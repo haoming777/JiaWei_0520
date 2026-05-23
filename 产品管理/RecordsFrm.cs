@@ -1,4 +1,4 @@
-﻿using CommonLib;
+using CommonLib;
 using Sunny.UI;
 using System;
 using System.Collections.Generic;
@@ -24,8 +24,52 @@ namespace SetProduct
 			CreatePagination();
 		}
 
-		private SQLiteHelper _db = new SQLiteHelper();
+		private string _productionDbPath = Path.Combine(Directory.GetCurrentDirectory(), "data", "production.db");
 		private XLToolClass _log = new XLToolClass();
+
+		private SQLiteConnection GetProductionConnection()
+		{
+			return new SQLiteConnection(@"Data Source = " + _productionDbPath);
+		}
+
+		private DataTable ExecuteProdQuery(string sql, params SQLiteParameter[] parameters)
+		{
+			using (var conn = GetProductionConnection())
+			{
+				using (var cmd = new SQLiteCommand(sql, conn))
+				{
+					if (parameters != null && parameters.Length > 0)
+						cmd.Parameters.AddRange(parameters);
+					var adapter = new SQLiteDataAdapter(cmd);
+					var dt = new DataTable();
+					adapter.Fill(dt);
+					return dt;
+				}
+			}
+		}
+
+		private bool ExecuteProdNonQuery(string sql, params SQLiteParameter[] parameters)
+		{
+			try
+			{
+				using (var conn = GetProductionConnection())
+				{
+					conn.Open();
+					using (var cmd = new SQLiteCommand(sql, conn))
+					{
+						if (parameters != null && parameters.Length > 0)
+							cmd.Parameters.AddRange(parameters);
+						cmd.ExecuteNonQuery();
+						return true;
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				_log.SaveLog($"数据库操作异常: {ex.Message}");
+				return false;
+			}
+		}
 
 		private string currentMode = "summary";
 		private DataTable _currentData;
@@ -152,15 +196,15 @@ namespace SetProduct
 				headers.Add(new ColumnHeaderInfo("ng_异物", "管内异物", 80));
 				headers.Add(new ColumnHeaderInfo("ng_管盖有无", "管盖有无", 80));
 				headers.Add(new ColumnHeaderInfo("ng_管口圆度", "管口圆度", 80));
-				headers.Add(new ColumnHeaderInfo("ng_正面工号", "正面工号", 80));
-				headers.Add(new ColumnHeaderInfo("ng_背面工号", "背面工号", 80));
+				headers.Add(new ColumnHeaderInfo("ng_正面工号不齐", "正面工号不齐", 80));
+				headers.Add(new ColumnHeaderInfo("ng_背面工号不齐", "背面工号不齐", 80));
 				headers.Add(new ColumnHeaderInfo("ng_PCode", "P-Code", 75));
 				headers.Add(new ColumnHeaderInfo("ng_色标对中", "色标对中", 80));
 				headers.Add(new ColumnHeaderInfo("ng_爆管", "爆管", 70));
 				headers.Add(new ColumnHeaderInfo("ng_斜口", "斜口", 70));
 				headers.Add(new ColumnHeaderInfo("ng_未剪断", "未剪断", 70));
-				headers.Add(new ColumnHeaderInfo("ng_混合缺陷", "混合缺陷", 80));
-				headers.Add(new ColumnHeaderInfo("continuous_exclude", "连续剔除", 80));
+				headers.Add(new ColumnHeaderInfo("ng_混合多种缺陷", "混合多种缺陷", 90));
+				headers.Add(new ColumnHeaderInfo("continuous_exclude_count", "连续爆管剔除", 90));
 				headers.Add(new ColumnHeaderInfo("yield_rate", "良率", 75));
 			}
 			else
@@ -241,9 +285,9 @@ namespace SetProduct
 			};
 
 			string[] defects = {
-				"管内异物", "管盖有无", "管口圆度", "正面工号",
-				"背面工号", "P-Code", "色标对中", "爆管",
-				"斜口", "未剪断", "混合缺陷"
+				"管内异物", "管盖有无", "管口圆度", "正面工号不齐",
+				"背面工号不齐", "P-Code", "色标对中", "爆管",
+				"斜口", "未剪断", "混合多种缺陷"
 			};
 
 			for (int i = 0; i < defects.Length; i++)
@@ -304,7 +348,7 @@ namespace SetProduct
 		{
 			try
 			{
-				var check = this._db.ExecuteQuery("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='production_records_detail'");
+				var check = this.ExecuteProdQuery("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='production_records_detail'");
 				bool hasTable = check.Rows.Count > 0 && Convert.ToInt32(check.Rows[0][0]) > 0;
 
 				if (!hasTable)
@@ -328,18 +372,23 @@ namespace SetProduct
 				string createDetail = @"
 					CREATE TABLE IF NOT EXISTS production_records_detail (
 						id INTEGER PRIMARY KEY AUTOINCREMENT,
-						p_time DATETIME,
-						p_date TEXT,
-						p_shift TEXT,
-						p_shift_date TEXT,
-						sku TEXT,
+						p_time DATETIME NOT NULL,
+						p_date TEXT NOT NULL,
+						p_shift TEXT NOT NULL,
+						p_shift_date TEXT NOT NULL,
+						sku TEXT NOT NULL,
 						sequence_id INTEGER,
-						final_result TEXT,
+						final_result TEXT NOT NULL,
+						cam1_result INTEGER,
+						cam2_result INTEGER,
+						cam3_result INTEGER,
+						cam4_result INTEGER,
+						cam5_result INTEGER,
 						ng_异物 INTEGER DEFAULT 0,
 						ng_管盖有无 INTEGER DEFAULT 0,
 						ng_管口圆度 INTEGER DEFAULT 0,
-						ng_正面工号 INTEGER DEFAULT 0,
-						ng_背面工号 INTEGER DEFAULT 0,
+						ng_正面工号不齐 INTEGER DEFAULT 0,
+						ng_背面工号不齐 INTEGER DEFAULT 0,
 						ng_PCode INTEGER DEFAULT 0,
 						ng_色标对中 INTEGER DEFAULT 0,
 						ng_爆管 INTEGER DEFAULT 0,
@@ -347,35 +396,39 @@ namespace SetProduct
 						ng_未剪断 INTEGER DEFAULT 0,
 						defect_detail TEXT,
 						defect_count INTEGER DEFAULT 0,
-						is_excluded INTEGER DEFAULT 0
+						is_excluded INTEGER DEFAULT 0,
+						excluded_reason TEXT,
+						created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 					)";
 
 				string createSummary = @"
 					CREATE TABLE IF NOT EXISTS production_records_summary (
 						id INTEGER PRIMARY KEY AUTOINCREMENT,
-						p_date TEXT,
-						p_shift TEXT,
-						sku TEXT,
+						p_date TEXT NOT NULL,
+						p_shift TEXT NOT NULL,
+						sku TEXT NOT NULL,
 						total_count INTEGER DEFAULT 0,
 						ok_count INTEGER DEFAULT 0,
 						ng_count INTEGER DEFAULT 0,
 						ng_异物 INTEGER DEFAULT 0,
 						ng_管盖有无 INTEGER DEFAULT 0,
 						ng_管口圆度 INTEGER DEFAULT 0,
-						ng_正面工号 INTEGER DEFAULT 0,
-						ng_背面工号 INTEGER DEFAULT 0,
+						ng_正面工号不齐 INTEGER DEFAULT 0,
+						ng_背面工号不齐 INTEGER DEFAULT 0,
 						ng_PCode INTEGER DEFAULT 0,
 						ng_色标对中 INTEGER DEFAULT 0,
 						ng_爆管 INTEGER DEFAULT 0,
 						ng_斜口 INTEGER DEFAULT 0,
 						ng_未剪断 INTEGER DEFAULT 0,
-						ng_混合缺陷 INTEGER DEFAULT 0,
-						continuous_exclude INTEGER DEFAULT 0,
-						yield_rate REAL DEFAULT 0
+						ng_混合多种缺陷 INTEGER DEFAULT 0,
+						continuous_exclude_count INTEGER DEFAULT 0,
+						yield_rate REAL DEFAULT 0,
+						summary_date TEXT DEFAULT CURRENT_DATE,
+						UNIQUE(p_date, p_shift, sku)
 					)";
 
-				this._db.ExecuteNonQuery(createDetail);
-				this._db.ExecuteNonQuery(createSummary);
+				this.ExecuteProdNonQuery(createDetail);
+				this.ExecuteProdNonQuery(createSummary);
 			}
 			catch (Exception ex)
 			{
@@ -390,8 +443,8 @@ namespace SetProduct
 				Random rand = new Random();
 				string[] skus = { "SKU-A", "SKU-B", "SKU-C", "SKU-D" };
 				string[] shifts = { "早班", "中班", "夜班" };
-				string[] defectTypes = { "管内异物", "管盖有无", "管口圆度", "正面工号",
-										  "背面工号", "P-Code", "色标对中", "爆管",
+				string[] defectTypes = { "管内异物", "管盖有无", "管口圆度", "正面工号不齐",
+										  "背面工号不齐", "P-Code", "色标对中", "爆管",
 										  "斜口", "未剪断" };
 
 				int consecutiveBurst = 0;
@@ -441,8 +494,8 @@ namespace SetProduct
 							if (d == "管内异物") ng1 = 1;
 							else if (d == "管盖有无") ng2 = 1;
 							else if (d == "管口圆度") ng3 = 1;
-							else if (d == "正面工号") ng4 = 1;
-							else if (d == "背面工号") ng5 = 1;
+							else if (d == "正面工号不齐") ng4 = 1;
+							else if (d == "背面工号不齐") ng5 = 1;
 							else if (d == "P-Code") ng6 = 1;
 							else if (d == "色标对中") ng7 = 1;
 							else if (d == "爆管") ng8 = 1;
@@ -462,7 +515,7 @@ namespace SetProduct
 					string insertDetail = @"
 						INSERT INTO production_records_detail 
 						(p_time, p_date, p_shift, p_shift_date, sku, sequence_id, final_result,
-						 ng_异物, ng_管盖有无, ng_管口圆度, ng_正面工号, ng_背面工号,
+						 ng_异物, ng_管盖有无, ng_管口圆度, ng_正面工号不齐, ng_背面工号不齐,
 						 ng_PCode, ng_色标对中, ng_爆管, ng_斜口, ng_未剪断,
 						 defect_detail, defect_count, is_excluded)
 						VALUES 
@@ -470,7 +523,7 @@ namespace SetProduct
 						 @ng1, @ng2, @ng3, @ng4, @ng5, @ng6, @ng7, @ng8, @ng9, @ng10,
 						 @detail, @count, @excluded)";
 
-					this._db.ExecuteNonQuery(insertDetail,
+					this.ExecuteProdNonQuery(insertDetail,
 						new SQLiteParameter("@time", dt),
 						new SQLiteParameter("@date", dt.ToString("yyyy-MM-dd")),
 						new SQLiteParameter("@shift", shift),
@@ -492,27 +545,27 @@ namespace SetProduct
 					INSERT OR REPLACE INTO production_records_summary
 					SELECT 
 						p_shift_date as p_date, p_shift, sku,
-						COUNT(*) as total,
-						SUM(CASE WHEN final_result='OK' AND is_excluded=0 THEN 1 ELSE 0 END) as ok,
-						SUM(CASE WHEN final_result='NG' AND is_excluded=0 THEN 1 ELSE 0 END) as ng,
-						SUM(CASE WHEN defect_count=1 AND ng_异物=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng1,
-						SUM(CASE WHEN defect_count=1 AND ng_管盖有无=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng2,
-						SUM(CASE WHEN defect_count=1 AND ng_管口圆度=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng3,
-						SUM(CASE WHEN defect_count=1 AND ng_正面工号=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng4,
-						SUM(CASE WHEN defect_count=1 AND ng_背面工号=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng5,
-						SUM(CASE WHEN defect_count=1 AND ng_PCode=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng6,
-						SUM(CASE WHEN defect_count=1 AND ng_色标对中=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng7,
-						SUM(CASE WHEN defect_count=1 AND ng_爆管=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng8,
-						SUM(CASE WHEN defect_count=1 AND ng_斜口=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng9,
-						SUM(CASE WHEN defect_count=1 AND ng_未剪断=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng10,
-						SUM(CASE WHEN defect_count>=2 AND is_excluded=0 THEN 1 ELSE 0 END) as ng_mix,
-						SUM(CASE WHEN is_excluded=1 THEN 1 ELSE 0 END) as exclude,
+						COUNT(*) as total_count,
+						SUM(CASE WHEN final_result='OK' AND is_excluded=0 THEN 1 ELSE 0 END) as ok_count,
+						SUM(CASE WHEN final_result='NG' AND is_excluded=0 THEN 1 ELSE 0 END) as ng_count,
+						SUM(CASE WHEN defect_count=1 AND ng_异物=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng_异物,
+						SUM(CASE WHEN defect_count=1 AND ng_管盖有无=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng_管盖有无,
+						SUM(CASE WHEN defect_count=1 AND ng_管口圆度=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng_管口圆度,
+						SUM(CASE WHEN defect_count=1 AND ng_正面工号不齐=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng_正面工号不齐,
+						SUM(CASE WHEN defect_count=1 AND ng_背面工号不齐=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng_背面工号不齐,
+						SUM(CASE WHEN defect_count=1 AND ng_PCode=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng_PCode,
+						SUM(CASE WHEN defect_count=1 AND ng_色标对中=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng_色标对中,
+						SUM(CASE WHEN defect_count=1 AND ng_爆管=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng_爆管,
+						SUM(CASE WHEN defect_count=1 AND ng_斜口=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng_斜口,
+						SUM(CASE WHEN defect_count=1 AND ng_未剪断=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng_未剪断,
+						SUM(CASE WHEN defect_count>=2 AND is_excluded=0 THEN 1 ELSE 0 END) as ng_混合多种缺陷,
+						SUM(CASE WHEN is_excluded=1 THEN 1 ELSE 0 END) as continuous_exclude_count,
 						ROUND(CAST(SUM(CASE WHEN final_result='OK' AND is_excluded=0 THEN 1 ELSE 0 END) AS REAL) / 
-							NULLIF(SUM(CASE WHEN is_excluded=0 THEN 1 ELSE 0 END), 0) * 100, 2) as yield
+							NULLIF(SUM(CASE WHEN is_excluded=0 THEN 1 ELSE 0 END), 0) * 100, 2) as yield_rate
 					FROM production_records_detail
 					GROUP BY p_shift_date, p_shift, sku";
 
-				this._db.ExecuteNonQuery(summarySql);
+				this.ExecuteProdNonQuery(summarySql);
 				this._log.SaveLog("模拟数据生成成功");
 			}
 			catch (Exception ex)
@@ -562,7 +615,7 @@ namespace SetProduct
 					? "SELECT * FROM production_records_summary ORDER BY p_date DESC, p_shift, sku"
 					: "SELECT * FROM production_records_detail ORDER BY p_time DESC";
 
-				_currentData = this._db.ExecuteQuery(sql);
+				_currentData = this.ExecuteProdQuery(sql);
 
 				if (_currentData != null && _currentData.Rows.Count > 0)
 				{
@@ -672,7 +725,7 @@ namespace SetProduct
 					sql += " ORDER BY p_time DESC";
 				}
 
-				_currentData = this._db.ExecuteQuery(sql, parameters.ToArray());
+				_currentData = this.ExecuteProdQuery(sql, parameters.ToArray());
 
 				if (_currentData != null)
 				{
@@ -694,11 +747,11 @@ namespace SetProduct
 			var map = new Dictionary<string, string>
 			{
 				{"管内异物", "ng_异物 = 1"}, {"管盖有无", "ng_管盖有无 = 1"},
-				{"管口圆度", "ng_管口圆度 = 1"}, {"正面工号", "ng_正面工号 = 1"},
-				{"背面工号", "ng_背面工号 = 1"}, {"P-Code", "ng_PCode = 1"},
+				{"管口圆度", "ng_管口圆度 = 1"}, {"正面工号不齐", "ng_正面工号不齐 = 1"},
+				{"背面工号不齐", "ng_背面工号不齐 = 1"}, {"P-Code", "ng_PCode = 1"},
 				{"色标对中", "ng_色标对中 = 1"}, {"爆管", "ng_爆管 = 1"},
 				{"斜口", "ng_斜口 = 1"}, {"未剪断", "ng_未剪断 = 1"},
-				{"混合缺陷", "defect_count >= 2"}
+				{"混合多种缺陷", "defect_count >= 2"}
 			};
 			var selected = this._defectChecks.Where(c => c.Checked && map.ContainsKey(c.Text)).Select(c => map[c.Text]);
 			return string.Join(" OR ", selected);

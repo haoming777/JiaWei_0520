@@ -1,4 +1,4 @@
-﻿using CommonLib;
+﻿﻿﻿﻿using CommonLib;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -155,10 +155,29 @@ namespace VisionMeasure
 			// 计算缺陷分类
 			ComputeDefectCategories(record);
 
+			// 检查连续爆管剔除
+			CheckConsecutiveBurstExclusion(record);
+
 			// 添加到队列
 			if (!_recordQueue.TryAdd(record))
 			{
 				_toolClass.SaveLog($"记录队列已满，丢弃记录: SequenceId={record.SequenceId}");
+			}
+		}
+
+		/// <summary>
+		/// 检查连续爆管剔除逻辑
+		/// </summary>
+		private void CheckConsecutiveBurstExclusion(ProductionRecord record)
+		{
+			// 如果只有爆管NG，且是连续爆管，则标记为剔除
+			if (record.Ng_爆管 == 1 && record.DefectCount == 1)
+			{
+				if (IsConsecutiveBurstExcluded(record.SequenceId))
+				{
+					record.IsExcluded = true;
+					record.ExcludedReason = "连续爆管剔除";
+				}
 			}
 		}
 
@@ -289,6 +308,10 @@ namespace VisionMeasure
 			// 注意：混合多种缺陷的标记在汇总时处理，这里不设置
 		}
 
+		// 连续爆管追踪 - 使用队列存储最近的爆管记录
+		private readonly Queue<Tuple<long, bool>> _burstHistory = new Queue<Tuple<long, bool>>();
+		private const int BURST_HISTORY_SIZE = 5;
+
 		/// <summary>
 		/// 更新连续爆管状态（需要在主线程中调用，传入相机5的结果）
 		/// </summary>
@@ -296,46 +319,50 @@ namespace VisionMeasure
 		{
 			lock (_burstLock)
 			{
-				if (isBurstNg && isPureBurst)
+				_burstHistory.Enqueue(Tuple.Create(sequenceId, isBurstNg && isPureBurst));
+				
+				if (_burstHistory.Count > BURST_HISTORY_SIZE)
 				{
-					if (_consecutiveBurstCount == 0)
-					{
-						_consecutiveStartId = sequenceId;
-						_consecutiveBurstCount = 1;
-					}
-					else if (sequenceId == _lastSequenceId + 1)
-					{
-						_consecutiveBurstCount++;
-					}
-					else
-					{
-						_consecutiveBurstCount = 1;
-						_consecutiveStartId = sequenceId;
-					}
+					_burstHistory.Dequeue();
 				}
-				else
-				{
-					// 中断连续爆管
-					_consecutiveBurstCount = 0;
-					_consecutiveStartId = 0;
-				}
-
-				_lastSequenceId = sequenceId;
 			}
 		}
 
 		/// <summary>
-		/// 检查序列是否被标记为连续异常剔除
+		/// 检查序列是否被标记为连续异常剔除（连续3条爆管NG）
 		/// </summary>
 		public bool IsConsecutiveBurstExcluded(long sequenceId)
 		{
 			lock (_burstLock)
 			{
-				if (_consecutiveBurstCount >= 3 &&
-					sequenceId >= _consecutiveStartId &&
-					sequenceId <= _consecutiveStartId + _consecutiveBurstCount - 1)
+				// 检查当前序列之前是否有连续3条爆管NG
+				if (_burstHistory.Count >= 3)
 				{
-					return true;
+					Tuple<long, bool>[] historyArray = _burstHistory.ToArray();
+					List<Tuple<long, bool>> recent = new List<Tuple<long, bool>>();
+					foreach (var item in historyArray)
+					{
+						if (item.Item1 >= sequenceId - 2 && item.Item1 <= sequenceId)
+						{
+							recent.Add(item);
+						}
+					}
+					if (recent.Count == 3)
+					{
+						bool allBurst = true;
+						foreach (var item in recent)
+						{
+							if (!item.Item2)
+							{
+								allBurst = false;
+								break;
+							}
+						}
+						if (allBurst)
+						{
+							return true;
+						}
+					}
 				}
 				return false;
 			}
@@ -348,7 +375,16 @@ namespace VisionMeasure
 		{
 			lock (_burstLock)
 			{
-				return _consecutiveBurstCount >= 3 ? _consecutiveBurstCount : 0;
+				// 从队列末尾向前计算连续爆管数量
+				int count = 0;
+				var arr = _burstHistory.ToArray();
+				Array.Reverse(arr);
+				foreach (var item in arr)
+				{
+					if (item.Item2) count++;
+					else break;
+				}
+				return count >= 3 ? count : 0;
 			}
 		}
 
@@ -619,6 +655,65 @@ namespace VisionMeasure
 			}
 		}
 
+		/// <summary>
+		/// 手动触发班次汇总（用于班次结束时）
+		/// </summary>
+		/// <param name="date">统计归属日期</param>
+		/// <param name="shift">班次名称</param>
+		/// <param name="sku">SKU（可选，为空时汇总所有SKU）</param>
+		public void TriggerShiftSummary(string date, string shift, string sku = "")
+		{
+			Task.Run(() =>
+			{
+				try
+				{
+					// 等待队列处理完成
+					while (_recordQueue.Count > 0)
+					{
+						Thread.Sleep(100);
+					}
+
+					// 生成汇总
+					if (string.IsNullOrEmpty(sku))
+					{
+						GenerateShiftSummary(date, shift);
+					}
+					else
+					{
+						// 针对特定SKU生成汇总
+						UpdateOrCreateSummary(date, shift, sku);
+					}
+				}
+				catch (Exception ex)
+				{
+					_toolClass.SaveLog($"手动触发班次汇总异常: {ex.Message}");
+				}
+			});
+		}
+
+		/// <summary>
+		/// 获取所有SKU列表（用于汇总所有SKU）
+		/// </summary>
+		/// <returns></returns>
+		public List<string> GetAllSkus()
+		{
+			List<string> skus = new List<string>();
+			try
+			{
+				string sql = "SELECT DISTINCT sku FROM production_records_detail WHERE sku IS NOT NULL AND sku != ''";
+				var data = _dbHelper.ExecuteQuery(sql);
+				foreach (DataRow row in data.Rows)
+				{
+					skus.Add(row["sku"].ToString());
+				}
+			}
+			catch (Exception ex)
+			{
+				_toolClass.SaveLog($"获取SKU列表异常: {ex.Message}");
+			}
+			return skus;
+		}
+
 		public void Dispose()
 		{
 			if (_disposed) return;
@@ -680,5 +775,6 @@ namespace VisionMeasure
 		public int DefectCount { get; set; }
 		public string DefectDetail { get; set; }
 		public bool IsExcluded { get; set; }
+		public string ExcludedReason { get; set; }
 	}
 }

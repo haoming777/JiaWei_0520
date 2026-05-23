@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
@@ -23,7 +23,7 @@ namespace SetUser
 			this.MaximizeBox = false;
 			this.MinimizeBox = false;
 		}
-		SQLiteHelper SQLiteHelper = new SQLiteHelper();
+		SQLiteHelper _sqliteHelper = new SQLiteHelper();
 		private void MainFrm_Load(object sender, EventArgs e)
 		{
 			dataGridView1.AutoGenerateColumns = false;
@@ -32,7 +32,7 @@ namespace SetUser
 
 		public void LoadData()
 		{
-			dataGridView1.DataSource = SQLiteHelper.GetAllList("user_info");
+			dataGridView1.DataSource = _sqliteHelper.GetAllList("user_info");
 		}
 
 		private void addBtn_Click(object sender, EventArgs e)
@@ -74,7 +74,7 @@ namespace SetUser
 			};
 
 			sql = "delete from user_info WHERE UserID=@id";
-			SQLiteHelper.ExecuteNonQuery(sql, vparams);
+			_sqliteHelper.ExecuteNonQuery(sql, vparams);
 
 			dataGridView1.Rows.Remove(dataGridView1.CurrentRow);
 		}

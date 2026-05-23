@@ -1,4 +1,4 @@
-﻿using AIsdk;
+using AIsdk;
 using Cognex.VisionPro.ToolBlock;
 using CommonLib;
 using Dahua.LConv;
@@ -2374,6 +2374,26 @@ namespace VisionMeasure
 						stageTimer.Restart();
 
 						context.ProcessResult = result;
+
+						// 设置相机5细分结果到context.Result
+						if (context.Result != null)
+						{
+							context.Result.Cam5_CharResult = result_char ? 1 : 0;
+							context.Result.Cam5_PCodeResult = result_PCode_char ? 1 : 0;
+							context.Result.Cam5_SebiaoResult = result_Segmentation ? 1 : 0;
+							context.Result.Cam5_BaoguanResult = result_flaw ? 1 : 0;
+							context.Result.Cam5_XiekouResult = !result_class.Contains("斜口") ? 1 : 0;
+							context.Result.Cam5_WeijianduanResult = !result_class.Contains("未剪断") ? 1 : 0;
+
+							// 判断是否纯爆管NG（只有爆管缺陷）
+							if (!result && result_flaw == false && 
+								result_char && result_PCode_char && result_Segmentation &&
+								!result_class.Contains("斜口") && !result_class.Contains("未剪断"))
+							{
+								context.Result.IsPureBurst = true;
+							}
+						}
+
 						Interlocked.Increment(ref resultCount5);
 						_resultMatcher?.SignalNewResult();
 					}
@@ -2766,8 +2786,13 @@ namespace VisionMeasure
 					Cam4Result = results[3].Result ? 1 : 0,
 					Cam5Result = results[4].Result ? 1 : 0,
 
-					// 相机5细分结果需要从相机5的处理过程中获取
-					// 这些值需要在 ProcessCamera5Image 中传递
+					// 相机5细分结果
+					Cam5_CharResult = results[4].Cam5_CharResult,
+					Cam5_PCodeResult = results[4].Cam5_PCodeResult,
+					Cam5_SebiaoResult = results[4].Cam5_SebiaoResult,
+					Cam5_BaoguanResult = results[4].Cam5_BaoguanResult,
+					Cam5_XiekouResult = results[4].Cam5_XiekouResult,
+					Cam5_WeijianduanResult = results[4].Cam5_WeijianduanResult
 				};
 
 				_dbRecorder.AddRecord(record);
@@ -2775,9 +2800,9 @@ namespace VisionMeasure
 				// 更新连续爆管状态
 				if (_dbRecorder != null)
 				{
-					// 判断是否为纯爆管NG（需要从相机5的结果中获取）
-					bool isBurstNg = !results[4].Result;  // 相机5为NG
-					bool isPureBurst = false;  // 需要从相机5处理结果中获取
+					// 判断是否为纯爆管NG
+					bool isBurstNg = results[4].Cam5_BaoguanResult == 0;  // 爆管检测为NG
+					bool isPureBurst = results[4].IsPureBurst;
 
 					_dbRecorder.UpdateConsecutiveBurst(results[0].SequenceId, isBurstNg, isPureBurst);
 				}

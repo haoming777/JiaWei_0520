@@ -1,4 +1,4 @@
-﻿using CommonLib;
+using CommonLib;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -34,7 +34,7 @@ namespace SetUser
 
 		public string oldPassword;
 
-		SQLiteHelper SQLiteHelper = new SQLiteHelper();
+		SQLiteHelper _sqliteHelper = new SQLiteHelper();
 
 		private void ChangeCodeFrm_Load(object sender, EventArgs e)
 		{
@@ -79,7 +79,7 @@ namespace SetUser
 			};
 
 			sql = "update user_info SET PassWord = @psw WHERE UserName = @name;";
-			SQLiteHelper.ExecuteNonQuery(sql, vparams);
+			_sqliteHelper.ExecuteNonQuery(sql, vparams);
 			MessageBox.Show("修改成功");
 			this.Close();
 		}

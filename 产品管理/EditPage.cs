@@ -1,4 +1,4 @@
-﻿using CommonLib;
+using CommonLib;
 using Sunny.UI;
 using System;
 using System.Collections.Generic;
@@ -22,7 +22,7 @@ namespace SetProduct
 			InitializeComponent();
 		}
 		string userChartName = "product_info";
-		SQLiteHelper SQLiteHelper = new SQLiteHelper();
+		SQLiteHelper _sqliteHelper = new SQLiteHelper();
 
 		public Model modelVal;
 		public DataGridViewRow row;
@@ -68,7 +68,7 @@ namespace SetProduct
 					new SQLiteParameter("@id",bianHao.Text.ToString())
 					};
 
-					DataTable dt = SQLiteHelper.ExecuteQuery(sql, paramId);
+					DataTable dt = _sqliteHelper.ExecuteQuery(sql, paramId);
 					if (dt.Rows.Count > 0)
 					{
 						MessageBox.Show("产品编号已存在！", "系统提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -80,7 +80,7 @@ namespace SetProduct
 					new SQLiteParameter("@spec",xingHao.Text.ToString())
 					};
 
-					dt = SQLiteHelper.ExecuteQuery(sql, paramSpec);
+					dt = _sqliteHelper.ExecuteQuery(sql, paramSpec);
 					if (dt.Rows.Count > 0)
 					{
 						MessageBox.Show("规格型号已存在！", "系统提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -88,14 +88,14 @@ namespace SetProduct
 					}
 
 					sql = "insert into product_info(ProductID,ProductName,ProductSpec) values(@id,@name,@spec)";
-					SQLiteHelper.ExecuteNonQuery(sql, vparams);
+					_sqliteHelper.ExecuteNonQuery(sql, vparams);
 					vision.CopyVpp(xingHao.Text.ToString(), 1);//我这里只有一个相机就复制一次就行了
 					MessageBox.Show("新增成功");
 
 					break;
 				case Model.Rev:
 					sql = "update product_info SET ProductName = @name, ProductSpec = @spec  WHERE ProductID = @id;";
-					SQLiteHelper.ExecuteNonQuery(sql, vparams);
+					_sqliteHelper.ExecuteNonQuery(sql, vparams);
 					MessageBox.Show("修改成功");
 					break;
 				default:

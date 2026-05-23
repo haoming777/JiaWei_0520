@@ -1,4 +1,4 @@
-﻿using CommonLib;
+using CommonLib;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -15,30 +15,25 @@ namespace SetProduct
 {
 	public partial class MainFrm : Form
 	{
+		private readonly SQLiteHelper _sqliteHelper;
+
 		public MainFrm()
 		{
 			InitializeComponent();
 			this.FormBorderStyle = FormBorderStyle.FixedSingle;
 			this.MaximizeBox = false;
 			this.MinimizeBox = false;
+			_sqliteHelper = new SQLiteHelper();
 		}
-		SQLiteHelper SQLiteHelper = new SQLiteHelper();
 
 		public Vision vision;
 		public delegate void ChangeModel(string Model);
 		public event ChangeModel EventChangeMode;
-		//public UserClass user;
+
 		private void MainFrm_Load(object sender, EventArgs e)
 		{
 			dataGridView1.AutoGenerateColumns = false;
 			LoadData();
-
-			//if (int.Parse(user.Grade) == 2)
-			//{
-			//	this.addBtn.Enabled = false;
-			//	this.editBtn.Enabled = false;
-			//	this.delBtn.Enabled = false;
-			//}
 		}
 
 
@@ -108,7 +103,7 @@ namespace SetProduct
 			};
 
 			sql = "delete from product_info WHERE ID=@id";
-			SQLiteHelper.ExecuteNonQuery(sql, vparams);
+			_sqliteHelper.ExecuteNonQuery(sql, vparams);
 			vision.DelVpp(dataGridView1.CurrentRow.Cells[2].Value + "", 3);
 
 			dataGridView1.Rows.Remove(dataGridView1.CurrentRow);
@@ -121,13 +116,13 @@ namespace SetProduct
 				new SQLiteParameter("@val",$"%{searchTxt.Text}%"),
 			};
 
-			DataTable dt = SQLiteHelper.ExecuteQuery(sql, paramId);
+			DataTable dt = _sqliteHelper.ExecuteQuery(sql, paramId);
 			dataGridView1.DataSource = dt;
 		}
 
 		public void LoadData()
 		{
-			dataGridView1.DataSource = SQLiteHelper.GetAllList("product_info");
+			dataGridView1.DataSource = _sqliteHelper.GetAllList("product_info");
 		}
 
 		private void searchTxt_TextChanged(object sender, EventArgs e)

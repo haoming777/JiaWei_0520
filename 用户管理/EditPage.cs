@@ -1,4 +1,4 @@
-﻿using CommonLib;
+using CommonLib;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -25,7 +25,7 @@ namespace SetUser
 
 		public Model modelVal;
 		public DataGridViewRow row;
-		SQLiteHelper SQLiteHelper = new SQLiteHelper();
+		SQLiteHelper _sqliteHelper = new SQLiteHelper();
 
 		private void EditPage_Load(object sender, EventArgs e)
 		{
@@ -74,7 +74,7 @@ namespace SetUser
 					new SQLiteParameter("@id",bianHaoTxt.Text.ToString())
 					};
 
-					DataTable dt = SQLiteHelper.ExecuteQuery(sql, paramId);
+					DataTable dt = _sqliteHelper.ExecuteQuery(sql, paramId);
 					if (dt.Rows.Count > 0)
 					{
 						MessageBox.Show("用户编号！", "系统提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -86,7 +86,7 @@ namespace SetUser
 					new SQLiteParameter("@name",mingChengTxt.Text.ToString())
 					};
 
-					dt = SQLiteHelper.ExecuteQuery(sql, paramSpec);
+					dt = _sqliteHelper.ExecuteQuery(sql, paramSpec);
 					if (dt.Rows.Count > 0)
 					{
 						MessageBox.Show("用户名已存在！", "系统提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -94,13 +94,13 @@ namespace SetUser
 					}
 
 					sql = "insert into user_info(UserID,UserName,PassWord,UserGrade,UserRole,Remark) values(@id,@name,@mima,@grade,@zhiwei,@beizhu)";
-					SQLiteHelper.ExecuteNonQuery(sql, vparams);
+					_sqliteHelper.ExecuteNonQuery(sql, vparams);
 					MessageBox.Show("新增成功");
 
 					break;
 				case Model.Rev:
 					sql = "update user_info SET UserName = @name, UserGrade = @grade, UserRole = @zhiwei, UserRole = @zhiwei, Remark = @beizhu  WHERE  UserID = @id;";
-					SQLiteHelper.ExecuteNonQuery(sql, vparams);
+					_sqliteHelper.ExecuteNonQuery(sql, vparams);
 					MessageBox.Show("修改成功");
 					break;
 				default:

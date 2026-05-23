@@ -1,4 +1,4 @@
-﻿using CommonLib;
+using CommonLib;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -23,7 +23,7 @@ namespace SetUser
 		}
 
 		string SQLiteFileName = Application.StartupPath + @"/data/data.db";
-		SQLiteHelper SQLiteHelper = new SQLiteHelper();
+		SQLiteHelper _sqliteHelper = new SQLiteHelper();
 		XLToolClass tool = new XLToolClass();
 		public UserClass user;
 		private void LoginFrm_Load(object sender, EventArgs e)
@@ -33,7 +33,7 @@ namespace SetUser
 				changeBtn.Hide();
 			}
 			this.PasswordTxt.PasswordChar = '*';
-			DataTable db = SQLiteHelper.GetAllList("user_info");
+			DataTable db = _sqliteHelper.GetAllList("user_info");
 			foreach (DataRow item in db.Rows)
 			{
 				comboBox1.Items.Add(item["UserName"]);
@@ -60,9 +60,9 @@ namespace SetUser
 			}
 			try
 			{
-				if (SQLiteHelper.FindPassWord(comboBox1.SelectedItem.ToString(), PasswordTxt.Text))
+				if (_sqliteHelper.FindPassWord(comboBox1.SelectedItem.ToString(), PasswordTxt.Text))
 				{
-					user = SQLiteHelper.FindUserName(comboBox1.SelectedItem.ToString());
+					user = _sqliteHelper.FindUserName(comboBox1.SelectedItem.ToString());
 					_Config.test = false;
 					int grade = int.Parse(user.Grade);
 					switch (this.Text)
@@ -125,7 +125,7 @@ namespace SetUser
 			}
 			try
 			{
-				if (SQLiteHelper.FindPassWord(comboBox1.SelectedItem.ToString(), PasswordTxt.Text))
+				if (_sqliteHelper.FindPassWord(comboBox1.SelectedItem.ToString(), PasswordTxt.Text))
 				{
 					ChangeCodeFrm changeCodeFrm = new ChangeCodeFrm();
 					changeCodeFrm.UserName = comboBox1.SelectedItem.ToString();
