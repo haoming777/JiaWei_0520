@@ -50,7 +50,7 @@ using static System.Windows.Forms.VisualStyles.VisualStyleElement.TaskbarClock;
 
 namespace VisionMeasure
 {
-	// ==================== 主窗体类 ====================
+	// ==================== 主窗体类1 ====================
 
 	public partial class MainFrm : Form, ICamera
 	{
@@ -97,7 +97,17 @@ namespace VisionMeasure
 		string modelId_rests_cam5 = "3";
 		string modelId_segmentation_cam5 = "2";
 
-		// 优化后的处理器
+		// 静态资源定义
+		private static readonly Font Font_Title = new Font("微软雅黑", 24, FontStyle.Bold);
+		private static readonly Font Font_Text = new Font("微软雅黑", 24, FontStyle.Bold);
+		private static readonly SolidBrush Brush_Green = new SolidBrush(Color.LawnGreen);
+		private static readonly SolidBrush Brush_Red = new SolidBrush(Color.Red);
+		private static readonly object _drawLock = new object(); // GDI+绘制锁
+		private static readonly SolidBrush Brush_White = new SolidBrush(Color.White);
+
+
+		private static readonly Font Font_Main = new Font("Microsoft YaHei", 30, FontStyle.Bold);
+		private static readonly Font Font_Sub = new Font("Microsoft YaHei", 24, FontStyle.Bold);
 		private ImageProcessor _processor1;
 		private ImageProcessor _processor2;
 		private ImageProcessor _processor3;
@@ -114,6 +124,10 @@ namespace VisionMeasure
 		private DateTime _lastShiftCheckTime = DateTime.Now;
 		private string _currentShift = "";
 		private string _currentShiftDate = "";
+
+		// SKU管理
+		private string _savedSku = "";  // 已保存的SKU
+		private bool _skuModified = false;  // SKU是否已修改但未保存
 
 
 		// 性能监控
@@ -226,6 +240,11 @@ namespace VisionMeasure
 		int output_delay_cam5 = -1;
 		#endregion
 
+		#region 图像缓存（用于按缺陷类型存图）
+		private ConcurrentDictionary<long, Dictionary<string, Bitmap>> _imageCache = new ConcurrentDictionary<long, Dictionary<string, Bitmap>>();
+		private ConcurrentDictionary<long, Dictionary<string, Bitmap>> _resultImageCache = new ConcurrentDictionary<long, Dictionary<string, Bitmap>>();
+		#endregion
+
 		#region 光电信号
 		uint IFCam1 = 100;
 		uint IFCam2 = 100;
@@ -249,13 +268,55 @@ namespace VisionMeasure
 		public MainFrm()
 		{
 			InitializeComponent();
+			// 【新增优化】开启平滑低延迟垃圾回收模式，防止高并发高密集型计算时GC引起程序突发卡顿
+			System.Runtime.GCSettings.LatencyMode = System.Runtime.GCLatencyMode.SustainedLowLatency;
+			// 【新增优化】提升当前进程在操作系统中的优先级，确保多线程调度更稳定
+			Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.High;
+
 			_cts = new CancellationTokenSource();
-			//InitializePerformanceMonitoring();
-			//InitializeImageProcessors();
-			//InitializeHighSpeedSavers();
-			//InitializeMemoryPools();
+			InitializePerformanceMonitoring();
+			InitializeImageProcessors();
+			InitializeHighSpeedSavers();
+			InitializeMemoryPools();
 
 			InitializeDatabaseRecorder();
+
+			// 加载保存的SKU
+			InitializeSavedSku();
+		}
+
+		/// <summary>
+		/// 初始化保存的SKU
+		/// </summary>
+		private void InitializeSavedSku()
+		{
+			try
+			{
+				string savedSku = _Config.LastSku;
+				if (!string.IsNullOrEmpty(savedSku))
+				{
+					_savedSku = savedSku;
+					_skuModified = false;
+					if (SKU_Txt != null)
+					{
+						SKU_Txt.Text = savedSku;
+						SKU_Txt.Style = UIStyle.Green;
+					}
+					toolClass.SaveLog($"已加载保存的SKU: {savedSku}");
+				}
+				else
+				{
+					// 本地没有SKU，显示红色提示用户需要输入
+					if (SKU_Txt != null)
+					{
+						SKU_Txt.Style = UIStyle.Red;
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				toolClass.SaveLog($"初始化SKU异常: {ex.Message}");
+			}
 		}
 
 		private void InitializeMemoryPools()
@@ -313,21 +374,124 @@ namespace VisionMeasure
 
 		private string GetCurrentSkuValue()
 		{
-			// 从SKU_Txt控件获取SKU值（请根据实际控件名称修改）
+			// 从SKU_Txt控件获取SKU值
 			try
 			{
-				// 假设有一个名为 SKU_Txt 的控件
+				string skuText = "";
 				if (this.InvokeRequired)
 				{
-					return (string)this.Invoke(new Func<string>(() =>
-						SKU_Txt?.Text ?? _Config.CurCheckSpec ?? "Unknown"));
+					skuText = (string)this.Invoke(new Func<string>(() => SKU_Txt?.Text ?? ""));
 				}
-				return SKU_Txt?.Text ?? _Config.CurCheckSpec ?? "Unknown";
+				else
+				{
+					skuText = SKU_Txt?.Text ?? "";
+				}
+
+				// 如果文本框为空但有保存的SKU，使用保存的SKU
+				if (string.IsNullOrEmpty(skuText) && !string.IsNullOrEmpty(_savedSku))
+				{
+					return _savedSku;
+				}
+				return skuText;
 			}
 			catch
 			{
-				return _Config.CurCheckSpec ?? "Unknown";
+				return "";
 			}
+		}
+
+		/// <summary>
+		/// SKU输入框Enter键处理 - 保存SKU并清空统计数据
+		/// </summary>
+		private void SKU_Txt_Enter(object sender, KeyEventArgs e)
+		{
+			if (e.KeyCode == Keys.Enter)
+			{
+				try
+				{
+					string currentSku = GetCurrentSkuValue();
+
+					if (currentSku.Length != 8)
+					{
+						SetSkuTextBoxBorderColor(UIStyle.Red);
+						MessageBox.Show($"SKU正确长度为8位 目前检测到{currentSku.Length}位！请检查！！！");
+						return;
+					}
+
+
+					// 检查SKU是否发生变化
+					if (_savedSku != currentSku)
+					{
+						// SKU发生变化，清空统计数据
+						ClearStatisticsDisplay();
+						_savedSku = currentSku;
+						_skuModified = false;
+
+						// 保存到配置文件
+						_Config.LastSku = currentSku;
+
+						// 设置边框为绿色
+						SetSkuTextBoxBorderColor(UIStyle.Green);
+
+						toolClass.SaveLog($"SKU已更新: {currentSku}，统计数据已清空");
+					}
+				}
+				catch (Exception ex)
+				{
+					toolClass.SaveLog($"SKU保存异常: {ex.Message}");
+				}
+				e.SuppressKeyPress = true;
+			}
+		}
+
+		/// <summary>
+		/// SKU输入框文本变化处理 - 设置边框颜色
+		/// 规则：
+		/// - 本地没有SKU时显示红色
+		/// - 输入框内容与本地SKU不同时显示黄色
+		/// - 输入框内容与本地SKU相同时显示绿色
+		/// </summary>
+		private void SKU_Txt_TextChanged(object sender, EventArgs e)
+		{
+			try
+			{
+				string currentSku = GetCurrentSkuValue();
+
+				// 本地没有SKU时显示红色
+				if (string.IsNullOrEmpty(_savedSku))
+				{
+					_skuModified = true;
+					SetSkuTextBoxBorderColor(UIStyle.Red);
+				}
+				// 输入框内容与本地SKU不同时显示黄色
+				else if (currentSku != _savedSku)
+				{
+					_skuModified = true;
+					SetSkuTextBoxBorderColor(UIStyle.Orange);
+				}
+				else
+				{
+					// 相同则显示绿色
+					_skuModified = false;
+					SetSkuTextBoxBorderColor(UIStyle.Green);
+				}
+			}
+			catch { }
+		}
+
+		/// <summary>
+		/// 设置SKU输入框边框颜色
+		/// </summary>
+		private void SetSkuTextBoxBorderColor(UIStyle color)
+		{
+			try
+			{
+				if (SKU_Txt != null)
+				{
+					SKU_Txt.Style = color;
+				}
+			}
+			catch { }
 		}
 		private void InitializeHighSpeedSavers()
 		{
@@ -490,9 +654,9 @@ namespace VisionMeasure
 				//}
 				_Config.cameraDebug = 0;
 
-				//LoadConfiguration();
-				//InitData();
-				//InitializeAIModels();
+				LoadConfiguration();
+				InitData();
+				InitializeAIModels();
 
 				modbusClass.EventConnectState += ModbusConnectState;
 				modbusClass.EventCount += PLCCountMethod;
@@ -810,10 +974,13 @@ namespace VisionMeasure
 						if (totalTxt != null) totalTxt.Text = _Config.total.ToString();
 						if (okTxt != null) okTxt.Text = _Config.ok.ToString();
 						if (ngTxt != null) ngTxt.Text = (_Config.total - _Config.ok).ToString();
+						if (BaoGuanNGTxt != null) BaoGuanNGTxt.Text = _Config.burstExcludeCount.ToString();
 
 						if (yieldTxt != null && _Config.total > 0)
 						{
-							double yieldRate = (_Config.ok * 100.0) / _Config.total;
+							// 良率 = OK合格数 ÷（总检测数 - 被剔除的连续爆管异常数量）
+							double effectiveCount = _Config.total - _Config.burstExcludeCount;
+							double yieldRate = effectiveCount > 0 ? (_Config.ok * 100.0) / effectiveCount : 0;
 							yieldTxt.Text = yieldRate.ToString("F2") + "%";
 							yieldTxt.ForeColor = yieldRate > 95 ? Color.Green : yieldRate > 90 ? Color.Orange : Color.Red;
 						}
@@ -1115,6 +1282,19 @@ namespace VisionMeasure
 			Stopwatch stageTimer = Stopwatch.StartNew();
 			long id = context.SequenceId - context.Offset;
 
+			Mat sourceMat = null;
+			Mat labelImage = null;
+			Mat labelImage1 = null;
+			Mat compareMaskMat = null;
+			Mat componentLabelsMat = null;
+			Mat componentStatsMat = null;
+			Mat componentCentroidsMat = null;
+			Mat singleContourMaskMat = null;
+			Bitmap displayBitmap = null;
+			Bitmap rawBmpForSave = null;
+			Bitmap resBmpForSave = null;
+
+			var pool = GetBufferPool(CameraSelect.Camera1);
 			try
 			{
 				if (IFSaveLog)
@@ -1123,220 +1303,193 @@ namespace VisionMeasure
 				StartMethod(CameraSelect.Camera1);
 
 				Bitmap bitmap = context.OriginalBitmap;
-				Bitmap bp2 = null;
-				Bitmap bmp = null;
 				bool result = true;
 				double totalArea = 0;
 
-				try
+				sourceMat = BitmapConverter.ToMat(bitmap);
+				bool isGrayscale = sourceMat.Type() == MatType.CV_8UC1;
+
+				if (pool != null)
 				{
-					var pool = GetBufferPool(CameraSelect.Camera1);
-					Mat sourceMat = null;
-					Mat labelImage = null;
-					Mat labelImage1 = null;
-
-					try
-					{
-						sourceMat = BitmapConverter.ToMat(bitmap);
-						bool isGrayscale = sourceMat.Type() == MatType.CV_8UC1;
-
-						if (pool != null)
-						{
-							labelImage = pool.RentMat();
-							labelImage1 = pool.RentMat();
-						}
-						else
-						{
-							labelImage = new Mat();
-							labelImage1 = new Mat();
-						}
-
-						if (isGrayscale)
-						{
-							Cv2.CvtColor(sourceMat, labelImage, ColorConversionCodes.GRAY2BGR);
-							Cv2.CvtColor(sourceMat, labelImage1, ColorConversionCodes.GRAY2BGR);
-						}
-						else
-						{
-							sourceMat.CopyTo(labelImage);
-							sourceMat.CopyTo(labelImage1);
-						}
-
-						stageTimer.Stop();
-						context.StageTimes["图像前处理"] = stageTimer.ElapsedMilliseconds;
-						stageTimer.Restart();
-
-						bmp = labelImage.ToBitmap();
-
-						#region AI模型推理
-						Task task_segmentation = null;
-						ResponseList<SegmentationResponse> rsp_segmentation = null;
-						bool result_Segmentation = false;
-
-						if (_Config.IFRunCamera1.ToBool())
-						{
-							task_segmentation = Task.Run(() => Model_Segmentation_Cam1.Run(labelImage, out rsp_segmentation));
-							task_segmentation.Wait();
-						}
-
-						stageTimer.Stop();
-						context.StageTimes["AI模型推理"] = stageTimer.ElapsedMilliseconds;
-						stageTimer.Restart();
-
-						int minArea_Camera1 = _Config.minArea_Camera1;
-						int totalArea_Camera1 = _Config.totalArea_Camera1;
-
-						if (rsp_segmentation != null)
-						{
-							for (int i = 0; i < rsp_segmentation.Count; i++)
-							{
-								var rspPair = rsp_segmentation[i];
-								var rsp = rspPair.Item2;
-
-								if (rsp.LabelMap != null)
-								{
-									var labelKeys = rsp.LabelMap.Keys.ToArray();
-									for (int j = 0; j < labelKeys.Length; j++)
-									{
-										var kv = new KeyValuePair<string, int>(labelKeys[j], rsp.LabelMap[labelKeys[j]]);
-
-										using (var labels = new Mat())
-										using (var stats = new Mat())
-										using (var centroids = new Mat())
-										{
-											var count_flaw = Cv2.ConnectedComponentsWithStats(rsp.Mask.Equals(kv.Value), labels, stats, centroids);
-
-											for (int k = 1; k < count_flaw; k++)
-											{
-												var area = stats.At<int>(k, (int)ConnectedComponentsTypes.Area);
-												if (area <= minArea_Camera1) continue;
-
-												Cv2.FindContours(labels.Equals(k), out var contours, out var hierarcy, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
-												if (contours.Length == 0) continue;
-
-												RotatedRect minAreaRect = Cv2.MinAreaRect(contours[0]);
-												var color = new Scalar(255, 0, 0);
-												Cv2.DrawContours(labelImage1, contours, -1, new Scalar(0, 0, 255), 2);
-
-												foreach (var ctr in contours)
-												{
-													toolClass.SaveLog($"相机一分割结果 Label：{kv.Key}, Area: {area}");
-													totalArea += area;
-												}
-
-												DrawPoint(labelImage1, new OpenCvSharp.Point(minAreaRect.Center.X, minAreaRect.Center.Y), color);
-												DrawRotatedRectangle(labelImage1, minAreaRect, color);
-											}
-										}
-									}
-								}
-							}
-							result_Segmentation = totalArea == 0 || totalArea <= totalArea_Camera1;
-						}
-						else
-						{
-							result_Segmentation = true;
-							toolClass.SaveLog($"相机一分割模型出错：rsp_segmentation == null");
-						}
-
-						stageTimer.Stop();
-						context.StageTimes["结果处理"] = stageTimer.ElapsedMilliseconds;
-						stageTimer.Restart();
-						#endregion
-
-						result = result_Segmentation;
-
-						using (var tempBitmap = labelImage1.ToBitmap())
-						{
-							if (tempBitmap != null)
-							{
-								int textX = tempBitmap.Width - 500;
-
-								using (var graphics = Graphics.FromImage(tempBitmap))
-								using (var font = new Font("微软雅黑", 30, FontStyle.Bold))
-								using (var greenBrush = new SolidBrush(Color.LawnGreen))
-								using (var redBrush = new SolidBrush(Color.Red))
-								{
-									var brush = result ? greenBrush : redBrush;
-
-									string[] texts = {
-										$"相机：底部异物检测",
-										$"时间：{DateTime.Now:HH:mm:ss.fff}",
-										$"总结果：{(result ? "OK" : "NG")}",
-										$"异物面积：{totalArea:F2} / {totalArea_Camera1}",
-										$"SequenceId：{id}"
-									};
-
-									int y = 100;
-									for (int i = 0; i < texts.Length; i++)
-									{
-										graphics.DrawString(texts[i], font, i == 2 || i == 3 ? brush : greenBrush, new PointF(textX, y));
-										y += 70;
-									}
-								}
-
-								stageTimer.Stop();
-								context.StageTimes["图像绘制"] = stageTimer.ElapsedMilliseconds;
-								stageTimer.Restart();
-
-								if (!_isClosing)
-									UpdatePictureBox1(tempBitmap);
-								bp2 = new Bitmap(tempBitmap);
-							}
-						}
-
-						stageTimer.Stop();
-						context.StageTimes["显示更新"] = stageTimer.ElapsedMilliseconds;
-						stageTimer.Restart();
-
-						if (!_isClosing)
-							SaveImageIfNeeded_Fast("Camera1", bmp, bp2, result, context.SequenceId, context.Offset);
-
-						stageTimer.Stop();
-						context.StageTimes["存储图像"] = stageTimer.ElapsedMilliseconds;
-						stageTimer.Restart();
-
-						context.ProcessResult = result;
-						Interlocked.Increment(ref resultCount1);
-						_resultMatcher?.SignalNewResult();
-					}
-					catch (Exception ex)
-					{
-						toolClass.SaveLog($"相机一处理异常: {ex.Message}\n{ex.StackTrace}");
-						context.ProcessResult = false;
-					}
-					finally
-					{
-						if (pool != null)
-						{
-							if (labelImage != null) pool.ReturnMat(labelImage);
-							if (labelImage1 != null) pool.ReturnMat(labelImage1);
-						}
-						else
-						{
-							labelImage?.Dispose();
-							labelImage1?.Dispose();
-						}
-						sourceMat?.Dispose();
-					}
+					labelImage = pool.RentMat();
+					labelImage1 = pool.RentMat();
 				}
-				finally
+				else
 				{
-					bp2?.Dispose();
-					bmp?.Dispose();
+					labelImage = new Mat();
+					labelImage1 = new Mat();
 				}
 
-				EndMethod(CameraSelect.Camera1);
+				if (isGrayscale)
+				{
+					Cv2.CvtColor(sourceMat, labelImage, ColorConversionCodes.GRAY2BGR);
+					Cv2.CvtColor(sourceMat, labelImage1, ColorConversionCodes.GRAY2BGR);
+				}
+				else
+				{
+					sourceMat.CopyTo(labelImage);
+					sourceMat.CopyTo(labelImage1);
+				}
+
+				stageTimer.Stop();
+				context.StageTimes["图像前处理"] = stageTimer.ElapsedMilliseconds;
+				stageTimer.Restart();
+
+				#region AI模型推理
+				ResponseList<SegmentationResponse> rsp_segmentation = null;
+				bool result_Segmentation = false;
+
+				if (_Config.IFRunCamera1.ToBool())
+				{
+					Model_Segmentation_Cam1.Run(labelImage, out rsp_segmentation);
+				}
+
+				stageTimer.Stop();
+				context.StageTimes["AI模型推理"] = stageTimer.ElapsedMilliseconds;
+				stageTimer.Restart();
+
+				int minArea_Camera1 = _Config.minArea_Camera1;
+				int totalArea_Camera1 = _Config.totalArea_Camera1;
+
+				if (rsp_segmentation != null)
+				{
+					compareMaskMat = new Mat();
+					componentLabelsMat = new Mat();
+					componentStatsMat = new Mat();
+					componentCentroidsMat = new Mat();
+					singleContourMaskMat = new Mat();
+
+					for (int i = 0; i < rsp_segmentation.Count; i++)
+					{
+						var rspPair = rsp_segmentation[i];
+						var rsp = rspPair.Item2;
+
+						if (rsp.LabelMap != null)
+						{
+							var labelKeys = rsp.LabelMap.Keys.ToArray();
+							for (int j = 0; j < labelKeys.Length; j++)
+							{
+								var kv = new KeyValuePair<string, int>(labelKeys[j], rsp.LabelMap[labelKeys[j]]);
+
+								Cv2.Compare(rsp.Mask, Scalar.All(kv.Value), compareMaskMat, CmpType.EQ);
+								var count_flaw = Cv2.ConnectedComponentsWithStats(compareMaskMat, componentLabelsMat, componentStatsMat, componentCentroidsMat);
+
+								for (int k = 1; k < count_flaw; k++)
+								{
+									var area = componentStatsMat.At<int>(k, (int)ConnectedComponentsTypes.Area);
+									if (area <= minArea_Camera1) continue;
+
+									Cv2.Compare(componentLabelsMat, Scalar.All(k), singleContourMaskMat, CmpType.EQ);
+									Cv2.FindContours(singleContourMaskMat, out var contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
+									if (contours.Length == 0) continue;
+
+									RotatedRect minAreaRect = Cv2.MinAreaRect(contours[0]);
+									var color = new Scalar(255, 0, 0);
+									Cv2.DrawContours(labelImage1, contours, -1, new Scalar(0, 0, 255), 2);
+
+									foreach (var ctr in contours)
+									{
+										toolClass.SaveLog($"相机一分割结果 Label：{kv.Key}, Area: {area}");
+										totalArea += area;
+									}
+
+									DrawPointFast(labelImage1, minAreaRect.Center, color);
+									DrawRotatedRectangleFast(labelImage1, minAreaRect, color);
+								}
+							}
+						}
+					}
+					result_Segmentation = totalArea == 0 || totalArea <= totalArea_Camera1;
+				}
+				else
+				{
+					result_Segmentation = true;
+					toolClass.SaveLog($"相机一分割模型出错：rsp_segmentation == null");
+				}
+
+				stageTimer.Stop();
+				context.StageTimes["结果处理"] = stageTimer.ElapsedMilliseconds;
+				stageTimer.Restart();
+				#endregion
+
+				result = result_Segmentation;
+
+				if (!_isClosing)
+				{
+					rawBmpForSave = labelImage.ToBitmap();
+					resBmpForSave = labelImage1.ToBitmap();
+
+					// 【关键修复】每帧都必须绘制字体，决不能放在 id % 3 里面
+					using (Graphics g = Graphics.FromImage(resBmpForSave))
+					{
+						lock (_drawLock)
+						{
+							int x = resBmpForSave.Width - 500; int y = 100;
+							g.DrawString("相机：底部异物检测", Font_Title, Brush_Green, x, y); y += 70;
+							g.DrawString($"检测时间：{DateTime.Now:HH:mm:ss.fff}", Font_Text, Brush_Green, x, y); y += 70;
+							g.DrawString($"综合结果：{(result ? "OK" : "NG")}", Font_Text, result ? Brush_Green : Brush_Red, x, y); y += 70;
+
+							if (!result_Segmentation)
+							{
+								g.DrawString($"异物面积：{totalArea:F2} / {totalArea_Camera1}", Font_Text, Brush_Red, x, y); y += 70;
+							}
+							g.DrawString($"SequenceId：{id}", Font_Text, Brush_Green, x, y); y += 70;
+						}
+					}
+
+					// 绘制完字体后，再把带有字体的图像放入存图缓存
+					CacheImageForDefectSave("Camera1", rawBmpForSave, resBmpForSave, context.SequenceId);
+
+					// 仅仅是限制 PictureBox 控件界面的刷新频率
+					if (id % 3 == 0)
+					{
+						displayBitmap = new Bitmap(resBmpForSave);
+						UpdatePictureBox1(displayBitmap);
+					}
+				}
+
+				stageTimer.Stop();
+				context.StageTimes["存储图像"] = stageTimer.ElapsedMilliseconds;
+				stageTimer.Restart();
+
+				context.ProcessResult = result;
+				Interlocked.Increment(ref resultCount1);
+				_resultMatcher?.SignalNewResult();
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog($"相机一处理异常: {ex.Message}\n{ex.StackTrace}");
+				toolClass.SaveLog($"[Camera1] ID:{id} 处理异常: {ex.Message}\n{ex.StackTrace}");
+				context.ProcessResult = false;
+				_resultMatcher?.SignalNewResult();
+			}
+			finally
+			{
+				compareMaskMat?.Dispose();
+				componentLabelsMat?.Dispose();
+				componentStatsMat?.Dispose();
+				componentCentroidsMat?.Dispose();
+				singleContourMaskMat?.Dispose();
+				sourceMat?.Dispose();
+
+				if (pool != null)
+				{
+					if (labelImage != null) pool.ReturnMat(labelImage);
+					if (labelImage1 != null) pool.ReturnMat(labelImage1);
+				}
+				else
+				{
+					labelImage?.Dispose();
+					labelImage1?.Dispose();
+				}
+
+				displayBitmap?.Dispose();
+				rawBmpForSave?.Dispose();
+				resBmpForSave?.Dispose();
+
+				EndMethod(CameraSelect.Camera1);
 			}
 		}
 
-		// ProcessCamera2Image, ProcessCamera3Image, ProcessCamera4Image, ProcessCamera5Image
-		// 保持与ProcessCamera1Image类似的关闭检查逻辑
-		// 由于篇幅限制，这里省略详细代码，实际使用时需要添加 _isClosing 检查
 
 		private void ProcessCamera2Image(ImageProcessingContext context)
 		{
@@ -1344,6 +1497,14 @@ namespace VisionMeasure
 			Stopwatch stageTimer = Stopwatch.StartNew();
 			long id = context.SequenceId - context.Offset;
 
+			Mat sourceMat = null;
+			Mat labelImage = null;
+			Mat labelImage1 = null;
+			Bitmap displayBitmap = null;
+			Bitmap rawBmpForSave = null;
+			Bitmap resBmpForSave = null;
+
+			var pool = GetBufferPool(CameraSelect.Camera2);
 			try
 			{
 				if (IFSaveLog)
@@ -1352,188 +1513,156 @@ namespace VisionMeasure
 				StartMethod(CameraSelect.Camera2);
 
 				Bitmap bitmap = context.OriginalBitmap;
-				Bitmap bp2 = null;
-				Bitmap bmp = null;
 				bool result = false;
 
-				try
+				sourceMat = BitmapConverter.ToMat(bitmap);
+				bool isGrayscale = sourceMat.Type() == MatType.CV_8UC1;
+
+				if (pool != null)
 				{
-					var pool = GetBufferPool(CameraSelect.Camera2);
-					Mat sourceMat = null;
-					Mat labelImage = null;
-					Mat labelImage1 = null;
-
-					try
-					{
-						sourceMat = BitmapConverter.ToMat(bitmap);
-						bool isGrayscale = sourceMat.Type() == MatType.CV_8UC1;
-
-						if (pool != null)
-						{
-							labelImage = pool.RentMat();
-							labelImage1 = pool.RentMat();
-						}
-						else
-						{
-							labelImage = new Mat();
-							labelImage1 = new Mat();
-						}
-
-						if (isGrayscale)
-						{
-							Cv2.CvtColor(sourceMat, labelImage, ColorConversionCodes.GRAY2BGR);
-							Cv2.CvtColor(sourceMat, labelImage1, ColorConversionCodes.GRAY2BGR);
-						}
-						else
-						{
-							sourceMat.CopyTo(labelImage);
-							sourceMat.CopyTo(labelImage1);
-						}
-
-						stageTimer.Stop();
-						context.StageTimes["图像前处理"] = stageTimer.ElapsedMilliseconds;
-						stageTimer.Restart();
-
-						bmp = labelImage.ToBitmap();
-
-						#region AI模型推理 - 分类模型
-						ResponseList<ClassificationResponse> rsp_class = null;
-						bool result_flaw = false;
-						string result_class = "";
-
-						if (_Config.IFRunCamera2.ToBool())
-						{
-							Model_Class_Cam2.Run(labelImage, out rsp_class);
-						}
-
-						stageTimer.Stop();
-						context.StageTimes["AI模型推理"] = stageTimer.ElapsedMilliseconds;
-						stageTimer.Restart();
-
-						var classBuilder = new System.Text.StringBuilder();
-
-						if (rsp_class != null)
-						{
-							for (int i = 0; i < rsp_class.Count; i++)
-							{
-								var item = rsp_class[i];
-								var labels = item.Item2?.Labels;
-
-								if (labels != null)
-								{
-									foreach (var label in labels)
-									{
-										if (classBuilder.Length > 0)
-										{
-											classBuilder.Append("; ");
-										}
-										classBuilder.Append(label.Label);
-									}
-								}
-							}
-
-							result_class = classBuilder.ToString();
-							result_flaw = string.IsNullOrEmpty(result_class);
-						}
-						else
-						{
-							result_flaw = true;
-							toolClass.SaveLog($"分类模型出错：rsp_class == null");
-						}
-
-						stageTimer.Stop();
-						context.StageTimes["结果处理"] = stageTimer.ElapsedMilliseconds;
-						stageTimer.Restart();
-						#endregion
-
-						result = result_flaw;
-
-						using (var tempBitmap = labelImage1.ToBitmap())
-						{
-							if (tempBitmap != null)
-							{
-								int textX = tempBitmap.Width - 500;
-
-								using (var graphics = Graphics.FromImage(tempBitmap))
-								using (var font = new Font("微软雅黑", 30, FontStyle.Bold))
-								using (var greenBrush = new SolidBrush(Color.LawnGreen))
-								using (var redBrush = new SolidBrush(Color.Red))
-								{
-									var brush = result ? greenBrush : redBrush;
-
-									int y = 100;
-									graphics.DrawString($"相机：瓶盖有无检测", font, greenBrush, new PointF(textX, y));
-									y += 70;
-									graphics.DrawString($"时间：{DateTime.Now:HH:mm:ss.fff}", font, greenBrush, new PointF(textX, y));
-									y += 70;
-									graphics.DrawString($"总结果：{(result ? "OK" : "NG")}", font, brush, new PointF(textX, y));
-
-									if (!string.IsNullOrEmpty(result_class))
-									{
-										y += 70;
-										graphics.DrawString($"缺陷标签：{result_class}", font, redBrush, new PointF(textX, y));
-									}
-
-									y += 70;
-									graphics.DrawString($"SequenceId：{id}", font, greenBrush, new PointF(textX, y));
-								}
-
-								stageTimer.Stop();
-								context.StageTimes["图像绘制"] = stageTimer.ElapsedMilliseconds;
-								stageTimer.Restart();
-
-								if (!_isClosing)
-									UpdatePictureBox2(tempBitmap);
-								bp2 = new Bitmap(tempBitmap);
-							}
-						}
-
-						stageTimer.Stop();
-						context.StageTimes["显示更新"] = stageTimer.ElapsedMilliseconds;
-						stageTimer.Restart();
-
-						if (!_isClosing)
-							SaveImageIfNeeded_Fast("Camera2", bmp, bp2, result, context.SequenceId, context.Offset);
-
-						stageTimer.Stop();
-						context.StageTimes["存储图像"] = stageTimer.ElapsedMilliseconds;
-						stageTimer.Restart();
-
-						context.ProcessResult = result;
-						Interlocked.Increment(ref resultCount2);
-						_resultMatcher?.SignalNewResult();
-					}
-					catch (Exception ex)
-					{
-						toolClass.SaveLog($"相机二处理异常: {ex.Message}\n{ex.StackTrace}");
-						context.ProcessResult = false;
-					}
-					finally
-					{
-						if (pool != null)
-						{
-							if (labelImage != null) pool.ReturnMat(labelImage);
-							if (labelImage1 != null) pool.ReturnMat(labelImage1);
-						}
-						else
-						{
-							labelImage?.Dispose();
-							labelImage1?.Dispose();
-						}
-						sourceMat?.Dispose();
-					}
+					labelImage = pool.RentMat();
+					labelImage1 = pool.RentMat();
 				}
-				finally
+				else
 				{
-					bp2?.Dispose();
-					bmp?.Dispose();
+					labelImage = new Mat();
+					labelImage1 = new Mat();
 				}
 
-				EndMethod(CameraSelect.Camera2);
+				if (isGrayscale)
+				{
+					Cv2.CvtColor(sourceMat, labelImage, ColorConversionCodes.GRAY2BGR);
+					Cv2.CvtColor(sourceMat, labelImage1, ColorConversionCodes.GRAY2BGR);
+				}
+				else
+				{
+					sourceMat.CopyTo(labelImage);
+					sourceMat.CopyTo(labelImage1);
+				}
+
+				stageTimer.Stop();
+				context.StageTimes["图像前处理"] = stageTimer.ElapsedMilliseconds;
+				stageTimer.Restart();
+
+				#region AI模型推理 - 分类模型
+				ResponseList<ClassificationResponse> rsp_class = null;
+				bool result_flaw = false;
+				string result_class = "";
+
+				if (_Config.IFRunCamera2.ToBool())
+				{
+					Model_Class_Cam2.Run(labelImage, out rsp_class);
+				}
+
+				stageTimer.Stop();
+				context.StageTimes["AI模型推理"] = stageTimer.ElapsedMilliseconds;
+				stageTimer.Restart();
+
+				var classBuilder = new System.Text.StringBuilder();
+
+				if (rsp_class != null)
+				{
+					for (int i = 0; i < rsp_class.Count; i++)
+					{
+						var item = rsp_class[i];
+						var labels = item.Item2?.Labels;
+
+						if (labels != null)
+						{
+							foreach (var label in labels)
+							{
+								if (classBuilder.Length > 0)
+								{
+									classBuilder.Append("; ");
+								}
+								classBuilder.Append(label.Label);
+							}
+						}
+					}
+
+					result_class = classBuilder.ToString();
+					result_flaw = string.IsNullOrEmpty(result_class);
+				}
+				else
+				{
+					result_flaw = true;
+					toolClass.SaveLog($"分类模型出错：rsp_class == null");
+				}
+
+				stageTimer.Stop();
+				context.StageTimes["结果处理"] = stageTimer.ElapsedMilliseconds;
+				stageTimer.Restart();
+				#endregion
+
+				result = result_flaw;
+
+				if (!_isClosing)
+				{
+					rawBmpForSave = labelImage.ToBitmap();
+					resBmpForSave = labelImage1.ToBitmap();
+
+					// 【关键修复】每帧必画字
+					using (Graphics g = Graphics.FromImage(resBmpForSave))
+					{
+						lock (_drawLock)
+						{
+							int x = resBmpForSave.Width - 500; int y = 100;
+							g.DrawString("相机：瓶盖有无检测", Font_Title, Brush_Green, x, y); y += 70;
+							g.DrawString($"检测时间：{DateTime.Now:HH:mm:ss.fff}", Font_Text, Brush_Green, x, y); y += 70;
+							g.DrawString($"综合结果：{(result ? "OK" : "NG")}", Font_Text, result ? Brush_Green : Brush_Red, x, y); y += 70;
+
+							if (!string.IsNullOrEmpty(result_class))
+							{
+								g.DrawString($"缺陷标签：{result_class}", Font_Text, Brush_Red, x, y); y += 70;
+							}
+							g.DrawString($"SequenceId：{id}", Font_Text, Brush_Green, x, y); y += 70;
+						}
+					}
+
+					// 画完字再存
+					CacheImageForDefectSave("Camera2", rawBmpForSave, resBmpForSave, context.SequenceId);
+
+					// 降频刷新UI
+					if (id % 3 == 0)
+					{
+						displayBitmap = new Bitmap(resBmpForSave);
+						UpdatePictureBox2(displayBitmap);
+					}
+				}
+
+				stageTimer.Stop();
+				context.StageTimes["存储图像"] = stageTimer.ElapsedMilliseconds;
+				stageTimer.Restart();
+
+				context.ProcessResult = result;
+				Interlocked.Increment(ref resultCount2);
+				_resultMatcher?.SignalNewResult();
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog($"相机二处理异常: {ex.Message}\n{ex.StackTrace}");
+				toolClass.SaveLog($"[Camera2] ID:{id} 处理异常: {ex.Message}\n{ex.StackTrace}");
+				context.ProcessResult = false;
+				_resultMatcher?.SignalNewResult();
+			}
+			finally
+			{
+				sourceMat?.Dispose();
+				if (pool != null)
+				{
+					if (labelImage != null) pool.ReturnMat(labelImage);
+					if (labelImage1 != null) pool.ReturnMat(labelImage1);
+				}
+				else
+				{
+					labelImage?.Dispose();
+					labelImage1?.Dispose();
+				}
+
+				displayBitmap?.Dispose();
+				rawBmpForSave?.Dispose();
+				resBmpForSave?.Dispose();
+
+				EndMethod(CameraSelect.Camera2);
 			}
 		}
 
@@ -1543,6 +1672,14 @@ namespace VisionMeasure
 			Stopwatch stageTimer = Stopwatch.StartNew();
 			long id = context.SequenceId - context.Offset;
 
+			Mat sourceMat = null;
+			Mat labelImage = null;
+			Mat resultImage = null;
+			Bitmap displayBitmap = null;
+			Bitmap rawBmpForSave = null;
+			Bitmap resBmpForSave = null;
+
+			var pool = GetBufferPool(CameraSelect.Camera3);
 			try
 			{
 				if (IFSaveLog)
@@ -1551,187 +1688,161 @@ namespace VisionMeasure
 				StartMethod(CameraSelect.Camera3);
 
 				Bitmap bitmap = context.OriginalBitmap;
-				Bitmap bp2 = null;
-				Bitmap bmp = null;
 				bool result = false;
 				double roundness = 0;
 				double PipeDiameter = _Config.Camera3PipeDiameter;
+				double longEdge = 0;
 
-				try
+				sourceMat = BitmapConverter.ToMat(bitmap);
+				bool isGrayscale = sourceMat.Type() == MatType.CV_8UC1;
+
+				if (pool != null)
 				{
-					var pool = GetBufferPool(CameraSelect.Camera3);
-					Mat sourceMat = null;
-					Mat labelImage = null;
-					Mat resultImage = null;
-					double longEdge = 0;
+					labelImage = pool.RentMat();
+				}
+				else
+				{
+					labelImage = new Mat();
+				}
 
-					try
+				if (isGrayscale)
+				{
+					Cv2.CvtColor(sourceMat, labelImage, ColorConversionCodes.GRAY2BGR);
+				}
+				else
+				{
+					sourceMat.CopyTo(labelImage);
+				}
+
+				stageTimer.Stop();
+				context.StageTimes["图像前处理"] = stageTimer.ElapsedMilliseconds;
+				stageTimer.Restart();
+
+				#region 圆度检测
+				if (labelImage.Empty())
+				{
+					toolClass.SaveLog($"相机三图像异常..");
+					resultImage = labelImage.Clone();
+				}
+				else
+				{
+					DetectionResultV3 detectionResult = null;
+					if (_Config.IFRunCamera3)
 					{
-						sourceMat = BitmapConverter.ToMat(bitmap);
-						bool isGrayscale = sourceMat.Type() == MatType.CV_8UC1;
+						detectionResult = RoundnessDetectorV3.DetectRoundnessAndRect(labelImage);
+					}
 
-						if (pool != null)
-						{
-							labelImage = pool.RentMat();
-						}
-						else
-						{
-							labelImage = new Mat();
-						}
+					stageTimer.Stop();
+					context.StageTimes["AI模型推理"] = stageTimer.ElapsedMilliseconds;
+					stageTimer.Restart();
 
-						if (isGrayscale)
-						{
-							Cv2.CvtColor(sourceMat, labelImage, ColorConversionCodes.GRAY2BGR);
-						}
-						else
-						{
-							sourceMat.CopyTo(labelImage);
-						}
+					if (detectionResult != null)
+					{
+						resultImage = RoundnessDetectorV3.VisualizeDetection(labelImage, detectionResult);
+						longEdge = detectionResult.LongEdge * _Config.K_Cam3;
+						roundness = Math.Round((longEdge - PipeDiameter) / PipeDiameter, 3);
+						result = _Config.Camera3RoundnessUp >= roundness && roundness >= _Config.Camera3RoundnessDown;
 
+						if (IFSaveLog)
+						{
+							toolClass.SaveLog($"[Camera3] ID:{id} 圆度检测 - LongEdge:{longEdge:F3}, PipeDiameter:{PipeDiameter}, Roundness:{roundness:F3}, Up:{_Config.Camera3RoundnessUp}, Down:{_Config.Camera3RoundnessDown}, Result:{result}");
+						}
+					}
+					else
+					{
+						toolClass.SaveLog($"[Camera3] ID:{id} 圆度检测失败，设置为OK");
+						result = true;
+						resultImage = labelImage.Clone();
+					}
+				}
+
+				stageTimer.Stop();
+				context.StageTimes["结果处理"] = stageTimer.ElapsedMilliseconds;
+				stageTimer.Restart();
+
+				if (!_isClosing)
+				{
+					rawBmpForSave = labelImage.ToBitmap();
+					resBmpForSave = resultImage.ToBitmap();
+
+					// 【关键修复】每帧必画字
+					using (Graphics g = Graphics.FromImage(resBmpForSave))
+					{
+						lock (_drawLock)
+						{
+							int x = resBmpForSave.Width - 500; int y = 100;
+							g.DrawString("相机：管口圆度检测", Font_Title, Brush_Green, x, y); y += 70;
+							g.DrawString($"检测时间：{DateTime.Now:HH:mm:ss.fff}", Font_Text, Brush_Green, x, y); y += 70;
+							g.DrawString($"综合结果：{(result ? "OK" : "NG")}", Font_Text, result ? Brush_Green : Brush_Red, x, y); y += 70;
+
+							g.DrawString($"长边：{longEdge:F2}", Font_Text, result ? Brush_Green : Brush_Red, x, y); y += 70;
+							g.DrawString($"管径：{PipeDiameter}", Font_Text, result ? Brush_Green : Brush_Red, x, y); y += 70;
+
+							if (!result) g.DrawString($"圆度上限：{_Config.Camera3RoundnessUp}", Font_Text, Brush_Green, x, y); y += 70;
+							g.DrawString($"圆度：{roundness:F3}", Font_Text, result ? Brush_Green : Brush_Red, x, y); y += 70;
+							if (!result) g.DrawString($"圆度下限：{_Config.Camera3RoundnessDown}", Font_Text, Brush_Green, x, y); y += 70;
+							g.DrawString($"SequenceId：{id}", Font_Text, Brush_Green, x, y); y += 70;
+						}
+					}
+
+					// 画完字再存缓存
+					CacheImageForDefectSave("Camera3", rawBmpForSave, resBmpForSave, context.SequenceId);
+
+					// 降频刷新 UI
+					if (id % 3 == 0)
+					{
 						stageTimer.Stop();
-						context.StageTimes["图像前处理"] = stageTimer.ElapsedMilliseconds;
+						context.StageTimes["图像绘制"] = stageTimer.ElapsedMilliseconds;
 						stageTimer.Restart();
 
-						bmp = labelImage.ToBitmap();
-
-						#region 圆度检测
-						if (labelImage.Empty())
-						{
-							toolClass.SaveLog($"相机三图像异常..");
-							resultImage = labelImage.Clone();
-						}
-						else
-						{
-							DetectionResultV3 detectionResult = null;
-							if (_Config.IFRunCamera3)
-							{
-								detectionResult = RoundnessDetectorV3.DetectRoundnessAndRect(labelImage);
-							}
-
-							stageTimer.Stop();
-							context.StageTimes["AI模型推理"] = stageTimer.ElapsedMilliseconds;
-							stageTimer.Restart();
-
-							if (detectionResult != null)
-							{
-								resultImage = RoundnessDetectorV3.VisualizeDetection(labelImage, detectionResult);
-								longEdge = detectionResult.LongEdge * _Config.K_Cam3;
-								roundness = Math.Round((longEdge - PipeDiameter) / PipeDiameter, 3);
-								result = _Config.Camera3RoundnessUp >= roundness && roundness >= _Config.Camera3RoundnessDown;
-							}
-							else
-							{
-								toolClass.SaveLog("相机三圆度检测失败");
-								result = true;
-								resultImage = labelImage.Clone();
-							}
-						}
-
-						stageTimer.Stop();
-						context.StageTimes["结果处理"] = stageTimer.ElapsedMilliseconds;
-						stageTimer.Restart();
-
-						using (var tempBitmap = resultImage.ToBitmap())
-						{
-							if (tempBitmap != null)
-							{
-								int textX = tempBitmap.Width - 500;
-
-								using (var graphics = Graphics.FromImage(tempBitmap))
-								using (var font = new Font("微软雅黑", 30, FontStyle.Bold))
-								using (var greenBrush = new SolidBrush(Color.LawnGreen))
-								using (var redBrush = new SolidBrush(Color.Red))
-								{
-									var brush = result ? greenBrush : redBrush;
-
-									int y = 100;
-									graphics.DrawString($"相机：管口圆度检测", font, greenBrush, new PointF(textX, y));
-									y += 70;
-									graphics.DrawString($"时间：{DateTime.Now:HH:mm:ss.fff}", font, greenBrush, new PointF(textX, y));
-									y += 70;
-									graphics.DrawString($"总结果：{(result ? "OK" : "NG")}", font, brush, new PointF(textX, y));
-									y += 70;
-									graphics.DrawString($"长边：{longEdge:F2}", font, brush, new PointF(textX, y));
-									y += 70;
-									graphics.DrawString($"管径：{PipeDiameter}", font, brush, new PointF(textX, y));
-
-									if (!result)
-									{
-										y += 70;
-										graphics.DrawString($"圆度上限：{_Config.Camera3RoundnessUp}", font, brush, new PointF(textX, y));
-									}
-
-									y += 70;
-									graphics.DrawString($"圆度：{roundness:F3}", font, brush, new PointF(textX, y));
-
-									if (!result)
-									{
-										y += 70;
-										graphics.DrawString($"圆度下限：{_Config.Camera3RoundnessDown}", font, brush, new PointF(textX, y));
-									}
-
-									y += 70;
-									graphics.DrawString($"SequenceId：{id}", font, greenBrush, new PointF(textX, y));
-								}
-
-								stageTimer.Stop();
-								context.StageTimes["图像绘制"] = stageTimer.ElapsedMilliseconds;
-								stageTimer.Restart();
-
-								if (!_isClosing)
-									UpdatePictureBox3(tempBitmap);
-								bp2 = new Bitmap(tempBitmap);
-							}
-						}
+						displayBitmap = new Bitmap(resBmpForSave);
+						UpdatePictureBox3(displayBitmap);
 
 						stageTimer.Stop();
 						context.StageTimes["显示更新"] = stageTimer.ElapsedMilliseconds;
 						stageTimer.Restart();
-
-						if (!_isClosing)
-							SaveImageIfNeeded_Fast("Camera3", bmp, bp2, result, context.SequenceId, context.Offset);
-
-						stageTimer.Stop();
-						context.StageTimes["存储图像"] = stageTimer.ElapsedMilliseconds;
-						stageTimer.Restart();
-
-						context.ProcessResult = result;
-						Interlocked.Increment(ref resultCount3);
-						_resultMatcher?.SignalNewResult();
-
-						resultImage?.Dispose();
-						#endregion
-					}
-					catch (Exception ex)
-					{
-						toolClass.SaveLog($"相机三处理异常: {ex.Message}\n{ex.StackTrace}");
-						context.ProcessResult = false;
-					}
-					finally
-					{
-						if (pool != null)
-						{
-							if (labelImage != null) pool.ReturnMat(labelImage);
-						}
-						else
-						{
-							labelImage?.Dispose();
-						}
-						sourceMat?.Dispose();
-						resultImage?.Dispose();
 					}
 				}
-				finally
+
+				stageTimer.Stop();
+				context.StageTimes["存储图像"] = stageTimer.ElapsedMilliseconds;
+				stageTimer.Restart();
+
+				context.ProcessResult = result;
+				if (IFSaveLog)
 				{
-					bp2?.Dispose();
-					bmp?.Dispose();
+					toolClass.SaveLog($"[Camera3] ID:{id} 最终结果 - ProcessResult:{result}, SequenceId:{context.SequenceId}, Offset:{context.Offset}");
 				}
 
-				EndMethod(CameraSelect.Camera3);
+				Interlocked.Increment(ref resultCount3);
+				_resultMatcher?.SignalNewResult();
+				#endregion
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog($"相机三处理异常: {ex.Message}\n{ex.StackTrace}");
+				toolClass.SaveLog($"[Camera3] ID:{context.SequenceId} 处理异常: {ex.Message}\n{ex.StackTrace}");
+				context.ProcessResult = false;
+				_resultMatcher?.SignalNewResult();
+			}
+			finally
+			{
+				sourceMat?.Dispose();
+				if (pool != null)
+				{
+					if (labelImage != null) pool.ReturnMat(labelImage);
+					resultImage?.Dispose();
+				}
+				else
+				{
+					labelImage?.Dispose();
+					resultImage?.Dispose();
+				}
+
+				displayBitmap?.Dispose();
+				rawBmpForSave?.Dispose();
+				resBmpForSave?.Dispose();
+
+				EndMethod(CameraSelect.Camera3);
 			}
 		}
 
@@ -1741,6 +1852,14 @@ namespace VisionMeasure
 			Stopwatch stageTimer = Stopwatch.StartNew();
 			long id = context.SequenceId - context.Offset;
 
+			Mat sourceMat = null;
+			Mat labelImage = null;
+			Mat labelImage1 = null;
+			Bitmap displayBitmap = null;
+			Bitmap rawBmpForSave = null;
+			Bitmap resBmpForSave = null;
+
+			var pool = GetBufferPool(CameraSelect.Camera4);
 			try
 			{
 				if (IFSaveLog)
@@ -1749,361 +1868,77 @@ namespace VisionMeasure
 				StartMethod(CameraSelect.Camera4);
 
 				Bitmap bitmap = context.OriginalBitmap;
-				Bitmap bp2 = null;
-				Bitmap bmp = null;
 				bool result = false;
 				bool result_char = false;
 				string order_ocr = "";
 				int camera4StandChar = _Config.Camera1StandChar;
 
-				try
+				sourceMat = BitmapConverter.ToMat(bitmap);
+				bool isGrayscale = sourceMat.Type() == MatType.CV_8UC1;
+
+				if (pool != null)
 				{
-					var pool = GetBufferPool(CameraSelect.Camera4);
-					Mat sourceMat = null;
-					Mat labelImage = null;
-					Mat labelImage1 = null;
-
-					try
-					{
-						sourceMat = BitmapConverter.ToMat(bitmap);
-						bool isGrayscale = sourceMat.Type() == MatType.CV_8UC1;
-
-						if (pool != null)
-						{
-							labelImage = pool.RentMat();
-							labelImage1 = pool.RentMat();
-						}
-						else
-						{
-							labelImage = new Mat();
-							labelImage1 = new Mat();
-						}
-
-						if (isGrayscale)
-						{
-							Cv2.CvtColor(sourceMat, labelImage, ColorConversionCodes.GRAY2BGR);
-							Cv2.CvtColor(sourceMat, labelImage1, ColorConversionCodes.GRAY2BGR);
-						}
-						else
-						{
-							sourceMat.CopyTo(labelImage);
-							sourceMat.CopyTo(labelImage1);
-						}
-
-						stageTimer.Stop();
-						context.StageTimes["图像前处理"] = stageTimer.ElapsedMilliseconds;
-						stageTimer.Restart();
-
-						bmp = labelImage.ToBitmap();
-
-						#region 字符识别
-						ResponseList<OcrResponse> rsp_ocr = null;
-						ResponseList<SegmentationResponse> rsp_segmentation = null;
-						string result_Char_str = "0";
-						int index_ocr = 0;
-
-						if (_Config.IFRunCamera4.ToBool())
-						{
-							Task taskSeg = Task.Run(() => Model_Segmentation_Cam4.Run(labelImage, out rsp_segmentation));
-							Task taskChar = Task.Run(() => Model_Char_Cam4.Run(labelImage, out rsp_ocr));
-							Task.WaitAll(taskSeg, taskChar);
-						}
-
-						stageTimer.Stop();
-						context.StageTimes["AI模型推理"] = stageTimer.ElapsedMilliseconds;
-						stageTimer.Restart();
-
-						if (rsp_segmentation != null && rsp_ocr != null)
-						{
-							int segmentationCount = 0;
-							foreach (var item in rsp_segmentation)
-							{
-								segmentationCount += item.Item2.LabelMap.Count;
-							}
-
-							if (segmentationCount > 0)
-							{
-								var ocrBuilder = new System.Text.StringBuilder();
-
-								if (rsp_ocr != null)
-								{
-									for (int i = 0; i < rsp_ocr.Count; i++)
-									{
-										if (_Config.IFCamera4NG)
-										{
-											result_Char_str += "1";
-										}
-										var item = rsp_ocr[i];
-										var blocks = item.Item2?.Blocks;
-
-										if (blocks != null)
-										{
-											foreach (var block in blocks)
-											{
-												index_ocr++;
-												ocrBuilder.Append(block.Label);
-												var bbox = Cv2.BoundingRect(block.Polygon);
-
-												Cv2.Rectangle(labelImage1, bbox, new Scalar(0, 255, 0), 2);
-												Cv2.PutText(labelImage1, block.Label,
-													new OpenCvSharp.Point(bbox.X, bbox.Y - 5),
-													HersheyFonts.HersheySimplex, 0.8,
-													new Scalar(0, 255, 0), 2);
-											}
-										}
-									}
-
-									order_ocr = ocrBuilder.ToString();
-								}
-								else
-								{
-									if (_Config.IFCamera4NG)
-									{
-										result_Char_str += "1";
-									}
-									result_Char_str += "0";
-									toolClass.SaveLog($"相机四OCR模型出错：rsp_ocr == null");
-								}
-
-								if (index_ocr > 0)
-								{
-									if (index_ocr >= camera4StandChar)
-									{
-										result_Char_str += "0";
-									}
-									else
-									{
-										result_Char_str += "1";
-									}
-									order_ocr = $"字符数量: {index_ocr} / {camera4StandChar};";
-								}
-								else
-								{
-									order_ocr = $"字符数量: 0;";
-									result_Char_str += "1";
-								}
-
-								result_char = Convert.ToInt16(result_Char_str, 2) == 0;
-							}
-							else
-							{
-								order_ocr = $"字符数量：未识别到工件";
-								result_char = true;
-							}
-						}
-						else
-						{
-							if (rsp_segmentation == null)
-							{
-								toolClass.SaveLog("相机四 rsp_segmentation == null");
-								order_ocr = $"相机四 rsp_segmentation == null;";
-							}
-							else if (rsp_ocr == null)
-							{
-								order_ocr = $"相机四 result_char == null;";
-								toolClass.SaveLog("相机四 result_char == null");
-							}
-							result_char = true;
-						}
-
-						result = result_char;
-						#endregion
-
-						stageTimer.Stop();
-						context.StageTimes["结果处理"] = stageTimer.ElapsedMilliseconds;
-						stageTimer.Restart();
-
-						using (var tempBitmap = labelImage1.ToBitmap())
-						{
-							if (tempBitmap != null)
-							{
-								int textX = tempBitmap.Width - 500;
-
-								using (var graphics = Graphics.FromImage(tempBitmap))
-								using (var font = new Font("微软雅黑", 30, FontStyle.Bold))
-								using (var greenBrush = new SolidBrush(Color.LawnGreen))
-								using (var redBrush = new SolidBrush(Color.Red))
-								{
-									var brush = result ? greenBrush : redBrush;
-
-									int y = 100;
-									graphics.DrawString($"相机：夹尾正面字符检测", font, greenBrush, new PointF(textX, y));
-									y += 70;
-									graphics.DrawString($"时间：{DateTime.Now:HH:mm:ss.fff}", font, greenBrush, new PointF(textX, y));
-									y += 70;
-									graphics.DrawString($"总结果：{(result ? "OK" : "NG")}", font, brush, new PointF(textX, y));
-									y += 70;
-									graphics.DrawString($"字符结果：{(result_char ? "OK" : "NG")}", font, brush, new PointF(textX, y));
-									y += 70;
-									graphics.DrawString($"{order_ocr}", font, brush, new PointF(textX, y));
-									y += 70;
-									graphics.DrawString($"SequenceId：{id}", font, greenBrush, new PointF(textX, y));
-								}
-
-								stageTimer.Stop();
-								context.StageTimes["图像绘制"] = stageTimer.ElapsedMilliseconds;
-								stageTimer.Restart();
-
-								if (!_isClosing)
-									UpdatePictureBox4(tempBitmap);
-								bp2 = new Bitmap(tempBitmap);
-							}
-						}
-
-						stageTimer.Stop();
-						context.StageTimes["显示更新"] = stageTimer.ElapsedMilliseconds;
-						stageTimer.Restart();
-
-						if (!_isClosing)
-							SaveImageIfNeeded_Fast("Camera4", bmp, bp2, result, context.SequenceId, context.Offset);
-
-						stageTimer.Stop();
-						context.StageTimes["存储图像"] = stageTimer.ElapsedMilliseconds;
-						stageTimer.Restart();
-
-						context.ProcessResult = result;
-						Interlocked.Increment(ref resultCount4);
-						_resultMatcher?.SignalNewResult();
-					}
-					catch (Exception ex)
-					{
-						toolClass.SaveLog($"相机四处理异常: {ex.Message}\n{ex.StackTrace}");
-						context.ProcessResult = false;
-					}
-					finally
-					{
-						if (pool != null)
-						{
-							if (labelImage != null) pool.ReturnMat(labelImage);
-							if (labelImage1 != null) pool.ReturnMat(labelImage1);
-						}
-						else
-						{
-							labelImage?.Dispose();
-							labelImage1?.Dispose();
-						}
-						sourceMat?.Dispose();
-					}
+					labelImage = pool.RentMat();
+					labelImage1 = pool.RentMat();
 				}
-				finally
+				else
 				{
-					bp2?.Dispose();
-					bmp?.Dispose();
+					labelImage = new Mat();
+					labelImage1 = new Mat();
 				}
 
-				EndMethod(CameraSelect.Camera4);
-			}
-			catch (Exception ex)
-			{
-				toolClass.SaveLog($"相机四处理异常: {ex.Message}\n{ex.StackTrace}");
-			}
-		}
-
-		private void ProcessCamera5Image(ImageProcessingContext context)
-		{
-			if (_isClosing) return;
-			Stopwatch stageTimer = Stopwatch.StartNew();
-			long id = context.SequenceId - context.Offset;
-
-			try
-			{
-				if (IFSaveLog)
-					toolClass.SaveLog($"time[{DateTime.Now:HH:mm:ss:fff}]相机五开始处理，ID: {id}");
-
-				StartMethod(CameraSelect.Camera5);
-
-				Bitmap bitmap = context.OriginalBitmap;
-				Bitmap bp2 = null;
-				Bitmap bmp = null;
-				bool result = true;
-				bool result_flaw = true;
-				bool result_char = true;
-				bool result_PCode_char = true;
-				bool result_Segmentation = true;
-				string result_Class_str = "0";
-				string result_class = "";
-				string order_ocr = $"字符数量: 0;";
-				string pcode_ocr = $"P-Code数量: 0;";
-				double projectionLength = 0;
-				string label_str = "";
-
-				try
+				if (isGrayscale)
 				{
-					var pool = GetBufferPool(CameraSelect.Camera5);
-					Mat sourceMat = null;
-					Mat labelImage = null;
-					Mat labelImage1 = null;
+					Cv2.CvtColor(sourceMat, labelImage, ColorConversionCodes.GRAY2BGR);
+					Cv2.CvtColor(sourceMat, labelImage1, ColorConversionCodes.GRAY2BGR);
+				}
+				else
+				{
+					sourceMat.CopyTo(labelImage);
+					sourceMat.CopyTo(labelImage1);
+				}
 
-					try
+				stageTimer.Stop();
+				context.StageTimes["图像前处理"] = stageTimer.ElapsedMilliseconds;
+				stageTimer.Restart();
+
+				#region 字符识别
+				ResponseList<OcrResponse> rsp_ocr = null;
+				ResponseList<SegmentationResponse> rsp_segmentation = null;
+				string result_Char_str = "0";
+				int index_ocr = 0;
+
+				if (_Config.IFRunCamera4.ToBool())
+				{
+					Task taskSeg = Task.Run(() => Model_Segmentation_Cam4.Run(labelImage, out rsp_segmentation));
+					Task taskChar = Task.Run(() => Model_Char_Cam4.Run(labelImage, out rsp_ocr));
+					Task.WaitAll(taskSeg, taskChar);
+				}
+
+				stageTimer.Stop();
+				context.StageTimes["AI模型推理"] = stageTimer.ElapsedMilliseconds;
+				stageTimer.Restart();
+
+				if (rsp_segmentation != null && rsp_ocr != null)
+				{
+					int segmentationCount = 0;
+					for (int i = 0; i < rsp_segmentation.Count; i++)
 					{
-						sourceMat = BitmapConverter.ToMat(bitmap);
-						bool isGrayscale = sourceMat.Type() == MatType.CV_8UC1;
+						segmentationCount += rsp_segmentation[i].Item2.LabelMap.Count;
+					}
 
-						if (pool != null)
-						{
-							labelImage = pool.RentMat();
-							labelImage1 = pool.RentMat();
-						}
-						else
-						{
-							labelImage = new Mat();
-							labelImage1 = new Mat();
-						}
-
-						if (isGrayscale)
-						{
-							Cv2.CvtColor(sourceMat, labelImage, ColorConversionCodes.GRAY2BGR);
-							Cv2.CvtColor(sourceMat, labelImage1, ColorConversionCodes.GRAY2BGR);
-						}
-						else
-						{
-							sourceMat.CopyTo(labelImage);
-							sourceMat.CopyTo(labelImage1);
-						}
-
-						stageTimer.Stop();
-						context.StageTimes["图像前处理"] = stageTimer.ElapsedMilliseconds;
-						stageTimer.Restart();
-
-						bmp = labelImage.ToBitmap();
-
-						#region 多模型并行推理
-						ResponseList<SegmentationResponse> rsp_segmentation = null;
-						ResponseList<SegmentationResponse> rsp_color = null;
-						ResponseList<SegmentationResponse> rsp_rests = null;
-						ResponseList<OcrResponse> rsp_ocr = null;
-						ResponseList<OcrResponse> rsp_PCode_ocr = null;
-
-						if (_Config.IFRunCamera5.ToBool())
-						{
-							var tasks = new Task[5];
-							tasks[0] = Task.Run(() => Model_Segmentation_Cam5.Run(labelImage, out rsp_segmentation));
-							tasks[1] = Task.Run(() => Model_Char_Cam5.Run(labelImage, out rsp_ocr));
-							tasks[2] = Task.Run(() => Model_Color_Cam5.Run(labelImage, out rsp_color));
-							tasks[3] = Task.Run(() => Model_Char_PCode_Cam5.Run(labelImage, out rsp_PCode_ocr));
-							tasks[4] = Task.Run(() => Model_Rests_Cam5.Run(labelImage, out rsp_rests));
-							Task.WaitAll(tasks);
-						}
-
-						stageTimer.Stop();
-						context.StageTimes["AI模型推理"] = stageTimer.ElapsedMilliseconds;
-						stageTimer.Restart();
-						#endregion
-
-						float k = Convert.ToSingle(_Config.K);
-						float offset = Convert.ToSingle(_Config.Offset);
-						float astrict = Convert.ToSingle(_Config.Astrict);
-						int camera5StandChar = _Config.Camera2StandChar;
-
-						#region 处理OCR结果
-						string result_Char_str = "0";
-						int index_ocr = 0;
+					if (segmentationCount > 0)
+					{
 						var ocrBuilder = new System.Text.StringBuilder();
 
 						if (rsp_ocr != null)
 						{
 							for (int i = 0; i < rsp_ocr.Count; i++)
 							{
+								if (_Config.IFCamera4NG)
+								{
+									result_Char_str += "1";
+								}
 								var item = rsp_ocr[i];
 								var blocks = item.Item2?.Blocks;
 
@@ -2124,310 +1959,537 @@ namespace VisionMeasure
 								}
 							}
 
-							if (index_ocr > 0)
+							order_ocr = ocrBuilder.ToString();
+						}
+						else
+						{
+							if (_Config.IFCamera4NG)
 							{
-								if (index_ocr >= camera5StandChar)
-								{
-									result_Char_str += "0";
-								}
-								else
-								{
-									result_Char_str += "1";
-								}
-								order_ocr = $"字符数量: {index_ocr} / {camera5StandChar};";
-							}
-							else
-							{
-								order_ocr = $"字符数量: 0;";
 								result_Char_str += "1";
 							}
-						}
-						else
-						{
 							result_Char_str += "0";
-							toolClass.SaveLog($"OCR模型出错：rsp_ocr == null");
+							toolClass.SaveLog($"相机四OCR模型出错：rsp_ocr == null");
 						}
 
-						if (_Config.Camera5IFOcr)
+						if (index_ocr > 0)
 						{
-							result_char = Convert.ToInt16(result_Char_str, 2) == 0;
-						}
-						else
-						{
-							result_char = true;
-						}
-						#endregion
-
-						#region 处理P-Code结果
-						string result_Char_PCode_str = "0";
-						string PCode = "";
-						index_ocr = 0;
-						ocrBuilder = new System.Text.StringBuilder();
-
-						if (rsp_PCode_ocr != null)
-						{
-							for (int i = 0; i < rsp_PCode_ocr.Count; i++)
+							if (index_ocr >= camera4StandChar)
 							{
-								var item = rsp_PCode_ocr[i];
-								var blocks = item.Item2?.Blocks;
-
-								if (blocks != null)
-								{
-									var rightToLeft = TextBlockSorter.SortByCenterX(blocks.ToList(), TextBlockSorter.SortDirection.RightToLeft);
-
-									foreach (var block in rightToLeft)
-									{
-										index_ocr++;
-										PCode += block.Label;
-										var bbox = Cv2.BoundingRect(block.Polygon);
-
-										Cv2.Rectangle(labelImage1, bbox, new Scalar(0, 255, 0), 1);
-										Cv2.PutText(labelImage1, block.Label,
-											new OpenCvSharp.Point(bbox.X, bbox.Y - 5),
-											HersheyFonts.HersheySimplex, 0.8,
-											new Scalar(0, 255, 0), 2);
-									}
-								}
-							}
-
-							if (index_ocr > 0)
-							{
-								if (_Config.Standard_PCode == PCode)
-								{
-									result_Char_PCode_str += "0";
-								}
-								else
-								{
-									result_Char_PCode_str += "1";
-								}
-								pcode_ocr = $"P-Code识别结果: {PCode}";
+								result_Char_str += "0";
 							}
 							else
 							{
-								pcode_ocr = $"P-Code数量为: 0;";
-								result_Char_PCode_str += "1";
+								result_Char_str += "1";
 							}
+							order_ocr = $"Char Count: {index_ocr} / {camera4StandChar};";
 						}
 						else
 						{
-							result_Char_PCode_str += "0";
-							toolClass.SaveLog($"OCR模型出错：rsp_ocr == null");
+							order_ocr = $"Char Count: 0;";
+							result_Char_str += "1";
 						}
 
-						if (_Config.Camera5IFPCode)
+						result_char = Convert.ToInt16(result_Char_str, 2) == 0;
+						toolClass.SaveLog($"[Camera4] ID:{id} 字符检测 - IndexOCR:{index_ocr}, StandChar:{camera4StandChar}, ResultStr:{result_Char_str}, ResultChar:{result_char}");
+					}
+					else
+					{
+						order_ocr = $"Char Count: Workpiece Not Found";
+						result_char = true;
+						toolClass.SaveLog($"[Camera4] ID:{id} 工件未找到");
+					}
+				}
+				else
+				{
+					if (rsp_segmentation == null)
+					{
+						toolClass.SaveLog($"[Camera4] ID:{id} rsp_segmentation == null");
+						order_ocr = $"Cam4 rsp_segmentation == null;";
+					}
+					else if (rsp_ocr == null)
+					{
+						order_ocr = $"Cam4 result_char == null;";
+						toolClass.SaveLog($"[Camera4] ID:{id} result_char == null");
+					}
+					result_char = true;
+				}
+
+				result = result_char;
+				#endregion
+
+				stageTimer.Stop();
+				context.StageTimes["结果处理"] = stageTimer.ElapsedMilliseconds;
+				stageTimer.Restart();
+
+				if (!_isClosing)
+				{
+					rawBmpForSave = labelImage.ToBitmap();
+					resBmpForSave = labelImage1.ToBitmap();
+
+					// 【关键修复】每帧必画字
+					using (Graphics g = Graphics.FromImage(resBmpForSave))
+					{
+						lock (_drawLock)
 						{
-							result_PCode_char = Convert.ToInt16(result_Char_PCode_str, 2) == 0;
+							int x = resBmpForSave.Width - 500; int y = 100;
+							g.DrawString("相机：夹尾正面字符检测", Font_Title, Brush_Green, x, y); y += 70;
+							g.DrawString($"检测时间：{DateTime.Now:HH:mm:ss.fff}", Font_Text, Brush_Green, x, y); y += 70;
+							g.DrawString($"综合结果：{(result ? "OK" : "NG")}", Font_Text, result ? Brush_Green : Brush_Red, x, y); y += 70;
+							g.DrawString($"字符结果：{(result_char ? "OK" : "NG")}", Font_Text, result_char ? Brush_Green : Brush_Red, x, y); y += 70;
+							g.DrawString($"{order_ocr}", Font_Text, result_char ? Brush_Green : Brush_Red, x, y); y += 70;
+							g.DrawString($"SequenceId：{id}", Font_Text, Brush_Green, x, y); y += 70;
 						}
-						else
-						{
-							result_PCode_char = true;
-						}
-						#endregion
+					}
 
-						#region 处理分割结果
-						SegmentationResult segmentationResult = new SegmentationResult();
-						if (rsp_color != null && rsp_color.Count > 0 && rsp_segmentation != null && rsp_segmentation.Count > 0 && rsp_rests != null && rsp_rests.Count > 0)
-						{
-							int result_Segmentation_str = 0;
-							segmentationResult = ProcessSegmentationResultsFast(
-								rsp_segmentation, rsp_color, rsp_rests, labelImage1, ref result_class, ref result_Class_str, ref label_str);
+					// 画完字再存缓存
+					CacheImageForDefectSave("Camera4", rawBmpForSave, resBmpForSave, context.SequenceId);
 
-							if (segmentationResult.DetectedBoth)
-							{
-								if (segmentationResult.SeBiaoX != 0 && segmentationResult.SeBiaoY != 0)
-								{
-									projectionLength = CalculateProjection(
-										segmentationResult.SeBiaoX, segmentationResult.SeBiaoY,
-										segmentationResult.PingShengX, segmentationResult.PingShengY,
-										segmentationResult.PingShengA);
+					// 降频刷新 UI
+					if (id % 3 == 0)
+					{
+						stageTimer.Stop();
+						context.StageTimes["图像绘制"] = stageTimer.ElapsedMilliseconds;
+						stageTimer.Restart();
 
-									projectionLength = projectionLength * k + offset;
-
-									if (_Config.Camera5IFSeBiao)
-									{
-										result_Segmentation = projectionLength <= astrict;
-
-										if (result_Segmentation)
-										{
-											DrawLine(labelImage1,
-												new OpenCvSharp.Point((int)segmentationResult.SeBiaoX, (int)segmentationResult.SeBiaoY),
-												new OpenCvSharp.Point((int)segmentationResult.PingShengX, (int)segmentationResult.PingShengY),
-												new Scalar(0, 255, 0));
-										}
-										else
-										{
-											DrawLine(labelImage1,
-												new OpenCvSharp.Point((int)segmentationResult.SeBiaoX, (int)segmentationResult.SeBiaoY),
-												new OpenCvSharp.Point((int)segmentationResult.PingShengX, (int)segmentationResult.PingShengY),
-												new Scalar(0, 0, 255));
-										}
-									}
-									else
-									{
-										result_Segmentation = true;
-									}
-								}
-							}
-							else
-							{
-								result_Segmentation = false;
-							}
-						}
-						else
-						{
-							result_Segmentation = true;
-						}
-
-						result_flaw = Convert.ToInt16(result_Class_str, 2) == 0;
-						#endregion
-
-						if (label_str.Contains("空杯"))
-						{
-							result_char = true;
-							result_PCode_char = true;
-						}
-						result = result_char && result_PCode_char && result_flaw && result_Segmentation;
-
-						using (var tempBitmap = labelImage1.ToBitmap())
-						{
-							if (tempBitmap != null)
-							{
-								int textX = tempBitmap.Width - 600;
-								int y = 100;
-
-								using (var graphics = Graphics.FromImage(tempBitmap))
-								using (var font = new Font("微软雅黑", 30, FontStyle.Bold))
-								using (var greenBrush = new SolidBrush(Color.LawnGreen))
-								using (var redBrush = new SolidBrush(Color.Red))
-								{
-									graphics.DrawString($"相机：夹尾反面字符检测", font, greenBrush, new PointF(textX, y));
-									y += 70;
-									graphics.DrawString($"时间：{DateTime.Now:HH:mm:ss.fff}", font, greenBrush, new PointF(textX, y));
-									y += 70;
-
-									var totalBrush = result ? greenBrush : redBrush;
-									graphics.DrawString($"总结果：{(result ? "OK" : "NG")}", font, totalBrush, new PointF(textX, y));
-									y += 70;
-
-									var charBrush = result_char ? greenBrush : redBrush;
-									graphics.DrawString($"字符结果：{(result_char ? "OK" : "NG")}", font, charBrush, new PointF(textX, y));
-									y += 70;
-									graphics.DrawString($"{order_ocr}", font, charBrush, new PointF(textX, y));
-									y += 70;
-
-									if (_Config.Camera5IFPCode)
-									{
-										charBrush = result_PCode_char ? greenBrush : redBrush;
-										graphics.DrawString($"P-Code结果：{(result_PCode_char ? "OK" : "NG")}", font, charBrush, new PointF(textX, y));
-										y += 70;
-										graphics.DrawString($"{pcode_ocr}", font, charBrush, new PointF(textX, y));
-										y += 70;
-										if (!result_PCode_char)
-										{
-											graphics.DrawString($"P-Code标准字符: {_Config.Standard_PCode}", font, charBrush, new PointF(textX, y));
-											y += 70;
-										}
-									}
-
-									var segBrush = result_Segmentation ? greenBrush : redBrush;
-									graphics.DrawString($"色标结果：{(result_Segmentation ? "OK" : "NG")}", font, segBrush, new PointF(textX, y));
-									y += 70;
-
-									if (segmentationResult.DetectedBoth)
-									{
-										graphics.DrawString($"色标测量值：{projectionLength:F2}mm", font, segBrush, new PointF(textX, y));
-										y += 70;
-									}
-
-									var flawBrush = result_flaw ? greenBrush : redBrush;
-									graphics.DrawString($"缺陷结果：{(result_flaw ? "OK" : "NG")}", font, flawBrush, new PointF(textX, y));
-									y += 70;
-
-									if (!string.IsNullOrEmpty(result_class))
-									{
-										graphics.DrawString($"缺陷标签：{result_class}", font, redBrush, new PointF(textX, y));
-										y += 70;
-									}
-
-									graphics.DrawString($"SequenceId：{id}", font, greenBrush, new PointF(textX, y));
-								}
-
-								stageTimer.Stop();
-								context.StageTimes["图像绘制"] = stageTimer.ElapsedMilliseconds;
-								stageTimer.Restart();
-
-								if (!_isClosing)
-									UpdatePictureBox5(tempBitmap);
-								bp2 = new Bitmap(tempBitmap);
-							}
-						}
+						displayBitmap = new Bitmap(resBmpForSave);
+						UpdatePictureBox4(displayBitmap);
 
 						stageTimer.Stop();
 						context.StageTimes["显示更新"] = stageTimer.ElapsedMilliseconds;
 						stageTimer.Restart();
-
-						if (!_isClosing)
-							SaveImageIfNeeded_Fast("Camera5", bmp, bp2, result, context.SequenceId, context.Offset);
-
-						stageTimer.Stop();
-						context.StageTimes["存储图像"] = stageTimer.ElapsedMilliseconds;
-						stageTimer.Restart();
-
-						context.ProcessResult = result;
-
-						// 设置相机5细分结果到context.Result
-						if (context.Result != null)
-						{
-							context.Result.Cam5_CharResult = result_char ? 1 : 0;
-							context.Result.Cam5_PCodeResult = result_PCode_char ? 1 : 0;
-							context.Result.Cam5_SebiaoResult = result_Segmentation ? 1 : 0;
-							context.Result.Cam5_BaoguanResult = result_flaw ? 1 : 0;
-							context.Result.Cam5_XiekouResult = !result_class.Contains("斜口") ? 1 : 0;
-							context.Result.Cam5_WeijianduanResult = !result_class.Contains("未剪断") ? 1 : 0;
-
-							// 判断是否纯爆管NG（只有爆管缺陷）
-							if (!result && result_flaw == false && 
-								result_char && result_PCode_char && result_Segmentation &&
-								!result_class.Contains("斜口") && !result_class.Contains("未剪断"))
-							{
-								context.Result.IsPureBurst = true;
-							}
-						}
-
-						Interlocked.Increment(ref resultCount5);
-						_resultMatcher?.SignalNewResult();
-					}
-					catch (Exception ex)
-					{
-						toolClass.SaveLog($"相机五处理异常: {ex.Message}\n{ex.StackTrace}");
-						context.ProcessResult = false;
-					}
-					finally
-					{
-						if (pool != null)
-						{
-							if (labelImage != null) pool.ReturnMat(labelImage);
-							if (labelImage1 != null) pool.ReturnMat(labelImage1);
-						}
-						else
-						{
-							labelImage?.Dispose();
-							labelImage1?.Dispose();
-						}
-						sourceMat?.Dispose();
 					}
 				}
-				finally
-				{
-					bp2?.Dispose();
-					bmp?.Dispose();
-				}
 
-				EndMethod(CameraSelect.Camera5);
+				stageTimer.Stop();
+				context.StageTimes["存储图像"] = stageTimer.ElapsedMilliseconds;
+				stageTimer.Restart();
+
+				toolClass.SaveLog($"[Camera4] ID:{id} 处理完成 - result_char:{result_char}, result:{result}");
+				context.ProcessResult = result;
+				Interlocked.Increment(ref resultCount4);
+				_resultMatcher?.SignalNewResult();
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog($"相机五处理异常: {ex.Message}\n{ex.StackTrace}");
+				toolClass.SaveLog($"[Camera4] ID:{id} 处理异常: {ex.Message}\n{ex.StackTrace}");
+				context.ProcessResult = false;
+				_resultMatcher?.SignalNewResult();
+			}
+			finally
+			{
+				sourceMat?.Dispose();
+				if (pool != null)
+				{
+					if (labelImage != null) pool.ReturnMat(labelImage);
+					if (labelImage1 != null) pool.ReturnMat(labelImage1);
+				}
+				else
+				{
+					labelImage?.Dispose();
+					labelImage1?.Dispose();
+				}
+
+				displayBitmap?.Dispose();
+				rawBmpForSave?.Dispose();
+				resBmpForSave?.Dispose();
+
+				EndMethod(CameraSelect.Camera4);
+			}
+		}
+
+		private void ProcessCamera5Image(ImageProcessingContext context)
+		{
+			if (_isClosing) return;
+			Stopwatch stageTimer = Stopwatch.StartNew();
+			long id = context.SequenceId - context.Offset;
+
+			Mat sourceMat = null;
+			Mat labelImage = null;
+			Mat labelImage1 = null;
+			Bitmap displayBitmap = null;
+			Bitmap rawBmpForSave = null;
+			Bitmap resBmpForSave = null;
+
+			var pool = GetBufferPool(CameraSelect.Camera5);
+			try
+			{
+				if (IFSaveLog)
+					toolClass.SaveLog($"time[{DateTime.Now:HH:mm:ss:fff}]相机五开始处理，ID: {id}");
+
+				StartMethod(CameraSelect.Camera5);
+
+				Bitmap bitmap = context.OriginalBitmap;
+				bool result = true;
+				bool result_flaw = true;
+				bool result_char = true;
+				bool result_PCode_char = true;
+				bool result_Segmentation = true;
+				string result_Class_str = "0";
+				string result_class = "";
+				string order_ocr = "字符数量: 0;";
+				string pcode_ocr = "P码数量: 0;";
+				double projectionLength = 0;
+				string label_str = "";
+
+				sourceMat = BitmapConverter.ToMat(bitmap);
+				bool isGrayscale = sourceMat.Type() == MatType.CV_8UC1;
+
+				if (pool != null)
+				{
+					labelImage = pool.RentMat();
+					labelImage1 = pool.RentMat();
+				}
+				else
+				{
+					labelImage = new Mat();
+					labelImage1 = new Mat();
+				}
+
+				if (isGrayscale)
+				{
+					Cv2.CvtColor(sourceMat, labelImage, ColorConversionCodes.GRAY2BGR);
+					Cv2.CvtColor(sourceMat, labelImage1, ColorConversionCodes.GRAY2BGR);
+				}
+				else
+				{
+					sourceMat.CopyTo(labelImage);
+					sourceMat.CopyTo(labelImage1);
+				}
+
+				stageTimer.Stop();
+				context.StageTimes["图像前处理"] = stageTimer.ElapsedMilliseconds;
+				stageTimer.Restart();
+
+				#region 多模型并行推理
+				ResponseList<SegmentationResponse> rsp_segmentation = null;
+				ResponseList<SegmentationResponse> rsp_color = null;
+				ResponseList<SegmentationResponse> rsp_rests = null;
+				ResponseList<OcrResponse> rsp_ocr = null;
+				ResponseList<OcrResponse> rsp_PCode_ocr = null;
+
+				if (_Config.IFRunCamera5.ToBool())
+				{
+					var tasks = new Task[5];
+					tasks[0] = Task.Run(() => Model_Segmentation_Cam5.Run(labelImage, out rsp_segmentation));
+					tasks[1] = Task.Run(() => Model_Char_Cam5.Run(labelImage, out rsp_ocr));
+					tasks[2] = Task.Run(() => Model_Color_Cam5.Run(labelImage, out rsp_color));
+					tasks[3] = Task.Run(() => Model_Char_PCode_Cam5.Run(labelImage, out rsp_PCode_ocr));
+					tasks[4] = Task.Run(() => Model_Rests_Cam5.Run(labelImage, out rsp_rests));
+					Task.WaitAll(tasks);
+				}
+
+				stageTimer.Stop();
+				context.StageTimes["AI模型推理"] = stageTimer.ElapsedMilliseconds;
+				stageTimer.Restart();
+				#endregion
+
+				float k = Convert.ToSingle(_Config.K);
+				float offset = Convert.ToSingle(_Config.Offset);
+				float astrict = Convert.ToSingle(_Config.Astrict);
+				int camera5StandChar = _Config.Camera2StandChar;
+
+				#region 处理OCR结果
+				string result_Char_str = "0";
+				int index_ocr = 0;
+				var ocrBuilder = new System.Text.StringBuilder();
+
+				if (rsp_ocr != null)
+				{
+					for (int i = 0; i < rsp_ocr.Count; i++)
+					{
+						var item = rsp_ocr[i];
+						var blocks = item.Item2?.Blocks;
+
+						if (blocks != null)
+						{
+							foreach (var block in blocks)
+							{
+								index_ocr++;
+								ocrBuilder.Append(block.Label);
+								var bbox = Cv2.BoundingRect(block.Polygon);
+
+								Cv2.Rectangle(labelImage1, bbox, new Scalar(0, 255, 0), 2);
+								Cv2.PutText(labelImage1, block.Label,
+									new OpenCvSharp.Point(bbox.X, bbox.Y - 5),
+									HersheyFonts.HersheySimplex, 0.8,
+									new Scalar(0, 255, 0), 2);
+							}
+						}
+					}
+
+					if (index_ocr > 0)
+					{
+						if (index_ocr >= camera5StandChar)
+						{
+							result_Char_str += "0";
+						}
+						else
+						{
+							result_Char_str += "1";
+						}
+						order_ocr = $"字符数量: {index_ocr} / {camera5StandChar};";
+					}
+					else
+					{
+						order_ocr = "字符数量: 0;";
+						result_Char_str += "1";
+					}
+				}
+				else
+				{
+					result_Char_str += "0";
+					toolClass.SaveLog($"OCR模型出错：rsp_ocr == null");
+				}
+
+				if (_Config.Camera5IFOcr)
+				{
+					result_char = Convert.ToInt16(result_Char_str, 2) == 0;
+				}
+				else
+				{
+					result_char = true;
+				}
+				#endregion
+
+				#region 处理P-Code结果
+				string result_Char_PCode_str = "0";
+				string PCode = "";
+				index_ocr = 0;
+
+				if (rsp_PCode_ocr != null)
+				{
+					for (int i = 0; i < rsp_PCode_ocr.Count; i++)
+					{
+						var item = rsp_PCode_ocr[i];
+						var blocks = item.Item2?.Blocks;
+
+						if (blocks != null)
+						{
+							var rightToLeft = TextBlockSorter.SortByCenterX(blocks.ToList(), TextBlockSorter.SortDirection.RightToLeft);
+
+							foreach (var block in rightToLeft)
+							{
+								index_ocr++;
+								PCode += block.Label;
+								var bbox = Cv2.BoundingRect(block.Polygon);
+
+								Cv2.Rectangle(labelImage1, bbox, new Scalar(0, 255, 0), 1);
+								Cv2.PutText(labelImage1, block.Label,
+									new OpenCvSharp.Point(bbox.X, bbox.Y - 5),
+									HersheyFonts.HersheySimplex, 0.8,
+									new Scalar(0, 255, 0), 2);
+							}
+						}
+					}
+
+					if (index_ocr > 0)
+					{
+						if (_Config.Standard_PCode == PCode)
+						{
+							result_Char_PCode_str += "0";
+						}
+						else
+						{
+							result_Char_PCode_str += "1";
+						}
+						pcode_ocr = $"P码内容: {PCode}";
+					}
+					else
+					{
+						pcode_ocr = "P码数量: 0;";
+						result_Char_PCode_str += "1";
+					}
+				}
+				else
+				{
+					result_Char_PCode_str += "0";
+					toolClass.SaveLog($"OCR模型出错：rsp_ocr == null");
+				}
+
+				if (_Config.Camera5IFPCode)
+				{
+					result_PCode_char = Convert.ToInt16(result_Char_PCode_str, 2) == 0;
+				}
+				else
+				{
+					result_PCode_char = true;
+				}
+				#endregion
+
+				#region 处理分割结果
+				SegmentationResult segmentationResult = new SegmentationResult();
+				if (rsp_color != null && rsp_color.Count > 0 && rsp_segmentation != null && rsp_segmentation.Count > 0 && rsp_rests != null && rsp_rests.Count > 0)
+				{
+					segmentationResult = ProcessSegmentationResultsFast(
+						rsp_segmentation, rsp_color, rsp_rests, labelImage1, ref result_class, ref result_Class_str, ref label_str);
+
+					if (segmentationResult.DetectedBoth)
+					{
+						if (segmentationResult.SeBiaoX != 0 && segmentationResult.SeBiaoY != 0)
+						{
+							projectionLength = CalculateProjection(
+								segmentationResult.SeBiaoX, segmentationResult.SeBiaoY,
+								segmentationResult.PingShengX, segmentationResult.PingShengY,
+								segmentationResult.PingShengA);
+
+							projectionLength = projectionLength * k + offset;
+
+							if (_Config.Camera5IFSeBiao)
+							{
+								result_Segmentation = projectionLength <= astrict;
+
+								if (result_Segmentation)
+								{
+									DrawLine(labelImage1,
+										new OpenCvSharp.Point((int)segmentationResult.SeBiaoX, (int)segmentationResult.SeBiaoY),
+										new OpenCvSharp.Point((int)segmentationResult.PingShengX, (int)segmentationResult.PingShengY),
+										new Scalar(0, 255, 0));
+								}
+								else
+								{
+									DrawLine(labelImage1,
+										new OpenCvSharp.Point((int)segmentationResult.SeBiaoX, (int)segmentationResult.SeBiaoY),
+										new OpenCvSharp.Point((int)segmentationResult.PingShengX, (int)segmentationResult.PingShengY),
+										new Scalar(0, 0, 255));
+								}
+							}
+							else
+							{
+								result_Segmentation = true;
+							}
+						}
+					}
+					else
+					{
+						result_Segmentation = false;
+					}
+				}
+				else
+				{
+					result_Segmentation = true;
+				}
+
+				result_flaw = Convert.ToInt16(result_Class_str, 2) == 0;
+				#endregion
+
+				if (label_str.Contains("空杯"))
+				{
+					result_char = true;
+					result_PCode_char = true;
+					toolClass.SaveLog($"[Camera5] ID:{id} 空杯产品");
+				}
+				result = result_char && result_PCode_char && result_flaw && result_Segmentation;
+				toolClass.SaveLog($"[Camera5] ID:{id} 最终结果 - result_char:{result_char}, result_PCode_char:{result_PCode_char}, result_flaw:{result_flaw}, result_Segmentation:{result_Segmentation}, FinalResult:{result}");
+
+				stageTimer.Stop();
+				context.StageTimes["结果处理"] = stageTimer.ElapsedMilliseconds;
+				stageTimer.Restart();
+
+				if (!_isClosing)
+				{
+					rawBmpForSave = labelImage.ToBitmap();
+					resBmpForSave = labelImage1.ToBitmap();
+
+					// 【关键修复】存入缓存之前画字
+					using (Graphics g = Graphics.FromImage(resBmpForSave))
+					{
+						lock (_drawLock)
+						{
+							int x = resBmpForSave.Width - 600; int y = 100;
+							g.DrawString("相机：夹尾反面字符检测", Font_Title, Brush_Green, x, y); y += 70;
+							g.DrawString($"检测时间：{DateTime.Now:HH:mm:ss.fff}", Font_Text, Brush_Green, x, y); y += 70;
+							g.DrawString($"综合结果：{(result ? "OK" : "NG")}", Font_Text, result ? Brush_Green : Brush_Red, x, y); y += 70;
+							g.DrawString($"字符结果：{(result_char ? "OK" : "NG")}", Font_Text, result_char ? Brush_Green : Brush_Red, x, y); y += 70;
+							g.DrawString($"{order_ocr}", Font_Text, result_char ? Brush_Green : Brush_Red, x, y); y += 70;
+							if (_Config.Camera5IFPCode)
+							{
+								g.DrawString($"P-Code结果：{(result_PCode_char ? "OK" : "NG")}", Font_Text, result_PCode_char ? Brush_Green : Brush_Red, x, y); y += 70;
+								g.DrawString($"{pcode_ocr}", Font_Text, result_PCode_char ? Brush_Green : Brush_Red, x, y); y += 70;
+								if (!result_PCode_char)
+								{
+									g.DrawString($"P-Code标准: {_Config.Standard_PCode}", Font_Text, Brush_Green, x, y); y += 70;
+									y += 70;
+								}
+							}
+
+							g.DrawString($"色标结果：{(result_Segmentation ? "OK" : "NG")}", Font_Text, result_Segmentation ? Brush_Green : Brush_Red, x, y); y += 70;
+							if (segmentationResult.DetectedBoth)
+							{
+								g.DrawString($"色标测量值：{projectionLength:F2}mm", Font_Text, result_Segmentation ? Brush_Green : Brush_Red, x, y); y += 70;
+							}
+							g.DrawString($"缺陷结果：{(result_flaw ? "OK" : "NG")}", Font_Text, result_flaw ? Brush_Green : Brush_Red, x, y); y += 70;
+
+							if (!string.IsNullOrEmpty(result_class))
+							{
+								g.DrawString($"缺陷标签：{result_class}", Font_Text, result_flaw ? Brush_Green : Brush_Red, x, y); y += 70;
+							}
+							g.DrawString($"SequenceId：{id}", Font_Text, Brush_Green, x, y); y += 70;
+						}
+					}
+
+					CacheImageForDefectSave("Camera5", rawBmpForSave, resBmpForSave, context.SequenceId);
+
+					displayBitmap = new Bitmap(resBmpForSave);
+					UpdatePictureBox5(displayBitmap);
+
+					stageTimer.Stop();
+					context.StageTimes["显示更新及存储图像"] = stageTimer.ElapsedMilliseconds;
+					stageTimer.Restart();
+				}
+
+				context.ProcessResult = result;
+
+				var cam5Result = new QueueResultItem
+				{
+					SequenceId = context.SequenceId,
+					Offset = context.Offset,
+					Result = result,
+					Timestamp = DateTime.Now,
+					Cam5_CharResult = result_char ? 1 : 0,
+					Cam5_PCodeResult = result_PCode_char ? 1 : 0,
+					Cam5_SebiaoResult = result_Segmentation ? 1 : 0,
+					Cam5_BaoguanResult = !result_class.Contains("爆管") ? 1 : 0,
+					Cam5_XiekouResult = !result_class.Contains("斜口") ? 1 : 0,
+					Cam5_WeijianduanResult = !result_class.Contains("未剪断") ? 1 : 0
+				};
+
+				if (!result && result_flaw == false &&
+					result_char && result_PCode_char && result_Segmentation &&
+					!result_class.Contains("斜口") && !result_class.Contains("未剪断"))
+				{
+					cam5Result.IsPureBurst = true;
+				}
+
+				context.Result = cam5Result;
+
+				Interlocked.Increment(ref resultCount5);
+				_resultMatcher?.SignalNewResult();
+			}
+			catch (Exception ex)
+			{
+				toolClass.SaveLog($"[Camera5] ID:{context.SequenceId} 处理异常: {ex.Message}\n{ex.StackTrace}");
+				context.ProcessResult = false;
+				_resultMatcher?.SignalNewResult();
+			}
+			finally
+			{
+				sourceMat?.Dispose();
+				if (pool != null)
+				{
+					if (labelImage != null) pool.ReturnMat(labelImage);
+					if (labelImage1 != null) pool.ReturnMat(labelImage1);
+				}
+				else
+				{
+					labelImage?.Dispose();
+					labelImage1?.Dispose();
+				}
+
+				displayBitmap?.Dispose();
+				rawBmpForSave?.Dispose();
+				resBmpForSave?.Dispose();
+
+				EndMethod(CameraSelect.Camera5);
 			}
 		}
 		#endregion
@@ -2456,19 +2518,31 @@ namespace VisionMeasure
 
 				string dtFormat = DateTime.Now.ToString("yyMMddHHmmssfff");
 				string dateFolder = DateTime.Now.ToString("yyMMdd");
+				string shiftFolder = _currentShift;
+				string skuFolder = GetCurrentSkuValue();
 				string resultFolder = resultBool ? "OK" : "NG";
+
+				// 根据相机和检测结果确定缺陷类型文件夹（存图时不考虑连续爆管剔除）
+				string defectFolder = GetDefectFolder(cameraName, resultBool);
 
 				var saver = GetHighSpeedSaver(cameraName);
 				if (saver == null) return;
 
+				// 构建完整路径：日期 -> 班次 -> SKU -> OK/NG -> 缺陷类型
+				string basePath = Path.Combine(_Config.ImagePath, dateFolder, shiftFolder, skuFolder, resultFolder);
+				if (!resultBool && !string.IsNullOrEmpty(defectFolder))
+				{
+					basePath = Path.Combine(basePath, defectFolder);
+				}
+
 				if (original != null && ((resultBool && IFSaveOKRawImage) || (!resultBool && IFSaveNGRawImage)))
 				{
-					SaveOriginalImage_Fast(saver, cameraName, original, dateFolder, resultFolder, dtFormat, SequenceId, Offset, resultBool);
+					SaveOriginalImage_Fast(saver, cameraName, original, basePath, dtFormat, SequenceId, Offset, resultBool);
 				}
 
 				if (result != null && ((resultBool && IFSaveOKImage) || (!resultBool && IFSaveNGImage)))
 				{
-					SaveResultImage_Fast(saver, cameraName, result, dateFolder, resultFolder, dtFormat, SequenceId, Offset, resultBool);
+					SaveResultImage_Fast(saver, cameraName, result, basePath, dtFormat, SequenceId, Offset, resultBool);
 				}
 
 				Interlocked.Increment(ref _totalSaveCount);
@@ -2493,12 +2567,37 @@ namespace VisionMeasure
 			}
 		}
 
-		private void SaveOriginalImage_Fast(HighSpeedImageSaver saver, string cameraName, Bitmap original, string dateFolder, string resultFolder, string dtFormat, long SequenceId, int Offset, bool resultBool)
+		/// <summary>
+		/// 根据相机名称和检测结果获取缺陷类型文件夹名称
+		/// 存图时不考虑连续爆管剔除
+		/// </summary>
+		private string GetDefectFolder(string cameraName, bool isOk)
+		{
+			if (isOk) return "";
+
+			switch (cameraName)
+			{
+				case "Camera1":
+					return "管内异物";
+				case "Camera2":
+					return "管盖有无";
+				case "Camera3":
+					return "管口圆度";
+				case "Camera4":
+					return "正面工号缺失";
+				case "Camera5":
+					return "背面工号缺失";
+				default:
+					return "其他缺陷";
+			}
+		}
+
+		private void SaveOriginalImage_Fast(HighSpeedImageSaver saver, string cameraName, Bitmap original, string basePath, string dtFormat, long SequenceId, int Offset, bool resultBool)
 		{
 			try
 			{
 				string yFileName = $"{dtFormat}_Y_ID{SequenceId - Offset}_SequenceId{SequenceId}_Offset{Offset}_result-{resultBool}-{(resultBool ? "OK" : "NG")}.jpg";
-				string yPath = Path.Combine(_Config.ImagePath, dateFolder, cameraName, resultFolder, yFileName);
+				string yPath = Path.Combine(basePath, yFileName);
 
 				byte[] yData = BitmapFastConverter.ToBmpBytesFast(original);
 				if (yData != null && yData.Length > 0)
@@ -2512,12 +2611,12 @@ namespace VisionMeasure
 			}
 		}
 
-		private void SaveResultImage_Fast(HighSpeedImageSaver saver, string cameraName, Bitmap result, string dateFolder, string resultFolder, string dtFormat, long SequenceId, int Offset, bool resultBool)
+		private void SaveResultImage_Fast(HighSpeedImageSaver saver, string cameraName, Bitmap result, string basePath, string dtFormat, long SequenceId, int Offset, bool resultBool)
 		{
 			try
 			{
 				string rFileName = $"{dtFormat}_R_ID{SequenceId - Offset}_SequenceId{SequenceId}_Offset{Offset}_result-{resultBool}-{(resultBool ? "OK" : "NG")}.jpg";
-				string rPath = Path.Combine(_Config.ImagePath, dateFolder, cameraName, resultFolder, rFileName);
+				string rPath = Path.Combine(basePath, rFileName);
 
 				byte[] rData = BitmapFastConverter.ToJpegBytesFast(result, IMAGE_JPEG_QUALITY);
 				if (rData != null && rData.Length > 0)
@@ -2541,6 +2640,262 @@ namespace VisionMeasure
 				case "Camera4": return _highSpeedSaver4;
 				case "Camera5": return _highSpeedSaver5;
 				default: return _highSpeedSaver1;
+			}
+		}
+
+		/// <summary>
+		/// 缓存图像，等结果匹配后统一按缺陷类型存图
+		/// 注意：必须创建Bitmap副本，因为原始Bitmap会在相机处理完成后被释放
+		/// </summary>
+		private void CacheImageForDefectSave(string cameraName, Bitmap original, Bitmap result, long sequenceId)
+		{
+			try
+			{
+				// 创建Bitmap副本，防止原始图像被释放后缓存失效
+				Bitmap originalCopy = original != null ? new Bitmap(original) : null;
+				Bitmap resultCopy = result != null ? new Bitmap(result) : null;
+
+				// 缓存原图
+				_imageCache.AddOrUpdate(sequenceId,
+					new Dictionary<string, Bitmap> { { cameraName, originalCopy } },
+					(key, existingDict) =>
+					{
+						// 释放旧的缓存图像
+						if (existingDict.ContainsKey(cameraName) && existingDict[cameraName] != null)
+						{
+							existingDict[cameraName].Dispose();
+						}
+						existingDict[cameraName] = originalCopy;
+						return existingDict;
+					});
+
+				// 缓存结果图
+				_resultImageCache.AddOrUpdate(sequenceId,
+					new Dictionary<string, Bitmap> { { cameraName, resultCopy } },
+					(key, existingDict) =>
+					{
+						// 释放旧的缓存图像
+						if (existingDict.ContainsKey(cameraName) && existingDict[cameraName] != null)
+						{
+							existingDict[cameraName].Dispose();
+						}
+						existingDict[cameraName] = resultCopy;
+						return existingDict;
+					});
+
+				toolClass.SaveLog($"缓存图像成功: Camera={cameraName}, SequenceId={sequenceId}");
+			}
+			catch (Exception ex)
+			{
+				toolClass.SaveLog($"缓存图像异常: {ex.Message}");
+			}
+		}
+
+		/// <summary>
+		/// 根据检测结果获取缺陷类型文件夹名称
+		/// 规则：
+		/// 1. OK -> OK
+		/// 2. Camera1~4：NG就固定存为对应缺陷名称
+		/// 3. Camera5：如果缺陷种类>=2就为混合缺陷，否则存为对应缺陷名称
+		/// </summary>
+		private string GetDefectTypeFolder(QueueResultItem[] results)
+		{
+			List<string> defects = new List<string>();
+
+			// Camera1 - 管内异物
+			if (!results[0].Result) defects.Add("管内异物");
+			// Camera2 - 管盖有无
+			if (!results[1].Result) defects.Add("管盖有无");
+			// Camera3 - 管口圆度
+			if (!results[2].Result) defects.Add("管口圆度");
+			// Camera4 - 正面工号缺失
+			if (!results[3].Result) defects.Add("正面工号缺失");
+			// Camera5 - 细分缺陷
+			if (results[4].Cam5_BaoguanResult == 0) defects.Add("爆管");
+			if (results[4].Cam5_XiekouResult == 0) defects.Add("斜口");
+			if (results[4].Cam5_WeijianduanResult == 0) defects.Add("未剪断");
+			if (results[4].Cam5_CharResult == 0) defects.Add("背面工号缺失");
+			if (results[4].Cam5_PCodeResult == 0) defects.Add("P-Code");
+			if (results[4].Cam5_SebiaoResult == 0) defects.Add("色标对中");
+
+			if (defects.Count == 0)
+				return "OK";
+			else if (defects.Count >= 2)
+				return "混合缺陷";
+			else
+				return defects[0];
+		}
+
+		/// <summary>
+		/// 统一按缺陷类型保存所有相机的图像
+		/// 路径结构：日期 -> 班次 -> SKU -> OK/NG -> 相机名 -> 缺陷类型
+		/// </summary>
+		private void SaveImagesByDefectType(long sequenceId, QueueResultItem[] results)
+		{
+			try
+			{
+				IFSaveOKImage = _Config.IsSaveOkImage;
+				IFSaveNGImage = _Config.IsSaveNgImage;
+				IFSaveOKRawImage = _Config.IsSaveOkRawImage;
+				IFSaveNGRawImage = _Config.IsSaveNgRawImage;
+
+				if (!IFSaveOKImage && !IFSaveNGImage && !IFSaveOKRawImage && !IFSaveNGRawImage)
+				{
+					// 如果不需要存图，也要清理缓存
+					ClearImageCache(sequenceId);
+					return;
+				}
+
+				// 构建基础路径：日期 -> 班次 -> SKU -> OK/NG
+				string dateFolder = DateTime.Now.ToString("yyMMdd");
+				string shiftFolder = _currentShift;
+				string skuFolder = GetCurrentSkuValue();
+
+				string dtFormat = DateTime.Now.ToString("yyMMddHHmmssfff");
+
+				// 保存各相机的图像
+				if (_imageCache.TryGetValue(sequenceId, out var originalImages) &&
+					_resultImageCache.TryGetValue(sequenceId, out var resultImages))
+				{
+					foreach (var kvp in originalImages)
+					{
+						string cameraName = kvp.Key;
+						Bitmap original = kvp.Value;
+						Bitmap result = resultImages.ContainsKey(cameraName) ? resultImages[cameraName] : null;
+
+						// 获取当前相机的缺陷类型和OK/NG状态
+						bool isCameraNg = IsCameraNg(cameraName, results);
+						string defectFolder = GetDefectTypeForCamera(cameraName, results);
+						bool isOk = defectFolder == "OK";
+
+						// 如果只保存NG图片且当前相机是OK，则跳过
+						if (!IFSaveOKImage && !IFSaveOKRawImage && isOk)
+						{
+							continue;
+						}
+
+						var saver = GetHighSpeedSaver(cameraName);
+						if (saver == null) continue;
+
+						// 构建路径：日期 -> 班次 -> SKU -> OK/NG -> 相机名 -> 缺陷类型
+						string resultFolder = isOk ? "OK" : "NG";
+						string basePath = Path.Combine(_Config.ImagePath, dateFolder, shiftFolder, skuFolder, resultFolder, cameraName);
+						if (!isOk)
+						{
+							basePath = Path.Combine(basePath, defectFolder);
+						}
+
+						toolClass.SaveLog($"开始存图: SequenceId={sequenceId}, Camera={cameraName}, Defect={defectFolder}, Path={basePath}");
+
+						// 保存原图
+						if (original != null && ((isOk && IFSaveOKRawImage) || (!isOk && IFSaveNGRawImage)))
+						{
+							SaveOriginalImage_Fast(saver, cameraName, original, basePath, dtFormat, sequenceId, 0, isOk);
+						}
+
+						// 保存结果图
+						if (result != null && ((isOk && IFSaveOKImage) || (!isOk && IFSaveNGImage)))
+						{
+							SaveResultImage_Fast(saver, cameraName, result, basePath, dtFormat, sequenceId, 0, isOk);
+						}
+					}
+
+					// 清理缓存（释放Bitmap并移除）
+					ClearImageCache(sequenceId);
+				}
+				else
+				{
+					toolClass.SaveLog($"缓存中未找到图像: SequenceId={sequenceId}");
+				}
+			}
+			catch (Exception ex)
+			{
+				toolClass.SaveLog($"按缺陷类型存图异常: {ex.Message}");
+				// 发生异常时也要清理缓存，避免内存泄漏
+				ClearImageCache(sequenceId);
+			}
+		}
+
+		/// <summary>
+		/// 判断指定相机是否为NG
+		/// </summary>
+		private bool IsCameraNg(string cameraName, QueueResultItem[] results)
+		{
+			if (results == null || results.Length == 0)
+				return false;
+
+			switch (cameraName)
+			{
+				case "Camera1":
+					return results[0]?.Result == false;
+				case "Camera2":
+					return results[1]?.Result == false;
+				case "Camera3":
+					return results[2]?.Result == false;
+				case "Camera4":
+					return results[3]?.Result == false;
+				case "Camera5":
+					return results[4]?.Result == false;
+				default:
+					return false;
+			}
+		}
+
+		/// <summary>
+		/// 获取指定相机的缺陷类型
+		/// </summary>
+		private string GetDefectTypeForCamera(string cameraName, QueueResultItem[] results)
+		{
+			if (results == null || results.Length == 0)
+				return "OK";
+
+			switch (cameraName)
+			{
+				case "Camera1":
+					return results[0]?.Result == false ? "NG" : "OK";
+				case "Camera2":
+					return results[1]?.Result == false ? "NG" : "OK";
+				case "Camera3":
+					return results[2]?.Result == false ? "NG" : "OK";
+				case "Camera4":
+					return results[3]?.Result == false ? "NG" : "OK";
+				case "Camera5":
+					return results[4]?.Result == false ? (results[4]?.Cam5_BaoguanResult == 0 ? "爆管" :
+						results[4]?.Cam5_XiekouResult == 0 ? "斜口" :
+						results[4]?.Cam5_WeijianduanResult == 0 ? "未剪断" : "NG") : "OK";
+				default:
+					return "OK";
+			}
+		}
+
+		/// <summary>
+		/// 清理指定SequenceId的图像缓存（释放Bitmap并移除）
+		/// </summary>
+		private void ClearImageCache(long sequenceId)
+		{
+			try
+			{
+				// 释放原图缓存
+				if (_imageCache.TryRemove(sequenceId, out var originalImages))
+				{
+					foreach (var kvp in originalImages)
+					{
+						kvp.Value?.Dispose();
+					}
+				}
+
+				// 释放结果图缓存
+				if (_resultImageCache.TryRemove(sequenceId, out var resultImages))
+				{
+					foreach (var kvp in resultImages)
+					{
+						kvp.Value?.Dispose();
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				toolClass.SaveLog($"清理图像缓存异常: {ex.Message}");
 			}
 		}
 		#endregion
@@ -2603,31 +2958,36 @@ namespace VisionMeasure
 		{
 			if (rspList == null) return;
 
-			for (int i = 0; i < rspList.Count; i++)
+			using (Mat compareMask = new Mat())
+			using (Mat labels = new Mat())
+			using (Mat stats = new Mat())
+			using (Mat centroids = new Mat())
+			using (Mat singleContourMask = new Mat())
 			{
-				var rspPair = rspList[i];
-				var rsp = rspPair.Item2;
-				if (rsp.LabelMap == null) continue;
-
-				var labelKeys = rsp.LabelMap.Keys.ToArray();
-				for (int j = 0; j < labelKeys.Length; j++)
+				for (int i = 0; i < rspList.Count; i++)
 				{
-					var kv = new KeyValuePair<string, int>(labelKeys[j], rsp.LabelMap[labelKeys[j]]);
+					var rspPair = rspList[i];
+					var rsp = rspPair.Item2;
+					if (rsp.LabelMap == null) continue;
 
-					using (var labels = new Mat())
-					using (var stats = new Mat())
-					using (var centroids = new Mat())
+					var labelKeys = rsp.LabelMap.Keys.ToArray();
+					for (int j = 0; j < labelKeys.Length; j++)
 					{
-						var count_flaw = Cv2.ConnectedComponentsWithStats(rsp.Mask.Equals(kv.Value), labels, stats, centroids);
+						var kv = new KeyValuePair<string, int>(labelKeys[j], rsp.LabelMap[labelKeys[j]]);
+
+						Cv2.Compare(rsp.Mask, Scalar.All(kv.Value), compareMask, CmpType.EQ);
+						var count_flaw = Cv2.ConnectedComponentsWithStats(compareMask, labels, stats, centroids);
 
 						for (int k = 1; k < count_flaw; k++)
 						{
-							Cv2.FindContours(labels.Equals(k), out var contours, out var hierarcy, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
+							Cv2.Compare(labels, Scalar.All(k), singleContourMask, CmpType.EQ);
+							Cv2.FindContours(singleContourMask, out var contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
 							if (contours.Length == 0) continue;
 
 							RotatedRect minAreaRect = Cv2.MinAreaRect(contours[0]);
 							label_str += $"{kv.Key};";
 
+							// 【核心修正】将算法核心判定切换回原汁原味的中文，防结果串位与丢失
 							switch (kv.Key)
 							{
 								case "色标":
@@ -2714,9 +3074,25 @@ namespace VisionMeasure
 
 			try
 			{
+				// 【调试日志】记录每个相机的匹配结果
+				if (IFSaveLog)
+				{
+					toolClass.SaveLog($"[ResultMatch] 开始匹配 - Cam1: Seq={results[0].SequenceId}, Offset={results[0].Offset}, Result={results[0].Result}");
+					toolClass.SaveLog($"[ResultMatch] 开始匹配 - Cam2: Seq={results[1].SequenceId}, Offset={results[1].Offset}, Result={results[1].Result}");
+					toolClass.SaveLog($"[ResultMatch] 开始匹配 - Cam3: Seq={results[2].SequenceId}, Offset={results[2].Offset}, Result={results[2].Result}");
+					toolClass.SaveLog($"[ResultMatch] 开始匹配 - Cam4: Seq={results[3].SequenceId}, Offset={results[3].Offset}, Result={results[3].Result}");
+					toolClass.SaveLog($"[ResultMatch] 开始匹配 - Cam5: Seq={results[4].SequenceId}, Offset={results[4].Offset}, Result={results[4].Result}");
+				}
+
 				bool finalResult = results[0].Result && results[1].Result && results[2].Result && results[3].Result && results[4].Result;
+				long sequenceId = results[0].SequenceId;
+
+				toolClass.SaveLog($"[ResultMatch] ID:{sequenceId} 汇总 - Cam1:{results[0].Result}, Cam2:{results[1].Result}, Cam3:{results[2].Result}, Cam4:{results[3].Result}, Cam5:{results[4].Result}, FinalResult:{finalResult}");
 
 				AddProductionRecord(results, finalResult);
+
+				// 统一按缺陷类型保存所有相机的图像
+				SaveImagesByDefectType(sequenceId, results);
 
 				if (modbusClass.modbusState && !_isClosing)
 				{
@@ -2724,13 +3100,13 @@ namespace VisionMeasure
 					{
 						SendResultList.Add(new QueueResultItem
 						{
-							SequenceId = results[0].SequenceId,
+							SequenceId = sequenceId,
 							Offset = 0,
 							Result = finalResult,
 							Timestamp = DateTime.Now
 						});
 					}
-					toolClass.SaveLog($"time[{DateTime.Now:HH:mm:ss:fff}]结果匹配成功 ID: {results[0].SequenceId} Result: {finalResult}");
+					toolClass.SaveLog($"time[{DateTime.Now:HH:mm:ss:fff}]结果匹配成功 ID: {sequenceId} Result: {finalResult}");
 				}
 
 				if (!_isClosing)
@@ -2795,16 +3171,31 @@ namespace VisionMeasure
 					Cam5_WeijianduanResult = results[4].Cam5_WeijianduanResult
 				};
 
-				_dbRecorder.AddRecord(record);
-
-				// 更新连续爆管状态
+				// 先更新连续爆管状态
 				if (_dbRecorder != null)
 				{
-					// 判断是否为纯爆管NG
+					// 只要有爆管缺陷即可，不管是否有其他缺陷
 					bool isBurstNg = results[4].Cam5_BaoguanResult == 0;  // 爆管检测为NG
-					bool isPureBurst = results[4].IsPureBurst;
 
-					_dbRecorder.UpdateConsecutiveBurst(results[0].SequenceId, isBurstNg, isPureBurst);
+					_dbRecorder.UpdateConsecutiveBurst(results[0].SequenceId, isBurstNg);
+				}
+
+				// 再添加记录（此时历史记录已经更新，可以正确判断连续爆管）
+				_dbRecorder.AddRecord(record);
+
+				// 检查是否被标记为连续爆管剔除，如果是则增加计数（连续3个爆管，所以增加3）
+				if (record.IsExcluded && record.ExcludedReason == "连续爆管剔除")
+				{
+					// 连续爆管剔除会标记3条记录，所以计数增加3
+					_Config.burstExcludeCount += 3;
+					if (BaoGuanNGTxt != null)
+					{
+						this.Invoke(new Action(() =>
+						{
+							if (BaoGuanNGTxt != null)
+								BaoGuanNGTxt.Text = _Config.burstExcludeCount.ToString();
+						}));
+					}
 				}
 			}
 			catch (Exception ex)
@@ -2857,10 +3248,13 @@ namespace VisionMeasure
 						if (totalTxt != null) totalTxt.Text = _Config.total.ToString();
 						if (okTxt != null) okTxt.Text = _Config.ok.ToString();
 						if (ngTxt != null) ngTxt.Text = (_Config.total - _Config.ok).ToString();
+						if (BaoGuanNGTxt != null) BaoGuanNGTxt.Text = _Config.burstExcludeCount.ToString();
 
 						if (yieldTxt != null && _Config.total > 0)
 						{
-							double yieldRate = (_Config.ok * 100.0) / _Config.total;
+							// 良率 = OK合格数 ÷（总检测数 - 被剔除的连续爆管异常数量）
+							double effectiveCount = _Config.total - _Config.burstExcludeCount;
+							double yieldRate = effectiveCount > 0 ? (_Config.ok * 100.0) / effectiveCount : 0;
 							yieldTxt.Text = yieldRate.ToString("F2") + "%";
 							yieldTxt.ForeColor = yieldRate > 95 ? Color.Green : yieldRate > 90 ? Color.Orange : Color.Red;
 						}
@@ -3133,6 +3527,12 @@ namespace VisionMeasure
 					// 上一个班次结束，自动保存
 					AutoSaveShiftReport(_currentShiftDate, _currentShift);
 					toolClass.SaveLog($"班次切换: {_currentShift} -> {newShift}, 已自动保存{_currentShift}班次报表");
+
+					// 清空统计数据，准备新班次
+					this.Invoke(new Action(() =>
+					{
+						ClearStatisticsDisplay();
+					}));
 				}
 
 				_currentShift = newShift;
@@ -3195,8 +3595,8 @@ namespace VisionMeasure
                     ng_异物 as 管内异物NG数量,
                     ng_管盖有无 as 管盖有无NG数量,
                     ng_管口圆度 as 管口圆度NG数量,
-                    ng_正面工号不齐 as 正面工号不齐数量,
-                    ng_背面工号不齐 as 背面工号不齐数量,
+                    ng_正面工号缺失 as 正面工号缺失数量,
+                    ng_背面工号缺失 as 背面工号缺失数量,
                     ng_PCode as [P-CodeNG数量],
                     ng_色标对中 as 色标对中NG数量,
                     ng_爆管 as 爆管数量,
@@ -3219,7 +3619,7 @@ namespace VisionMeasure
 					// 写入数据（简化版，实际可以从数据库查询后写入）
 					using (var writer = new StreamWriter(filePath, false, Encoding.UTF8))
 					{
-						writer.WriteLine("日期,班次,SKU,总检数,OK总数,NG总数,管内异物NG数量,管盖有无NG数量,管口圆度NG数量,正面工号不齐数量,背面工号不齐数量,P-CodeNG数量,色标对中NG数量,爆管数量,斜口数量,未剪断数量,混合多种缺陷,连续爆管剔除,良率(%)");
+						writer.WriteLine("日期,班次,SKU,总检数,OK总数,NG总数,管内异物NG数量,管盖有无NG数量,管口圆度NG数量,正面工号缺失数量,背面工号缺失数量,P-CodeNG数量,色标对中NG数量,爆管数量,斜口数量,未剪断数量,混合多种缺陷,连续爆管剔除,良率(%)");
 						// 这里需要写入实际数据
 					}
 
@@ -3331,33 +3731,51 @@ namespace VisionMeasure
 			zhmTest = 0;
 		}
 
+		/// <summary>
+		/// 清空统计数据显示
+		/// </summary>
+		private void ClearStatisticsDisplay()
+		{
+			try
+			{
+				_Config.total = 0;
+				_Config.ok = 0;
+				_Config.ng_cam1 = 0;
+				_Config.ng_cam2 = 0;
+				_Config.ng_cam3 = 0;
+				_Config.ng_cam4 = 0;
+				_Config.ng_cam5 = 0;
+				_Config.burstExcludeCount = 0;
+
+				if (totalTxt != null) totalTxt.Text = "0";
+				if (okTxt != null) okTxt.Text = "0";
+				if (ngTxt != null) ngTxt.Text = "0";
+				if (BaoGuanNGTxt != null) BaoGuanNGTxt.Text = "0";
+				if (yieldTxt != null)
+				{
+					yieldTxt.Text = "0.00%";
+					yieldTxt.ForeColor = Color.Green;
+				}
+			}
+			catch { }
+		}
+
+		private void DrawChineseText(Bitmap bmp, string title, bool result, string id, string extraInfo)
+		{
+			using (Graphics g = Graphics.FromImage(bmp))
+			{
+				int drawX = bmp.Width - 550;
+				g.DrawString(title, Font_Main, Brush_Green, drawX, 50);
+				g.DrawString($"综合结果：{(result ? "合格" : "NG")}", Font_Main, result ? Brush_Green : Brush_Red, drawX, 100);
+				g.DrawString($"产品序号：{id}", Font_Sub, Brush_White, drawX, 150);
+				if (!string.IsNullOrEmpty(extraInfo))
+					g.DrawString(extraInfo, Font_Sub, Brush_White, drawX, 200);
+			}
+		}
+
 		private void clearBtn_Click(object sender, EventArgs e)
 		{
-			_Config.total = 0;
-			_Config.ok = 0;
-			_Config.ng_cam1 = 0;
-			_Config.ng_cam2 = 0;
-			_Config.ng_cam3 = 0;
-			_Config.ng_cam4 = 0;
-			_Config.ng_cam5 = 0;
-
-			this.Invoke(new Action(() =>
-			{
-				try
-				{
-					if (totalTxt != null) totalTxt.Text = _Config.total.ToString();
-					if (okTxt != null) okTxt.Text = _Config.ok.ToString();
-					if (ngTxt != null) ngTxt.Text = (_Config.total - _Config.ok).ToString();
-
-					if (yieldTxt != null && _Config.total > 0)
-					{
-						double yieldRate = (_Config.ok * 100.0) / _Config.total;
-						yieldTxt.Text = yieldRate.ToString("F2") + "%";
-						yieldTxt.ForeColor = yieldRate > 95 ? Color.Green : yieldRate > 90 ? Color.Orange : Color.Red;
-					}
-				}
-				catch { }
-			}));
+			ClearStatisticsDisplay();
 		}
 
 		private Stopwatch _sendIntervalTimer = Stopwatch.StartNew();
@@ -3401,6 +3819,7 @@ namespace VisionMeasure
 						{
 							if (SendResultList.Count >= 3 + offset_send)
 							{
+								// 【保持原状】维持原有的单向线性检索，确保绝对按照你原本的一致性匹配
 								station1 = SendResultList.FirstOrDefault(item => item != null && item.SequenceId == startIndex);
 								station2 = SendResultList.FirstOrDefault(item => item != null && item.SequenceId == startIndex + 1);
 								station3 = SendResultList.FirstOrDefault(item => item != null && item.SequenceId == startIndex + 2);
@@ -3434,6 +3853,10 @@ namespace VisionMeasure
 										{
 											double avg = _sendIntervals.Average();
 											toolClass.SaveLog($"平均发送间隔: {avg:F0}ms");
+
+											// 【唯一改动点：真·内存泄漏修复】
+											// 仅在此处对测速队列进行清空，切断内存无限制暴涨的隐患。对生产队列零干扰。
+											_sendIntervals.Clear();
 										}
 
 										if (!_isClosing)
@@ -3459,6 +3882,7 @@ namespace VisionMeasure
 											}));
 										}
 
+										// 【保持原状】维持原汁原味的串行擦除逻辑，确保产品数量、递增步长绝对不跑偏
 										lock (SendResultList)
 										{
 											SendResultList.RemoveAll(item => item.SequenceId == startIndex);
@@ -4002,6 +4426,14 @@ namespace VisionMeasure
 			catch { }
 		}
 
+		public IEnumerable<T> GetAllItems()
+		{
+			lock (_lock)
+			{
+				return _items.Values.ToList();
+			}
+		}
+
 		public void Dispose()
 		{
 			if (!_disposed) { _disposed = true; Clear(); }
@@ -4164,19 +4596,17 @@ namespace VisionMeasure
 			return results;
 		}
 
+		/// <summary>
+		/// 查找匹配的结果（只读方式，不移除任何结果）
+		/// </summary>
 		public QueueResultItem FindResultById(long targetSequenceId)
 		{
-			var currentResult = PeekNextResult();
-			while (currentResult != null)
+			var allItems = _resultQueue.GetAllItems();
+			foreach (var result in allItems)
 			{
-				long currentId = currentResult.SequenceId - currentResult.Offset;
-				if (currentId == targetSequenceId) return currentResult;
+				long currentId = result.SequenceId - result.Offset;
+				if (currentId == targetSequenceId) return result;
 				else if (currentId > targetSequenceId) return null;
-				else
-				{
-					GetNextResult();
-					currentResult = PeekNextResult();
-				}
 			}
 			return null;
 		}
@@ -4209,6 +4639,7 @@ namespace VisionMeasure
 			}
 		}
 	}
+
 
 	public class ResultMatcher : IDisposable
 	{
@@ -4305,6 +4736,23 @@ namespace VisionMeasure
 
 					_matchCallback?.Invoke(matchedResults);
 					_matchSignal.Set();
+				}
+				else
+				{
+					toolClass.SaveLog($"[ResultMatch] ID:{targetSequenceId} 匹配失败，跳过Camera1");
+					_processors[0].GetNextResult();
+					for (int i = 1; i < _processors.Length; i++)
+					{
+						QueueResultItem current;
+						while ((current = _processors[i].PeekNextResult()) != null)
+						{
+							long currentId = current.SequenceId - current.Offset;
+							if (currentId < targetSequenceId)
+								_processors[i].GetNextResult();
+							else
+								break;
+						}
+					}
 				}
 			}
 			catch (Exception ex)
@@ -4439,6 +4887,46 @@ namespace VisionMeasure
 
 	public static class BitmapFastConverter
 	{
+
+		/// <summary>
+		/// 【修复编译版】直接使用 OpenCV 原生 C++ 算头进行 Jpeg 压缩
+		/// 严格适配 out 关键字，零托管内存开辟，防止高速存图时由于 MemoryStream 导致 GC 卡顿
+		/// </summary>
+		public static byte[] ToJpegBytesViaOpenCv(Mat mat, int quality = 85)
+		{
+			if (mat == null || mat.Empty()) return null;
+			try
+			{
+				int[] encodeParams = new int[] { (int)ImwriteFlags.JpegQuality, quality };
+
+				// 【修复】使用 out 关键字传递参数，承接编码后的字节数组
+				byte[] buf;
+				bool success = Cv2.ImEncode(".jpg", mat, out buf, encodeParams);
+
+				return success ? buf : null;
+			}
+			catch
+			{
+				return null;
+			}
+		}
+
+		// 保留原有的 Bmp 转换以向下兼容
+		public static byte[] ToBmpBytesFast(this Bitmap bitmap)
+		{
+			if (bitmap == null) return null;
+			try
+			{
+				using (var ms = new MemoryStream())
+				{
+					bitmap.Save(ms, ImageFormat.Bmp);
+					return ms.ToArray();
+				}
+			}
+			catch { return null; }
+		}
+
+
 		public static byte[] ToJpegBytesFast(this Bitmap bitmap, int quality = 85)
 		{
 			if (bitmap == null) return null;
@@ -4460,19 +4948,6 @@ namespace VisionMeasure
 			catch { return null; }
 		}
 
-		public static byte[] ToBmpBytesFast(this Bitmap bitmap)
-		{
-			if (bitmap == null) return null;
-			try
-			{
-				using (var ms = new MemoryStream())
-				{
-					bitmap.Save(ms, ImageFormat.Bmp);
-					return ms.ToArray();
-				}
-			}
-			catch { return null; }
-		}
 
 		public static Bitmap CreateCompatibleCopy(this Bitmap source)
 		{
@@ -4636,7 +5111,8 @@ namespace VisionMeasure
 
 			if (mat.Width == _defaultWidth && mat.Height == _defaultHeight && _matPool.Count < _maxCapacity)
 			{
-				mat.SetTo(Scalar.All(0));
+				// 【关键优化】移除极其吃CPU和非托管总线带宽的 mat.SetTo(Scalar.All(0)) 填充清零操作。
+				// 下一帧图像进行 CopyTo 或 转灰度图时会自动覆写内存，无需提前清零。
 				_matPool.Add(new PoolItem<Mat> { Resource = mat, LastUsed = DateTime.Now, Size = EstimateMatSize(mat) });
 			}
 			else

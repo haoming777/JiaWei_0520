@@ -1,4 +1,4 @@
-﻿namespace VisionMeasure
+namespace VisionMeasure
 {
 	partial class MainFrm
 	{
@@ -286,6 +286,8 @@
 			this.uiLabel42 = new Sunny.UI.UILabel();
 			this.panel6 = new System.Windows.Forms.Panel();
 			this.tableLayoutPanel9 = new System.Windows.Forms.TableLayoutPanel();
+			this.BaoGuanNGTxt = new Sunny.UI.UIPanel();
+			this.uiLabel7 = new Sunny.UI.UILabel();
 			this.ngTxt = new Sunny.UI.UIPanel();
 			this.uiLabel2 = new Sunny.UI.UILabel();
 			this.okTxt = new Sunny.UI.UIPanel();
@@ -4226,26 +4228,30 @@
 			// 
 			this.tableLayoutPanel9.ColumnCount = 1;
 			this.tableLayoutPanel9.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
+			this.tableLayoutPanel9.Controls.Add(this.BaoGuanNGTxt, 0, 9);
+			this.tableLayoutPanel9.Controls.Add(this.uiLabel7, 0, 8);
 			this.tableLayoutPanel9.Controls.Add(this.ngTxt, 0, 7);
 			this.tableLayoutPanel9.Controls.Add(this.uiLabel2, 0, 6);
 			this.tableLayoutPanel9.Controls.Add(this.okTxt, 0, 5);
 			this.tableLayoutPanel9.Controls.Add(this.uiLabel3, 0, 4);
 			this.tableLayoutPanel9.Controls.Add(this.totalTxt, 0, 3);
 			this.tableLayoutPanel9.Controls.Add(this.uiLabel8, 0, 2);
-			this.tableLayoutPanel9.Controls.Add(this.panel7, 0, 12);
-			this.tableLayoutPanel9.Controls.Add(this.panel22, 0, 10);
-			this.tableLayoutPanel9.Controls.Add(this.panel23, 0, 14);
-			this.tableLayoutPanel9.Controls.Add(this.panel53, 0, 9);
-			this.tableLayoutPanel9.Controls.Add(this.panel54, 0, 8);
+			this.tableLayoutPanel9.Controls.Add(this.panel7, 0, 14);
+			this.tableLayoutPanel9.Controls.Add(this.panel22, 0, 12);
+			this.tableLayoutPanel9.Controls.Add(this.panel23, 0, 16);
+			this.tableLayoutPanel9.Controls.Add(this.panel53, 0, 11);
+			this.tableLayoutPanel9.Controls.Add(this.panel54, 0, 10);
 			this.tableLayoutPanel9.Controls.Add(this.tableLayoutPanel39, 0, 0);
 			this.tableLayoutPanel9.Dock = System.Windows.Forms.DockStyle.Fill;
 			this.tableLayoutPanel9.Location = new System.Drawing.Point(0, 0);
 			this.tableLayoutPanel9.Margin = new System.Windows.Forms.Padding(0);
 			this.tableLayoutPanel9.Name = "tableLayoutPanel9";
 			this.tableLayoutPanel9.Padding = new System.Windows.Forms.Padding(5, 0, 5, 5);
-			this.tableLayoutPanel9.RowCount = 15;
+			this.tableLayoutPanel9.RowCount = 17;
 			this.tableLayoutPanel9.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 150F));
 			this.tableLayoutPanel9.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 20F));
+			this.tableLayoutPanel9.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 25F));
+			this.tableLayoutPanel9.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 35F));
 			this.tableLayoutPanel9.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 25F));
 			this.tableLayoutPanel9.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 35F));
 			this.tableLayoutPanel9.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 25F));
@@ -4261,6 +4267,35 @@
 			this.tableLayoutPanel9.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 30F));
 			this.tableLayoutPanel9.Size = new System.Drawing.Size(200, 944);
 			this.tableLayoutPanel9.TabIndex = 3;
+			// 
+			// BaoGuanNGTxt
+			// 
+			this.BaoGuanNGTxt.Dock = System.Windows.Forms.DockStyle.Fill;
+			this.BaoGuanNGTxt.FillColor = System.Drawing.Color.Transparent;
+			this.BaoGuanNGTxt.FillColor2 = System.Drawing.Color.FromArgb(((int)(((byte)(253)))), ((int)(((byte)(243)))), ((int)(((byte)(243)))));
+			this.BaoGuanNGTxt.Font = new System.Drawing.Font("微软雅黑", 12F, System.Drawing.FontStyle.Bold);
+			this.BaoGuanNGTxt.Location = new System.Drawing.Point(5, 375);
+			this.BaoGuanNGTxt.Margin = new System.Windows.Forms.Padding(0);
+			this.BaoGuanNGTxt.MinimumSize = new System.Drawing.Size(1, 1);
+			this.BaoGuanNGTxt.Name = "BaoGuanNGTxt";
+			this.BaoGuanNGTxt.RectColor = System.Drawing.Color.FromArgb(((int)(((byte)(230)))), ((int)(((byte)(80)))), ((int)(((byte)(80)))));
+			this.BaoGuanNGTxt.Size = new System.Drawing.Size(190, 35);
+			this.BaoGuanNGTxt.Style = Sunny.UI.UIStyle.Custom;
+			this.BaoGuanNGTxt.TabIndex = 29;
+			this.BaoGuanNGTxt.Text = "0";
+			this.BaoGuanNGTxt.TextAlignment = System.Drawing.ContentAlignment.MiddleCenter;
+			// 
+			// uiLabel7
+			// 
+			this.uiLabel7.Dock = System.Windows.Forms.DockStyle.Fill;
+			this.uiLabel7.Font = new System.Drawing.Font("微软雅黑", 12F, System.Drawing.FontStyle.Bold);
+			this.uiLabel7.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(48)))), ((int)(((byte)(48)))), ((int)(((byte)(48)))));
+			this.uiLabel7.Location = new System.Drawing.Point(8, 350);
+			this.uiLabel7.Name = "uiLabel7";
+			this.uiLabel7.Size = new System.Drawing.Size(184, 25);
+			this.uiLabel7.TabIndex = 28;
+			this.uiLabel7.Text = "NG连续剔除";
+			this.uiLabel7.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
 			// 
 			// ngTxt
 			// 
@@ -4373,7 +4408,6 @@
 			this.tableLayoutPanel20.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
 			this.tableLayoutPanel20.Size = new System.Drawing.Size(190, 30);
 			this.tableLayoutPanel20.TabIndex = 2;
-			this.tableLayoutPanel20.Visible = false;
 			// 
 			// uiComboBox1
 			// 
@@ -4417,10 +4451,10 @@
 			// 
 			this.panel22.Controls.Add(this.panel52);
 			this.panel22.Dock = System.Windows.Forms.DockStyle.Fill;
-			this.panel22.Location = new System.Drawing.Point(5, 410);
+			this.panel22.Location = new System.Drawing.Point(5, 470);
 			this.panel22.Margin = new System.Windows.Forms.Padding(0);
 			this.panel22.Name = "panel22";
-			this.panel22.Size = new System.Drawing.Size(190, 459);
+			this.panel22.Size = new System.Drawing.Size(190, 399);
 			this.panel22.TabIndex = 16;
 			// 
 			// panel52
@@ -4431,7 +4465,7 @@
 			this.panel52.Margin = new System.Windows.Forms.Padding(0);
 			this.panel52.Name = "panel52";
 			this.panel52.Padding = new System.Windows.Forms.Padding(0, 0, 0, 5);
-			this.panel52.Size = new System.Drawing.Size(190, 459);
+			this.panel52.Size = new System.Drawing.Size(190, 399);
 			this.panel52.TabIndex = 17;
 			// 
 			// tableLayoutPanel40
@@ -4455,7 +4489,7 @@
 			this.tableLayoutPanel40.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 30F));
 			this.tableLayoutPanel40.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 30F));
 			this.tableLayoutPanel40.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
-			this.tableLayoutPanel40.Size = new System.Drawing.Size(190, 454);
+			this.tableLayoutPanel40.Size = new System.Drawing.Size(190, 394);
 			this.tableLayoutPanel40.TabIndex = 1;
 			// 
 			// tableLayoutPanel58
@@ -4770,7 +4804,7 @@
 			this.panel72.Location = new System.Drawing.Point(0, 150);
 			this.panel72.Margin = new System.Windows.Forms.Padding(0);
 			this.panel72.Name = "panel72";
-			this.panel72.Size = new System.Drawing.Size(190, 304);
+			this.panel72.Size = new System.Drawing.Size(190, 244);
 			this.panel72.TabIndex = 5;
 			// 
 			// tableLayoutPanel59
@@ -4786,7 +4820,7 @@
 			this.tableLayoutPanel59.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 50F));
 			this.tableLayoutPanel59.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 100F));
 			this.tableLayoutPanel59.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 50F));
-			this.tableLayoutPanel59.Size = new System.Drawing.Size(190, 304);
+			this.tableLayoutPanel59.Size = new System.Drawing.Size(190, 244);
 			this.tableLayoutPanel59.TabIndex = 0;
 			// 
 			// uiPanel1
@@ -4795,7 +4829,7 @@
 			this.uiPanel1.Dock = System.Windows.Forms.DockStyle.Fill;
 			this.uiPanel1.FillColor = System.Drawing.Color.White;
 			this.uiPanel1.Font = new System.Drawing.Font("宋体", 12F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-			this.uiPanel1.Location = new System.Drawing.Point(0, 102);
+			this.uiPanel1.Location = new System.Drawing.Point(0, 72);
 			this.uiPanel1.Margin = new System.Windows.Forms.Padding(0);
 			this.uiPanel1.MinimumSize = new System.Drawing.Size(1, 1);
 			this.uiPanel1.Name = "uiPanel1";
@@ -4860,9 +4894,7 @@
 			// 
 			this.SKU_Txt.Cursor = System.Windows.Forms.Cursors.IBeam;
 			this.SKU_Txt.Dock = System.Windows.Forms.DockStyle.Fill;
-			this.SKU_Txt.DoubleValue = 61042688D;
 			this.SKU_Txt.Font = new System.Drawing.Font("微软雅黑", 12F, System.Drawing.FontStyle.Bold);
-			this.SKU_Txt.IntValue = 61042688;
 			this.SKU_Txt.Location = new System.Drawing.Point(0, 0);
 			this.SKU_Txt.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
 			this.SKU_Txt.MinimumSize = new System.Drawing.Size(1, 16);
@@ -4872,9 +4904,10 @@
 			this.SKU_Txt.ShowText = false;
 			this.SKU_Txt.Size = new System.Drawing.Size(174, 42);
 			this.SKU_Txt.TabIndex = 0;
-			this.SKU_Txt.Text = "61042688";
 			this.SKU_Txt.TextAlignment = System.Drawing.ContentAlignment.MiddleCenter;
 			this.SKU_Txt.Watermark = "";
+			this.SKU_Txt.TextChanged += new System.EventHandler(this.SKU_Txt_TextChanged);
+			this.SKU_Txt.KeyDown += new System.Windows.Forms.KeyEventHandler(this.SKU_Txt_Enter);
 			// 
 			// panel23
 			// 
@@ -4899,13 +4932,14 @@
 			this.clearBtn.TabIndex = 3;
 			this.clearBtn.Text = "清  空";
 			this.clearBtn.TipsFont = new System.Drawing.Font("宋体", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
+			this.clearBtn.Visible = false;
 			this.clearBtn.Click += new System.EventHandler(this.clearBtn_Click);
 			// 
 			// panel53
 			// 
 			this.panel53.Controls.Add(this.yieldTxt);
 			this.panel53.Dock = System.Windows.Forms.DockStyle.Fill;
-			this.panel53.Location = new System.Drawing.Point(5, 375);
+			this.panel53.Location = new System.Drawing.Point(5, 435);
 			this.panel53.Margin = new System.Windows.Forms.Padding(0);
 			this.panel53.Name = "panel53";
 			this.panel53.Size = new System.Drawing.Size(190, 35);
@@ -4932,7 +4966,7 @@
 			// 
 			this.panel54.Controls.Add(this.uiLabel6);
 			this.panel54.Dock = System.Windows.Forms.DockStyle.Fill;
-			this.panel54.Location = new System.Drawing.Point(5, 350);
+			this.panel54.Location = new System.Drawing.Point(5, 410);
 			this.panel54.Margin = new System.Windows.Forms.Padding(0);
 			this.panel54.Name = "panel54";
 			this.panel54.Size = new System.Drawing.Size(190, 25);
@@ -5017,7 +5051,7 @@
 			// 
 			// MainFrm
 			// 
-			this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 17F);
+			this.AutoScaleDimensions = new System.Drawing.SizeF(11F, 24F);
 			this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
 			this.BackColor = System.Drawing.Color.White;
 			this.ClientSize = new System.Drawing.Size(1711, 1048);
@@ -5358,6 +5392,8 @@
 		private System.Windows.Forms.Panel panel55;
 		private Sunny.UI.UILabel uiLabel20;
 		private System.Windows.Forms.Panel panel58;
+		private Sunny.UI.UIPanel burstExcludeCountTxt;
+		private Sunny.UI.UILabel uiLabelBurstExclude;
 		private Sunny.UI.UIPanel ResultPanel;
 		private System.Windows.Forms.TableLayoutPanel tableLayoutPanel40;
 		private System.Windows.Forms.TableLayoutPanel tableLayoutPanel52;
@@ -5501,6 +5537,8 @@
 		private Sunny.UI.UILabel uiLabel1;
 		private System.Windows.Forms.Panel panel74;
 		private Sunny.UI.UITextBox SKU_Txt;
+		private Sunny.UI.UIPanel BaoGuanNGTxt;
+		private Sunny.UI.UILabel uiLabel7;
 		// private Sunny.UI.UITextBox Result2;
 	}
 }

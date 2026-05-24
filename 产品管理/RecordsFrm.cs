@@ -5,617 +5,683 @@ using System.Collections.Generic;
 using System.Data;
 using System.Data.SQLite;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using XL.Tool;
 
 namespace SetProduct
 {
-	public partial class RecordsFrm : Form
-	{
-		public RecordsFrm()
-		{
-			InitializeComponent();
-			ReplaceDataGridView();
-			CreatePagination();
-		}
+    public partial class RecordsFrm : Form
+    {
+        private string _productionDbPath = Path.Combine(Directory.GetCurrentDirectory(), "data", "production.db");
+        private XLToolClass _log = new XLToolClass();
+        private string currentMode = "summary";
+        private DataTable _currentData;
+        private UIDataGridView dgvRecords;
+        private UIPanel pnlTop;
+        private UIPanel pnlStats;
+        private UIPanel pnlBottom;
+        private UITextBox txtSearch;
+        private UIComboBox cboTableType;
+        private UIComboBox cboShift;
+        private UIComboBox cboResult;
+        private UIDatePicker dtStart;
+        private UIDatePicker dtEnd;
+        private UIButton btnSearch;
+        private UIButton btnReset;
+        private UIButton btnExport;
+        private UILabel lblTotal;
+        private UILabel lblOK;
+        private UILabel lblNG;
+        private UILabel lblYield;
+        private UILabel lblPageInfo;
+        private UIButton btnPrev;
+        private UIButton btnNext;
+        private int _pageSize = 50;
+        private int _currentPage = 1;
+        private int _totalPages = 1;
 
-		private string _productionDbPath = Path.Combine(Directory.GetCurrentDirectory(), "data", "production.db");
-		private XLToolClass _log = new XLToolClass();
+        public RecordsFrm()
+        {
+            InitializeComponent();
+        }
+
+        private void RecordsFrm_Load(object sender, EventArgs e)
+        {
+            InitializeCustomUI();
+            InitializeData();
+        }
+
+        private void InitializeCustomUI()
+        {
+            this.BackColor = Color.FromArgb(240, 242, 245);
+            this.Font = new Font("微软雅黑", 10F);
+            this.Size = new Size(1400, 850);
+            this.StartPosition = FormStartPosition.CenterScreen;
+            this.Text = "生产记录查询系统";
+
+            CreateTopPanel();
+            CreateStatsPanel();
+            CreateDataGrid();
+            CreateBottomPanel();
+        }
+
+        private void CreateTopPanel()
+        {
+            pnlTop = new UIPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 145,
+                FillColor = Color.White,
+                RectColor = Color.FromArgb(220, 223, 230),
+                Radius = 0
+            };
+            this.Controls.Add(pnlTop);
+
+            int y = 15;
+            int x = 20;
+
+            var lblType = new UILabel
+            {
+                Text = "查看类型：",
+                Location = new Point(x, y),
+                Size = new Size(80, 30),
+                ForeColor = Color.FromArgb(51, 51, 51),
+                Font = new Font("微软雅黑", 10F),
+                BackColor = Color.Transparent
+            };
+            pnlTop.Controls.Add(lblType);
+            x += 85;
+
+            cboTableType = new UIComboBox
+            {
+                Location = new Point(x, y),
+                Size = new Size(180, 35),
+                FillColor = Color.White,
+                Font = new Font("微软雅黑", 10F),
+                DropDownStyle = UIDropDownStyle.DropDownList
+            };
+            cboTableType.Items.AddRange(new[] { "汇总报表（主表）", "详细记录（副表）" });
+            cboTableType.SelectedIndex = 0;
+            cboTableType.SelectedIndexChanged += CboTableType_SelectedIndexChanged;
+            pnlTop.Controls.Add(cboTableType);
+            x += 200;
+
+            var lblStart = new UILabel
+            {
+                Text = "开始日期：",
+                Location = new Point(x, y),
+                Size = new Size(80, 30),
+                ForeColor = Color.FromArgb(51, 51, 51),
+                Font = new Font("微软雅黑", 10F),
+                BackColor = Color.Transparent
+            };
+            pnlTop.Controls.Add(lblStart);
+            x += 85;
+
+            dtStart = new UIDatePicker
+            {
+                Location = new Point(x, y),
+                Size = new Size(180, 35),
+                FillColor = Color.White,
+                Font = new Font("微软雅黑", 10F),
+                Value = DateTime.Now.AddDays(-7)
+            };
+            pnlTop.Controls.Add(dtStart);
+            x += 200;
+
+            var lblEnd = new UILabel
+            {
+                Text = "结束日期：",
+                Location = new Point(x, y),
+                Size = new Size(80, 30),
+                ForeColor = Color.FromArgb(51, 51, 51),
+                Font = new Font("微软雅黑", 10F),
+                BackColor = Color.Transparent
+            };
+            pnlTop.Controls.Add(lblEnd);
+            x += 85;
+
+            dtEnd = new UIDatePicker
+            {
+                Location = new Point(x, y),
+                Size = new Size(180, 35),
+                FillColor = Color.White,
+                Font = new Font("微软雅黑", 10F),
+                Value = DateTime.Now
+            };
+            pnlTop.Controls.Add(dtEnd);
+
+            y = 58;
+            x = 20;
+
+            var lblShift = new UILabel
+            {
+                Text = "班次选择：",
+                Location = new Point(x, y),
+                Size = new Size(80, 30),
+                ForeColor = Color.FromArgb(51, 51, 51),
+                Font = new Font("微软雅黑", 10F),
+                BackColor = Color.Transparent
+            };
+            pnlTop.Controls.Add(lblShift);
+            x += 85;
+
+            cboShift = new UIComboBox
+            {
+                Location = new Point(x, y),
+                Size = new Size(120, 35),
+                FillColor = Color.White,
+                Font = new Font("微软雅黑", 10F),
+                DropDownStyle = UIDropDownStyle.DropDownList
+            };
+            cboShift.Items.AddRange(new[] { "全部班次", "早班", "中班", "夜班" });
+            cboShift.SelectedIndex = 0;
+            pnlTop.Controls.Add(cboShift);
+            x += 140;
+
+            var lblResult = new UILabel
+            {
+                Text = "检测结果：",
+                Location = new Point(x, y),
+                Size = new Size(80, 30),
+                ForeColor = Color.FromArgb(51, 51, 51),
+                Font = new Font("微软雅黑", 10F),
+                BackColor = Color.Transparent
+            };
+            pnlTop.Controls.Add(lblResult);
+            x += 85;
+
+            cboResult = new UIComboBox
+            {
+                Location = new Point(x, y),
+                Size = new Size(120, 35),
+                FillColor = Color.White,
+                Font = new Font("微软雅黑", 10F),
+                DropDownStyle = UIDropDownStyle.DropDownList
+            };
+            cboResult.Items.AddRange(new[] { "全部结果", "OK", "NG" });
+            cboResult.SelectedIndex = 0;
+            pnlTop.Controls.Add(cboResult);
+            x += 140;
+
+            var lblSearch = new UILabel
+            {
+                Text = "关键词：",
+                Location = new Point(x, y),
+                Size = new Size(80, 30),
+                ForeColor = Color.FromArgb(51, 51, 51),
+                Font = new Font("微软雅黑", 10F),
+                BackColor = Color.Transparent
+            };
+            pnlTop.Controls.Add(lblSearch);
+            x += 85;
+
+            txtSearch = new UITextBox
+            {
+                Location = new Point(x, y),
+                Size = new Size(220, 35),
+                FillColor = Color.White,
+                Watermark = "请输入SKU或流水号...",
+                Font = new Font("微软雅黑", 10F)
+            };
+            pnlTop.Controls.Add(txtSearch);
+
+            // 良率公式说明：放在查询按钮左边、筛选结果右边的空位置
+            y = 58;
+            x = this.Width - 850;
+            var formulaLabel = new UILabel
+            {
+                Text = "💡 良率计算公式：良率 = OK合格数 ÷（总检测数 - 被剔除的连续爆管异常数量）",
+                Location = new Point(x, y),
+                Size = new Size(550, 35),
+                ForeColor = Color.FromArgb(255, 140, 0),
+                Font = new Font("微软雅黑", 10F, FontStyle.Bold),
+                BackColor = Color.Transparent,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            pnlTop.Controls.Add(formulaLabel);
+
+            y = 102;
+            x = this.Width - 380;
+
+            btnSearch = new UIButton
+            {
+                Text = "🔍 查询",
+                Location = new Point(x, y),
+                Size = new Size(110, 38),
+                FillColor = Color.FromArgb(24, 144, 255),
+                RectColor = Color.FromArgb(24, 144, 255),
+                ForeColor = Color.White,
+                Font = new Font("微软雅黑", 10F, FontStyle.Bold),
+                Radius = 6
+            };
+            btnSearch.Click += BtnSearch_Click;
+            pnlTop.Controls.Add(btnSearch);
+            x += 120;
+
+            btnReset = new UIButton
+            {
+                Text = "🔄 重置",
+                Location = new Point(x, y),
+                Size = new Size(110, 38),
+                FillColor = Color.FromArgb(144, 147, 153),
+                RectColor = Color.FromArgb(144, 147, 153),
+                ForeColor = Color.White,
+                Font = new Font("微软雅黑", 10F, FontStyle.Bold),
+                Radius = 6
+            };
+            btnReset.Click += BtnReset_Click;
+            pnlTop.Controls.Add(btnReset);
+            x += 120;
+
+            btnExport = new UIButton
+            {
+                Text = "📥 导出",
+                Location = new Point(x, y),
+                Size = new Size(110, 38),
+                FillColor = Color.FromArgb(103, 194, 58),
+                RectColor = Color.FromArgb(103, 194, 58),
+                ForeColor = Color.White,
+                Font = new Font("微软雅黑", 10F, FontStyle.Bold),
+                Radius = 6
+            };
+            btnExport.Click += BtnExport_Click;
+            pnlTop.Controls.Add(btnExport);
+        }
+
+        private void CreateStatsPanel()
+        {
+            pnlStats = new UIPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 100,
+                FillColor = Color.FromArgb(248, 250, 252),
+                RectColor = Color.FromArgb(220, 223, 230),
+                Radius = 0
+            };
+            this.Controls.Add(pnlStats);
+
+            int panelWidth = (this.Width - 100) / 4;
+            int y = 20;
+            int x = 20;
+
+            CreateStatCard(x, y, panelWidth, "总检数量", "0", Color.FromArgb(0, 122, 255), ref lblTotal);
+            x += panelWidth + 10;
+
+            CreateStatCard(x, y, panelWidth, "合格数量", "0", Color.FromArgb(0, 200, 0), ref lblOK);
+            x += panelWidth + 10;
+
+            CreateStatCard(x, y, panelWidth, "不合格数量", "0", Color.FromArgb(255, 69, 0), ref lblNG);
+            x += panelWidth + 10;
+
+            CreateStatCard(x, y, panelWidth, "良品率", "0.00%", Color.FromArgb(255, 140, 0), ref lblYield);
+        }
+
+        private void CreateStatCard(int x, int y, int width, string title, string value, Color color, ref UILabel valueLabel)
+        {
+            var card = new UIPanel
+            {
+                Location = new Point(x, y),
+                Size = new Size(width, 55),
+                FillColor = Color.White,
+                RectColor = Color.FromArgb(228, 233, 242),
+                Radius = 8
+            };
+            pnlStats.Controls.Add(card);
+
+            var lblTitle = new UILabel
+            {
+                Text = title,
+                Location = new Point(15, 8),
+                Size = new Size(width - 30, 20),
+                ForeColor = Color.FromArgb(144, 147, 153),
+                Font = new Font("微软雅黑", 9F),
+                BackColor = Color.Transparent
+            };
+            card.Controls.Add(lblTitle);
+
+            valueLabel = new UILabel
+            {
+                Text = value,
+                Location = new Point(15, 26),
+                Size = new Size(width - 30, 26),
+                ForeColor = color,
+                Font = new Font("微软雅黑", 16F, FontStyle.Bold),
+                BackColor = Color.Transparent
+            };
+            card.Controls.Add(valueLabel);
+        }
+
+        private void CreateBottomPanel()
+        {
+            pnlBottom = new UIPanel
+            {
+                Dock = DockStyle.Bottom,
+                Height = 60,
+                FillColor = Color.White,
+                RectColor = Color.FromArgb(220, 223, 230),
+                Radius = 0
+            };
+            this.Controls.Add(pnlBottom);
+
+            int centerX = this.Width / 2;
+
+            btnPrev = new UIButton
+            {
+                Text = "◀ 上一页",
+                Location = new Point(centerX - 220, 12),
+                Size = new Size(100, 36),
+                FillColor = Color.FromArgb(24, 144, 255),
+                RectColor = Color.FromArgb(24, 144, 255),
+                ForeColor = Color.White,
+                Font = new Font("微软雅黑", 10F),
+                Radius = 6
+            };
+            btnPrev.Click += BtnPrev_Click;
+            pnlBottom.Controls.Add(btnPrev);
+
+            lblPageInfo = new UILabel
+            {
+                Text = "第 1 / 1 页",
+                Location = new Point(centerX - 50, 16),
+                Size = new Size(100, 28),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("微软雅黑", 11F),
+                ForeColor = Color.FromArgb(51, 51, 51),
+                BackColor = Color.Transparent
+            };
+            pnlBottom.Controls.Add(lblPageInfo);
+
+            btnNext = new UIButton
+            {
+                Text = "下一页 ▶",
+                Location = new Point(centerX + 120, 12),
+                Size = new Size(100, 36),
+                FillColor = Color.FromArgb(24, 144, 255),
+                RectColor = Color.FromArgb(24, 144, 255),
+                ForeColor = Color.White,
+                Font = new Font("微软雅黑", 10F),
+                Radius = 6
+            };
+            btnNext.Click += BtnNext_Click;
+            pnlBottom.Controls.Add(btnNext);
+        }
+
+        private void CreateDataGrid()
+        {
+            dgvRecords = new UIDataGridView
+            {
+                Dock = DockStyle.Fill,
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                ReadOnly = true,
+                BackgroundColor = Color.FromArgb(248, 250, 252),
+                BorderStyle = BorderStyle.None,
+                RowHeadersVisible = false,
+                EnableHeadersVisualStyles = false,
+                ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None,
+                CellBorderStyle = DataGridViewCellBorderStyle.Single,
+                GridColor = Color.FromArgb(228, 233, 242),
+                AlternatingRowsDefaultCellStyle = new DataGridViewCellStyle
+                {
+                    BackColor = Color.FromArgb(250, 251, 252),
+                    ForeColor = Color.FromArgb(51, 51, 51),
+                    SelectionBackColor = Color.FromArgb(205, 232, 255),
+                    SelectionForeColor = Color.FromArgb(51, 51, 51),
+                    Padding = new Padding(8, 4, 8, 4),
+                    Font = new Font("微软雅黑", 10F)
+                },
+                DefaultCellStyle = new DataGridViewCellStyle
+                {
+                    BackColor = Color.White,
+                    ForeColor = Color.FromArgb(51, 51, 51),
+                    SelectionBackColor = Color.FromArgb(205, 232, 255),
+                    SelectionForeColor = Color.FromArgb(51, 51, 51),
+                    Padding = new Padding(8, 4, 8, 4),
+                    Font = new Font("微软雅黑", 10F)
+                },
+                ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
+                {
+                    BackColor = Color.FromArgb(248, 250, 252),
+                    ForeColor = Color.FromArgb(96, 98, 102),
+                    Font = new Font("微软雅黑", 10F, FontStyle.Bold),
+                    Alignment = DataGridViewContentAlignment.MiddleCenter,
+                    Padding = new Padding(8)
+                },
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None,
+                AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None,
+                RowTemplate = new DataGridViewRow { Height = 40 },
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect
+            };
+            this.Controls.Add(dgvRecords);
+            dgvRecords.BringToFront();
+        }
+
+        private void InitializeData()
+        {
+            try
+            {
+                string checkDetailSql = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='production_records_detail'";
+                string checkSummarySql = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='production_records_summary'";
+                
+                var checkDetail = ExecuteProdQuery(checkDetailSql);
+                var checkSummary = ExecuteProdQuery(checkSummarySql);
+                
+                bool hasDetailTable = checkDetail.Rows.Count > 0 && Convert.ToInt32(checkDetail.Rows[0][0]) > 0;
+                bool hasSummaryTable = checkSummary.Rows.Count > 0 && Convert.ToInt32(checkSummary.Rows[0][0]) > 0;
+
+                if (!hasDetailTable || !hasSummaryTable)
+                {
+                    CreateTables();
+                }
+
+                LoadData();
+            }
+            catch (Exception ex)
+            {
+                _log.SaveLog($"加载数据异常: {ex.Message}");
+                MessageBox.Show($"加载数据异常：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
 
 		private SQLiteConnection GetProductionConnection()
 		{
-			return new SQLiteConnection(@"Data Source = " + _productionDbPath);
+			// 加入 Journal Mode=WAL; 和 Cache Size 优化
+			return new SQLiteConnection(@"Data Source=" + _productionDbPath + ";Journal Mode=WAL;Cache Size=10000;");
 		}
 
 		private DataTable ExecuteProdQuery(string sql, params SQLiteParameter[] parameters)
-		{
-			using (var conn = GetProductionConnection())
-			{
-				using (var cmd = new SQLiteCommand(sql, conn))
-				{
-					if (parameters != null && parameters.Length > 0)
-						cmd.Parameters.AddRange(parameters);
-					var adapter = new SQLiteDataAdapter(cmd);
-					var dt = new DataTable();
-					adapter.Fill(dt);
-					return dt;
-				}
-			}
-		}
+        {
+            using (var conn = GetProductionConnection())
+            {
+                using (var cmd = new SQLiteCommand(sql, conn))
+                {
+                    if (parameters != null && parameters.Length > 0)
+                        cmd.Parameters.AddRange(parameters);
+                    var adapter = new SQLiteDataAdapter(cmd);
+                    var dt = new DataTable();
+                    adapter.Fill(dt);
+                    return dt;
+                }
+            }
+        }
 
-		private bool ExecuteProdNonQuery(string sql, params SQLiteParameter[] parameters)
-		{
-			try
-			{
-				using (var conn = GetProductionConnection())
-				{
-					conn.Open();
-					using (var cmd = new SQLiteCommand(sql, conn))
-					{
-						if (parameters != null && parameters.Length > 0)
-							cmd.Parameters.AddRange(parameters);
-						cmd.ExecuteNonQuery();
-						return true;
-					}
-				}
-			}
-			catch (Exception ex)
-			{
-				_log.SaveLog($"数据库操作异常: {ex.Message}");
-				return false;
-			}
-		}
+        private bool ExecuteProdNonQuery(string sql, params SQLiteParameter[] parameters)
+        {
+            try
+            {
+                using (var conn = GetProductionConnection())
+                {
+                    conn.Open();
+                    using (var cmd = new SQLiteCommand(sql, conn))
+                    {
+                        if (parameters != null && parameters.Length > 0)
+                            cmd.Parameters.AddRange(parameters);
+                        cmd.ExecuteNonQuery();
+                        return true;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.SaveLog($"数据库操作异常: {ex.Message}");
+                return false;
+            }
+        }
 
-		private string currentMode = "summary";
-		private DataTable _currentData;
+        private void CreateTables()
+        {
+            try
+            {
+                string createDetail = @"
+                    CREATE TABLE IF NOT EXISTS production_records_detail (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        p_time DATETIME NOT NULL,
+                        p_date TEXT NOT NULL,
+                        p_shift TEXT NOT NULL,
+                        p_shift_date TEXT NOT NULL,
+                        sku TEXT NOT NULL,
+                        sequence_id INTEGER,
+                        final_result TEXT NOT NULL,
+                        cam1_result INTEGER,
+                        cam2_result INTEGER,
+                        cam3_result INTEGER,
+                        cam4_result INTEGER,
+                        cam5_result INTEGER,
+                        ng_异物 INTEGER DEFAULT 0,
+                        ng_管盖有无 INTEGER DEFAULT 0,
+                        ng_管口圆度 INTEGER DEFAULT 0,
+                        ng_正面工号缺失 INTEGER DEFAULT 0,
+                        ng_背面工号缺失 INTEGER DEFAULT 0,
+                        ng_PCode INTEGER DEFAULT 0,
+                        ng_色标对中 INTEGER DEFAULT 0,
+                        ng_爆管 INTEGER DEFAULT 0,
+                        ng_斜口 INTEGER DEFAULT 0,
+                        ng_未剪断 INTEGER DEFAULT 0,
+                        defect_detail TEXT,
+                        defect_count INTEGER DEFAULT 0,
+                        is_excluded INTEGER DEFAULT 0,
+                        excluded_reason TEXT,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )";
 
-		// 自定义表格控件
-		private CustomDataGridView customGrid;
+                string createSummary = @"
+                    CREATE TABLE IF NOT EXISTS production_records_summary (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        p_date TEXT NOT NULL,
+                        p_shift TEXT NOT NULL,
+                        sku TEXT NOT NULL,
+                        total_count INTEGER DEFAULT 0,
+                        ok_count INTEGER DEFAULT 0,
+                        ng_count INTEGER DEFAULT 0,
+                        ng_异物 INTEGER DEFAULT 0,
+                        ng_管盖有无 INTEGER DEFAULT 0,
+                        ng_管口圆度 INTEGER DEFAULT 0,
+                        ng_正面工号缺失 INTEGER DEFAULT 0,
+                        ng_背面工号缺失 INTEGER DEFAULT 0,
+                        ng_PCode INTEGER DEFAULT 0,
+                        ng_色标对中 INTEGER DEFAULT 0,
+                        ng_爆管 INTEGER DEFAULT 0,
+                        ng_斜口 INTEGER DEFAULT 0,
+                        ng_未剪断 INTEGER DEFAULT 0,
+                        ng_混合多种缺陷 INTEGER DEFAULT 0,
+                        continuous_exclude_count INTEGER DEFAULT 0,
+                        yield_rate REAL DEFAULT 0,
+                        summary_date TEXT DEFAULT CURRENT_DATE,
+                        UNIQUE(p_date, p_shift, sku)
+                    )";
 
-		// 缺陷筛选控件
-		private FlowLayoutPanel flpDefect;
-		private List<UICheckBox> _defectChecks = new List<UICheckBox>();
-		private UIPanel pnlDefectFilter;
-		private UIButton btnDefectAll, btnDefectClear;
+                ExecuteProdNonQuery(createDetail);
+                ExecuteProdNonQuery(createSummary);
+                _log.SaveLog("数据库表创建完成");
+            }
+            catch (Exception ex)
+            {
+                _log.SaveLog($"创建表异常: {ex.Message}");
+            }
+        }
 
-		// 分页相关
-		private int _pageSize = 100;
-		private int _currentPage = 1;
-		private int _totalPages = 1;
-		private UIPanel pnlPage;
-		private UILabel lblPageInfo;
-		private UIButton btnPrev, btnNext;
+        private void CboTableType_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            bool isDetail = cboTableType.SelectedIndex == 1;
+            currentMode = isDetail ? "detail" : "summary";
+            cboResult.Visible = isDetail;
+            LoadData();
+        }
 
-		private void ReplaceDataGridView()
-		{
-			if (this.dataGridView1 != null)
-			{
-				this.Controls.Remove(this.dataGridView1);
-				this.dataGridView1.Dispose();
-			}
-
-			customGrid = new CustomDataGridView
-			{
-				Location = new Point(0, 50),
-				Size = new Size(this.ClientSize.Width, this.ClientSize.Height - 140),
-				Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
-				BackColor = Color.White,
-				Visible = true
-			};
-			this.Controls.Add(customGrid);
-			customGrid.BringToFront();
-		}
-
-		private void CreatePagination()
-		{
-			pnlPage = new UIPanel
-			{
-				Dock = DockStyle.Bottom,
-				Height = 40,
-				FillColor = Color.White,
-				RectColor = Color.FromArgb(230, 235, 240)
-			};
-
-			btnPrev = new UIButton
-			{
-				Text = "上一页",
-				Location = new Point(pnlPage.Width - 260, 6),
-				Size = new Size(80, 28),
-				FillColor = Color.FromArgb(66, 133, 244),
-				RectColor = Color.FromArgb(66, 133, 244),
-				ForeColor = Color.White,
-				Font = new Font("微软雅黑", 9, FontStyle.Bold),
-				Radius = 4
-			};
-			btnPrev.Click += (s, ev) => { if (_currentPage > 1) { _currentPage--; RefreshGridData(); } };
-
-			lblPageInfo = new UILabel
-			{
-				Text = "第 1 / 1 页",
-				Location = new Point(pnlPage.Width - 170, 10),
-				AutoSize = true,
-				ForeColor = Color.FromArgb(80, 80, 80),
-				Font = new Font("微软雅黑", 10)
-			};
-
-			btnNext = new UIButton
-			{
-				Text = "下一页",
-				Location = new Point(pnlPage.Width - 85, 6),
-				Size = new Size(80, 28),
-				FillColor = Color.FromArgb(66, 133, 244),
-				RectColor = Color.FromArgb(66, 133, 244),
-				ForeColor = Color.White,
-				Font = new Font("微软雅黑", 9, FontStyle.Bold),
-				Radius = 4
-			};
-			btnNext.Click += (s, ev) => { if (_currentPage < _totalPages) { _currentPage++; RefreshGridData(); } };
-
-			pnlPage.Controls.Add(btnPrev);
-			pnlPage.Controls.Add(lblPageInfo);
-			pnlPage.Controls.Add(btnNext);
-			this.Controls.Add(pnlPage);
-			pnlPage.BringToFront();
-		}
-
-		private void RefreshGridData()
-		{
-			if (_currentData == null || customGrid == null) return;
-
-			int start = (_currentPage - 1) * _pageSize;
-			int end = Math.Min(start + _pageSize, _currentData.Rows.Count);
-			var pageRows = new List<DataRow>();
-			for (int i = start; i < end; i++)
-			{
-				pageRows.Add(_currentData.Rows[i]);
-			}
-
-			// 获取中文列名和列宽
-			var columnHeaders = GetColumnHeaders();
-			customGrid.SetData(pageRows, _currentData.Columns, columnHeaders);
-			lblPageInfo.Text = $"第 {_currentPage} / {_totalPages} 页（共 {_currentData.Rows.Count} 条）";
-		}
-
-		private List<ColumnHeaderInfo> GetColumnHeaders()
-		{
-			var headers = new List<ColumnHeaderInfo>();
-
-			if (currentMode == "summary")
-			{
-				headers.Add(new ColumnHeaderInfo("p_date", "日期", 100));
-				headers.Add(new ColumnHeaderInfo("p_shift", "班次", 60));
-				headers.Add(new ColumnHeaderInfo("sku", "SKU", 80));
-				headers.Add(new ColumnHeaderInfo("total_count", "总检数", 70));
-				headers.Add(new ColumnHeaderInfo("ok_count", "OK数", 70));
-				headers.Add(new ColumnHeaderInfo("ng_count", "NG数", 70));
-				headers.Add(new ColumnHeaderInfo("ng_异物", "管内异物", 80));
-				headers.Add(new ColumnHeaderInfo("ng_管盖有无", "管盖有无", 80));
-				headers.Add(new ColumnHeaderInfo("ng_管口圆度", "管口圆度", 80));
-				headers.Add(new ColumnHeaderInfo("ng_正面工号不齐", "正面工号不齐", 80));
-				headers.Add(new ColumnHeaderInfo("ng_背面工号不齐", "背面工号不齐", 80));
-				headers.Add(new ColumnHeaderInfo("ng_PCode", "P-Code", 75));
-				headers.Add(new ColumnHeaderInfo("ng_色标对中", "色标对中", 80));
-				headers.Add(new ColumnHeaderInfo("ng_爆管", "爆管", 70));
-				headers.Add(new ColumnHeaderInfo("ng_斜口", "斜口", 70));
-				headers.Add(new ColumnHeaderInfo("ng_未剪断", "未剪断", 70));
-				headers.Add(new ColumnHeaderInfo("ng_混合多种缺陷", "混合多种缺陷", 90));
-				headers.Add(new ColumnHeaderInfo("continuous_exclude_count", "连续爆管剔除", 90));
-				headers.Add(new ColumnHeaderInfo("yield_rate", "良率", 75));
-			}
-			else
-			{
-				headers.Add(new ColumnHeaderInfo("p_time", "检测时间", 150));
-				headers.Add(new ColumnHeaderInfo("p_shift", "班次", 60));
-				headers.Add(new ColumnHeaderInfo("sku", "SKU", 80));
-				headers.Add(new ColumnHeaderInfo("sequence_id", "流水号", 100));
-				headers.Add(new ColumnHeaderInfo("final_result", "检测结果", 80));
-				headers.Add(new ColumnHeaderInfo("defect_detail", "缺陷详情", 250));
-				headers.Add(new ColumnHeaderInfo("defect_count", "缺陷数", 70));
-			}
-
-			return headers;
-		}
-
-		private void RecordsFrm_Load(object sender, EventArgs e)
-		{
-			InitializeUI();
-			InitializeData();
-		}
-
-		private void InitializeUI()
-		{
-			if (this.startTime != null) this.startTime.Value = DateTime.Now.AddDays(-7);
-			if (this.endTime != null) this.endTime.Value = DateTime.Now;
-
-			if (this.uiComboBox2 != null)
-			{
-				this.uiComboBox2.Items.Clear();
-				this.uiComboBox2.Items.Add("全部");
-				this.uiComboBox2.Items.Add("OK");
-				this.uiComboBox2.Items.Add("NG");
-				this.uiComboBox2.SelectedIndex = 0;
-			}
-
-			if (this.uiComboBox3 != null)
-			{
-				this.uiComboBox3.Items.Clear();
-				this.uiComboBox3.Items.Add("汇总记录（主表）");
-				this.uiComboBox3.Items.Add("明细记录（副表）");
-				this.uiComboBox3.SelectedIndex = 0;
-				this.uiComboBox3.SelectedIndexChanged += UiComboBox3_SelectedIndexChanged;
-			}
-
-			if (this.uiTextBox1 != null) this.uiTextBox1.Watermark = "请输入流水号或SKU...";
-
-			CreateDefectFilterPanel();
-		}
-
-		private void CreateDefectFilterPanel()
-		{
-			this.pnlDefectFilter = new UIPanel
-			{
-				Location = new Point(12, 165),
-				Size = new Size(this.ClientSize.Width - 30, 50),
-				FillColor = Color.FromArgb(248, 249, 250),
-				RectColor = Color.FromArgb(230, 235, 240),
-				Radius = 5,
-				Visible = false
-			};
-
-			var lblTitle = new UILabel
-			{
-				Text = "缺陷筛选：",
-				Location = new Point(10, 14),
-				AutoSize = true,
-				Font = new Font("微软雅黑", 9, FontStyle.Bold),
-				ForeColor = Color.FromArgb(66, 133, 244)
-			};
-			this.pnlDefectFilter.Controls.Add(lblTitle);
-
-			this.flpDefect = new FlowLayoutPanel
-			{
-				Location = new Point(85, 8),
-				Size = new Size(this.pnlDefectFilter.Width - 170, 35),
-				AutoScroll = true
-			};
-
-			string[] defects = {
-				"管内异物", "管盖有无", "管口圆度", "正面工号不齐",
-				"背面工号不齐", "P-Code", "色标对中", "爆管",
-				"斜口", "未剪断", "混合多种缺陷"
-			};
-
-			for (int i = 0; i < defects.Length; i++)
-			{
-				var chk = new UICheckBox
-				{
-					Text = defects[i],
-					Size = new Size(85, 24),
-					Checked = true,
-					Font = new Font("微软雅黑", 8),
-					ForeColor = Color.FromArgb(60, 60, 60)
-				};
-				this.flpDefect.Controls.Add(chk);
-				this._defectChecks.Add(chk);
-			}
-			this.pnlDefectFilter.Controls.Add(this.flpDefect);
-
-			this.btnDefectAll = new UIButton
-			{
-				Text = "全选",
-				Location = new Point(this.pnlDefectFilter.Width - 105, 12),
-				Size = new Size(48, 26),
-				FillColor = Color.FromArgb(66, 133, 244),
-				RectColor = Color.FromArgb(66, 133, 244),
-				ForeColor = Color.White,
-				Font = new Font("微软雅黑", 8, FontStyle.Bold),
-				Radius = 4
-			};
-			this.btnDefectAll.Click += (s, ev) => { this._defectChecks.ForEach(c => c.Checked = true); if (this.currentMode == "detail") this.LoadData(); };
-			this.pnlDefectFilter.Controls.Add(this.btnDefectAll);
-
-			this.btnDefectClear = new UIButton
-			{
-				Text = "清空",
-				Location = new Point(this.pnlDefectFilter.Width - 52, 12),
-				Size = new Size(48, 26),
-				FillColor = Color.FromArgb(108, 117, 125),
-				RectColor = Color.FromArgb(108, 117, 125),
-				ForeColor = Color.White,
-				Font = new Font("微软雅黑", 8, FontStyle.Bold),
-				Radius = 4
-			};
-			this.btnDefectClear.Click += (s, ev) => { this._defectChecks.ForEach(c => c.Checked = false); if (this.currentMode == "detail") this.LoadData(); };
-			this.pnlDefectFilter.Controls.Add(this.btnDefectClear);
-
-			this.Controls.Add(this.pnlDefectFilter);
-			this.pnlDefectFilter.BringToFront();
-		}
-
-		private async void InitializeData()
-		{
-			this.Cursor = Cursors.WaitCursor;
-			await Task.Run(() => LoadDatabaseDataAsync());
-			this.Cursor = Cursors.Default;
-		}
-
-		private void LoadDatabaseDataAsync()
+		private async void LoadData()
 		{
 			try
 			{
-				var check = this.ExecuteProdQuery("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='production_records_detail'");
-				bool hasTable = check.Rows.Count > 0 && Convert.ToInt32(check.Rows[0][0]) > 0;
+				this.Cursor = Cursors.WaitCursor;
 
-				if (!hasTable)
-				{
-					CreateTables();
-					GenerateMockData();
+				var parameters = new List<SQLiteParameter>();
+                string sql;
+
+                if (currentMode == "summary")
+                {
+                    sql = "SELECT * FROM production_records_summary WHERE 1=1";
+                    
+                    DateTime startDate = dtStart.Value.Date;
+                    DateTime endDate = dtEnd.Value.Date;
+                    
+                    sql += " AND p_date >= @startDate AND p_date <= @endDate";
+                    parameters.Add(new SQLiteParameter("@startDate", startDate.ToString("yyyy-MM-dd")));
+                    parameters.Add(new SQLiteParameter("@endDate", endDate.ToString("yyyy-MM-dd")));
+
+                    if (cboShift.SelectedIndex > 0)
+                    {
+                        string shiftText = cboShift.SelectedItem.ToString();
+                        sql += " AND p_shift = @shift";
+                        parameters.Add(new SQLiteParameter("@shift", shiftText.Replace("班次", "")));
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(txtSearch.Text))
+                    {
+                        sql += " AND (sku LIKE @search OR p_date LIKE @search)";
+                        parameters.Add(new SQLiteParameter("@search", $"%{txtSearch.Text}%"));
+                    }
+
+                    sql += " ORDER BY p_date DESC, p_shift, sku";
+                }
+                else
+                {
+                    sql = "SELECT * FROM production_records_detail WHERE 1=1";
+                    
+                    DateTime startDate = dtStart.Value.Date;
+                    DateTime endDate = dtEnd.Value.Date.AddDays(1).AddSeconds(-1);
+                    
+                    sql += " AND p_time >= @startTime AND p_time <= @endTime";
+                    parameters.Add(new SQLiteParameter("@startTime", startDate));
+                    parameters.Add(new SQLiteParameter("@endTime", endDate));
+
+                    if (cboShift.SelectedIndex > 0)
+                    {
+                        string shiftText = cboShift.SelectedItem.ToString();
+                        sql += " AND p_shift = @shift";
+                        parameters.Add(new SQLiteParameter("@shift", shiftText.Replace("班次", "")));
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(txtSearch.Text))
+                    {
+                        sql += " AND (sku LIKE @search OR CAST(sequence_id AS TEXT) LIKE @search OR defect_detail LIKE @search)";
+                        parameters.Add(new SQLiteParameter("@search", $"%{txtSearch.Text}%"));
+                    }
+
+                    if (cboResult.SelectedIndex > 0)
+                    {
+                        sql += " AND final_result = @result";
+                        parameters.Add(new SQLiteParameter("@result", cboResult.SelectedItem.ToString()));
+                    }
+
+					sql += " ORDER BY p_time DESC LIMIT 3000";
 				}
 
-				this.BeginInvoke(new Action(() => LoadData()));
-			}
-			catch (Exception ex)
-			{
-				this._log.SaveLog($"加载数据异常: {ex.Message}");
-			}
-		}
-
-		private void CreateTables()
-		{
-			try
-			{
-				string createDetail = @"
-					CREATE TABLE IF NOT EXISTS production_records_detail (
-						id INTEGER PRIMARY KEY AUTOINCREMENT,
-						p_time DATETIME NOT NULL,
-						p_date TEXT NOT NULL,
-						p_shift TEXT NOT NULL,
-						p_shift_date TEXT NOT NULL,
-						sku TEXT NOT NULL,
-						sequence_id INTEGER,
-						final_result TEXT NOT NULL,
-						cam1_result INTEGER,
-						cam2_result INTEGER,
-						cam3_result INTEGER,
-						cam4_result INTEGER,
-						cam5_result INTEGER,
-						ng_异物 INTEGER DEFAULT 0,
-						ng_管盖有无 INTEGER DEFAULT 0,
-						ng_管口圆度 INTEGER DEFAULT 0,
-						ng_正面工号不齐 INTEGER DEFAULT 0,
-						ng_背面工号不齐 INTEGER DEFAULT 0,
-						ng_PCode INTEGER DEFAULT 0,
-						ng_色标对中 INTEGER DEFAULT 0,
-						ng_爆管 INTEGER DEFAULT 0,
-						ng_斜口 INTEGER DEFAULT 0,
-						ng_未剪断 INTEGER DEFAULT 0,
-						defect_detail TEXT,
-						defect_count INTEGER DEFAULT 0,
-						is_excluded INTEGER DEFAULT 0,
-						excluded_reason TEXT,
-						created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-					)";
-
-				string createSummary = @"
-					CREATE TABLE IF NOT EXISTS production_records_summary (
-						id INTEGER PRIMARY KEY AUTOINCREMENT,
-						p_date TEXT NOT NULL,
-						p_shift TEXT NOT NULL,
-						sku TEXT NOT NULL,
-						total_count INTEGER DEFAULT 0,
-						ok_count INTEGER DEFAULT 0,
-						ng_count INTEGER DEFAULT 0,
-						ng_异物 INTEGER DEFAULT 0,
-						ng_管盖有无 INTEGER DEFAULT 0,
-						ng_管口圆度 INTEGER DEFAULT 0,
-						ng_正面工号不齐 INTEGER DEFAULT 0,
-						ng_背面工号不齐 INTEGER DEFAULT 0,
-						ng_PCode INTEGER DEFAULT 0,
-						ng_色标对中 INTEGER DEFAULT 0,
-						ng_爆管 INTEGER DEFAULT 0,
-						ng_斜口 INTEGER DEFAULT 0,
-						ng_未剪断 INTEGER DEFAULT 0,
-						ng_混合多种缺陷 INTEGER DEFAULT 0,
-						continuous_exclude_count INTEGER DEFAULT 0,
-						yield_rate REAL DEFAULT 0,
-						summary_date TEXT DEFAULT CURRENT_DATE,
-						UNIQUE(p_date, p_shift, sku)
-					)";
-
-				this.ExecuteProdNonQuery(createDetail);
-				this.ExecuteProdNonQuery(createSummary);
-			}
-			catch (Exception ex)
-			{
-				this._log.SaveLog($"创建表异常: {ex.Message}");
-			}
-		}
-
-		private void GenerateMockData()
-		{
-			try
-			{
-				Random rand = new Random();
-				string[] skus = { "SKU-A", "SKU-B", "SKU-C", "SKU-D" };
-				string[] shifts = { "早班", "中班", "夜班" };
-				string[] defectTypes = { "管内异物", "管盖有无", "管口圆度", "正面工号不齐",
-										  "背面工号不齐", "P-Code", "色标对中", "爆管",
-										  "斜口", "未剪断" };
-
-				int consecutiveBurst = 0;
-				long lastSeq = 0;
-
-				for (int i = 0; i < 150; i++)
-				{
-					DateTime dt = DateTime.Now.AddDays(-rand.Next(15)).AddHours(rand.Next(24));
-					string shift = GetShiftByHour(dt.Hour);
-					string sku = skus[rand.Next(skus.Length)];
-
-					bool isBurst = rand.Next(100) < 8;
-					bool isExcluded = false;
-
-					if (isBurst)
-					{
-						if (lastSeq == i - 1) consecutiveBurst++;
-						else consecutiveBurst = 1;
-						if (consecutiveBurst >= 3) isExcluded = true;
-						lastSeq = i;
-					}
-					else
-					{
-						consecutiveBurst = 0;
-					}
-
-					bool isOk = rand.Next(100) < 85;
-					if (isBurst) isOk = false;
-					string result = isOk ? "OK" : "NG";
-
-					string defectDetail = "";
-					int defectCount = 0;
-					int ng1 = 0, ng2 = 0, ng3 = 0, ng4 = 0, ng5 = 0, ng6 = 0, ng7 = 0, ng8 = 0, ng9 = 0, ng10 = 0;
-
-					if (!isOk && !isBurst)
-					{
-						defectCount = rand.Next(1, 3);
-						var selected = new List<string>();
-						for (int j = 0; j < defectCount; j++)
-							selected.Add(defectTypes[rand.Next(defectTypes.Length)]);
-						selected = selected.Distinct().ToList();
-						defectCount = selected.Count;
-						defectDetail = string.Join("、", selected);
-
-						foreach (var d in selected)
-						{
-							if (d == "管内异物") ng1 = 1;
-							else if (d == "管盖有无") ng2 = 1;
-							else if (d == "管口圆度") ng3 = 1;
-							else if (d == "正面工号不齐") ng4 = 1;
-							else if (d == "背面工号不齐") ng5 = 1;
-							else if (d == "P-Code") ng6 = 1;
-							else if (d == "色标对中") ng7 = 1;
-							else if (d == "爆管") ng8 = 1;
-							else if (d == "斜口") ng9 = 1;
-							else if (d == "未剪断") ng10 = 1;
-						}
-					}
-					else if (isBurst)
-					{
-						defectDetail = "爆管";
-						defectCount = 1;
-						ng8 = 1;
-					}
-
-					string shiftDate = shift == "夜班" ? dt.AddDays(-1).ToString("yyyy-MM-dd") : dt.ToString("yyyy-MM-dd");
-
-					string insertDetail = @"
-						INSERT INTO production_records_detail 
-						(p_time, p_date, p_shift, p_shift_date, sku, sequence_id, final_result,
-						 ng_异物, ng_管盖有无, ng_管口圆度, ng_正面工号不齐, ng_背面工号不齐,
-						 ng_PCode, ng_色标对中, ng_爆管, ng_斜口, ng_未剪断,
-						 defect_detail, defect_count, is_excluded)
-						VALUES 
-						(@time, @date, @shift, @shiftDate, @sku, @seq, @result,
-						 @ng1, @ng2, @ng3, @ng4, @ng5, @ng6, @ng7, @ng8, @ng9, @ng10,
-						 @detail, @count, @excluded)";
-
-					this.ExecuteProdNonQuery(insertDetail,
-						new SQLiteParameter("@time", dt),
-						new SQLiteParameter("@date", dt.ToString("yyyy-MM-dd")),
-						new SQLiteParameter("@shift", shift),
-						new SQLiteParameter("@shiftDate", shiftDate),
-						new SQLiteParameter("@sku", sku),
-						new SQLiteParameter("@seq", i + 1),
-						new SQLiteParameter("@result", result),
-						new SQLiteParameter("@ng1", ng1), new SQLiteParameter("@ng2", ng2),
-						new SQLiteParameter("@ng3", ng3), new SQLiteParameter("@ng4", ng4),
-						new SQLiteParameter("@ng5", ng5), new SQLiteParameter("@ng6", ng6),
-						new SQLiteParameter("@ng7", ng7), new SQLiteParameter("@ng8", ng8),
-						new SQLiteParameter("@ng9", ng9), new SQLiteParameter("@ng10", ng10),
-						new SQLiteParameter("@detail", defectDetail),
-						new SQLiteParameter("@count", defectCount),
-						new SQLiteParameter("@excluded", isExcluded ? 1 : 0));
-				}
-
-				string summarySql = @"
-					INSERT OR REPLACE INTO production_records_summary
-					SELECT 
-						p_shift_date as p_date, p_shift, sku,
-						COUNT(*) as total_count,
-						SUM(CASE WHEN final_result='OK' AND is_excluded=0 THEN 1 ELSE 0 END) as ok_count,
-						SUM(CASE WHEN final_result='NG' AND is_excluded=0 THEN 1 ELSE 0 END) as ng_count,
-						SUM(CASE WHEN defect_count=1 AND ng_异物=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng_异物,
-						SUM(CASE WHEN defect_count=1 AND ng_管盖有无=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng_管盖有无,
-						SUM(CASE WHEN defect_count=1 AND ng_管口圆度=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng_管口圆度,
-						SUM(CASE WHEN defect_count=1 AND ng_正面工号不齐=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng_正面工号不齐,
-						SUM(CASE WHEN defect_count=1 AND ng_背面工号不齐=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng_背面工号不齐,
-						SUM(CASE WHEN defect_count=1 AND ng_PCode=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng_PCode,
-						SUM(CASE WHEN defect_count=1 AND ng_色标对中=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng_色标对中,
-						SUM(CASE WHEN defect_count=1 AND ng_爆管=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng_爆管,
-						SUM(CASE WHEN defect_count=1 AND ng_斜口=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng_斜口,
-						SUM(CASE WHEN defect_count=1 AND ng_未剪断=1 AND is_excluded=0 THEN 1 ELSE 0 END) as ng_未剪断,
-						SUM(CASE WHEN defect_count>=2 AND is_excluded=0 THEN 1 ELSE 0 END) as ng_混合多种缺陷,
-						SUM(CASE WHEN is_excluded=1 THEN 1 ELSE 0 END) as continuous_exclude_count,
-						ROUND(CAST(SUM(CASE WHEN final_result='OK' AND is_excluded=0 THEN 1 ELSE 0 END) AS REAL) / 
-							NULLIF(SUM(CASE WHEN is_excluded=0 THEN 1 ELSE 0 END), 0) * 100, 2) as yield_rate
-					FROM production_records_detail
-					GROUP BY p_shift_date, p_shift, sku";
-
-				this.ExecuteProdNonQuery(summarySql);
-				this._log.SaveLog("模拟数据生成成功");
-			}
-			catch (Exception ex)
-			{
-				this._log.SaveLog($"模拟数据异常: {ex.Message}");
-			}
-		}
-
-		private string GetShiftByHour(int hour)
-		{
-			if (hour >= 8 && hour <= 15) return "早班";
-			if (hour >= 16 && hour <= 23) return "中班";
-			return "夜班";
-		}
-
-		private void UiComboBox3_SelectedIndexChanged(object sender, EventArgs e)
-		{
-			bool isDetail = this.uiComboBox3 != null && this.uiComboBox3.SelectedIndex == 1;
-			this.currentMode = isDetail ? "detail" : "summary";
-
-			if (this.pnlDefectFilter != null) this.pnlDefectFilter.Visible = isDetail;
-
-			if (customGrid != null)
-			{
-				if (isDetail)
-				{
-					customGrid.Location = new Point(0, 215);
-					customGrid.Height = this.ClientSize.Height - 260;
-				}
-				else
-				{
-					customGrid.Location = new Point(0, 50);
-					customGrid.Height = this.ClientSize.Height - 95;
-				}
-				// 刷新表格
-				RefreshGridData();
-			}
-
-			LoadData();
-		}
-
-		private void LoadData()
-		{
-			try
-			{
-				string sql = (this.currentMode == "summary")
-					? "SELECT * FROM production_records_summary ORDER BY p_date DESC, p_shift, sku"
-					: "SELECT * FROM production_records_detail ORDER BY p_time DESC";
-
-				_currentData = this.ExecuteProdQuery(sql);
+				// 将查库操作放入后台线程，绝对不阻塞UI
+				_currentData = await Task.Run(() => ExecuteProdQuery(sql, parameters.ToArray()));
 
 				if (_currentData != null && _currentData.Rows.Count > 0)
 				{
@@ -626,504 +692,366 @@ namespace SetProduct
 				}
 				else
 				{
-					if (customGrid != null) customGrid.SetData(new List<DataRow>(), null, null);
+					dgvRecords.DataSource = null;
+					dgvRecords.Columns.Clear();
 					UpdateStatistics();
 				}
 			}
 			catch (Exception ex)
 			{
-				this._log.SaveLog($"加载数据异常: {ex.Message}");
-				if (customGrid != null) customGrid.SetData(new List<DataRow>(), null, null);
+				_log.SaveLog($"加载数据异常: {ex.Message}");
+				MessageBox.Show($"加载数据异常：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+			}
+			finally
+			{
+				this.Cursor = Cursors.Default;
 			}
 		}
 
-		private void UpdateStatistics()
-		{
-			if (_currentData == null || _currentData.Rows.Count == 0)
-			{
-				if (this.totalTxt != null) this.totalTxt.Text = "0";
-				if (this.okTxt != null) this.okTxt.Text = "0";
-				if (this.ngTxt != null) this.ngTxt.Text = "0";
-				if (this.yieldTxt != null) this.yieldTxt.Text = "0.00%";
-				return;
-			}
+		private void RefreshGridData()
+        {
+            if (_currentData == null || _currentData.Rows.Count == 0)
+            {
+                dgvRecords.DataSource = null;
+                dgvRecords.Columns.Clear();
+                return;
+            }
 
-			int total = _currentData.Rows.Count;
-			int ok = 0, ng = 0;
+            ConfigureGridColumns();
 
-			if (this.currentMode == "summary")
-			{
-				foreach (DataRow row in _currentData.Rows)
-				{
-					ok += Convert.ToInt32(row["ok_count"]);
-					ng += Convert.ToInt32(row["ng_count"]);
-				}
-				total = ok + ng;
-			}
-			else
-			{
-				foreach (DataRow row in _currentData.Rows)
-				{
-					if (row["final_result"].ToString() == "OK") ok++;
-					else ng++;
-				}
-			}
+            var displayData = _currentData.Clone();
+            int start = (_currentPage - 1) * _pageSize;
+            int end = Math.Min(start + _pageSize, _currentData.Rows.Count);
 
-			if (this.totalTxt != null) this.totalTxt.Text = total.ToString();
-			if (this.okTxt != null) this.okTxt.Text = ok.ToString();
-			if (this.ngTxt != null) this.ngTxt.Text = ng.ToString();
-			double yield = total > 0 ? (double)ok / total * 100 : 0;
-			if (this.yieldTxt != null) this.yieldTxt.Text = yield.ToString("F2") + "%";
-		}
+            for (int i = start; i < end; i++)
+            {
+                displayData.ImportRow(_currentData.Rows[i]);
+            }
 
-		private void findBtn_Click(object sender, EventArgs e)
-		{
-			try
-			{
-				string startDate = this.startTime?.Value.ToString("yyyy-MM-dd") ?? DateTime.Now.AddDays(-7).ToString("yyyy-MM-dd");
-				string endDate = this.endTime?.Value.ToString("yyyy-MM-dd") ?? DateTime.Now.ToString("yyyy-MM-dd");
-				string resultFilter = this.uiComboBox2?.SelectedItem?.ToString();
-				string searchText = this.uiTextBox1?.Text.Trim() ?? "";
+            dgvRecords.DataSource = displayData;
+            UpdatePageInfo();
+        }
 
-				string sql;
-				var parameters = new List<SQLiteParameter>();
+        private void ConfigureGridColumns()
+        {
+            dgvRecords.AutoGenerateColumns = false;
+            dgvRecords.Columns.Clear();
+            dgvRecords.CellFormatting -= DgvRecords_SummaryCellFormatting;
+            dgvRecords.CellFormatting -= DgvRecords_DetailCellFormatting;
 
-				if (this.currentMode == "summary")
-				{
-					sql = "SELECT * FROM production_records_summary WHERE 1=1";
-					sql += " AND p_date >= @start AND p_date <= @end";
-					parameters.Add(new SQLiteParameter("@start", startDate));
-					parameters.Add(new SQLiteParameter("@end", endDate));
-					if (!string.IsNullOrEmpty(searchText))
-					{
-						sql += " AND (sku LIKE @search)";
-						parameters.Add(new SQLiteParameter("@search", $"%{searchText}%"));
-					}
-					sql += " ORDER BY p_date DESC, p_shift, sku";
-				}
-				else
-				{
-					sql = "SELECT * FROM production_records_detail WHERE 1=1";
-					sql += " AND p_date >= @start AND p_date <= @end";
-					parameters.Add(new SQLiteParameter("@start", startDate));
-					parameters.Add(new SQLiteParameter("@end", endDate));
-					if (!string.IsNullOrEmpty(searchText))
-					{
-						sql += " AND (sku LIKE @search OR sequence_id LIKE @search)";
-						parameters.Add(new SQLiteParameter("@search", $"%{searchText}%"));
-					}
-					if (resultFilter != null && resultFilter != "全部")
-					{
-						sql += " AND final_result = @result";
-						parameters.Add(new SQLiteParameter("@result", resultFilter));
-					}
-					string defectCondition = GetDefectCondition();
-					if (!string.IsNullOrEmpty(defectCondition))
-					{
-						sql += $" AND ({defectCondition})";
-					}
-					sql += " ORDER BY p_time DESC";
-				}
+            if (currentMode == "summary")
+            {
+                AddSummaryColumns();
+                dgvRecords.CellFormatting += DgvRecords_SummaryCellFormatting;
+            }
+            else
+            {
+                AddDetailColumns();
+                dgvRecords.CellFormatting += DgvRecords_DetailCellFormatting;
+            }
+        }
 
-				_currentData = this.ExecuteProdQuery(sql, parameters.ToArray());
+        private void AddSummaryColumns()
+        {
+            var columns = new List<Tuple<string, string, int>>
+            {
+                Tuple.Create("p_date", "统计日期", 110),
+                Tuple.Create("p_shift", "班次", 70),
+                Tuple.Create("sku", "SKU", 130),
+                Tuple.Create("total_count", "总检数", 80),
+                Tuple.Create("ok_count", "OK数", 80),
+                Tuple.Create("ng_count", "NG数", 80),
+                Tuple.Create("ng_异物", "管内异物", 80),
+                Tuple.Create("ng_管盖有无", "管盖有无", 80),
+                Tuple.Create("ng_管口圆度", "管口圆度", 80),
+                Tuple.Create("ng_正面工号缺失", "正面缺失", 90),
+                Tuple.Create("ng_背面工号缺失", "背面缺失", 90),
+                Tuple.Create("ng_PCode", "P-Code", 80),
+                Tuple.Create("ng_色标对中", "色标对中", 80),
+                Tuple.Create("ng_爆管", "爆管", 70),
+                Tuple.Create("ng_斜口", "斜口", 70),
+                Tuple.Create("ng_未剪断", "未剪断", 80),
+                Tuple.Create("ng_混合多种缺陷", "混合缺陷", 90),
+                Tuple.Create("continuous_exclude_count", "连续爆管剔除", 100),
+                Tuple.Create("yield_rate", "良率%", 80)
+            };
 
-				if (_currentData != null)
-				{
-					_totalPages = (int)Math.Ceiling((double)_currentData.Rows.Count / _pageSize);
-					_currentPage = 1;
-					RefreshGridData();
-					UpdateStatistics();
-				}
-			}
-			catch (Exception ex)
-			{
-				this._log.SaveLog("查询数据异常: " + ex.Message);
-				MessageBox.Show($"查询失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-			}
-		}
+            foreach (var col in columns)
+            {
+                if (_currentData.Columns.Contains(col.Item1))
+                {
+                    dgvRecords.Columns.Add(new DataGridViewTextBoxColumn
+                    {
+                        Name = col.Item1,
+                        HeaderText = col.Item2,
+                        DataPropertyName = col.Item1,
+                        Width = col.Item3,
+                        ReadOnly = true,
+                        DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleCenter }
+                    });
+                }
+            }
+        }
 
-		private string GetDefectCondition()
-		{
-			var map = new Dictionary<string, string>
-			{
-				{"管内异物", "ng_异物 = 1"}, {"管盖有无", "ng_管盖有无 = 1"},
-				{"管口圆度", "ng_管口圆度 = 1"}, {"正面工号不齐", "ng_正面工号不齐 = 1"},
-				{"背面工号不齐", "ng_背面工号不齐 = 1"}, {"P-Code", "ng_PCode = 1"},
-				{"色标对中", "ng_色标对中 = 1"}, {"爆管", "ng_爆管 = 1"},
-				{"斜口", "ng_斜口 = 1"}, {"未剪断", "ng_未剪断 = 1"},
-				{"混合多种缺陷", "defect_count >= 2"}
-			};
-			var selected = this._defectChecks.Where(c => c.Checked && map.ContainsKey(c.Text)).Select(c => map[c.Text]);
-			return string.Join(" OR ", selected);
-		}
+        private void AddDetailColumns()
+        {
+            var columns = new List<Tuple<string, string, int>>
+            {
+                Tuple.Create("p_time", "检测时间", 170),
+                Tuple.Create("p_date", "检测日期", 110),
+                Tuple.Create("p_shift", "班次", 70),
+                Tuple.Create("sku", "SKU", 130),
+                Tuple.Create("sequence_id", "流水号", 90),
+                Tuple.Create("final_result", "结果", 70),
+                Tuple.Create("defect_detail", "缺陷详情", 350),
+                Tuple.Create("defect_count", "缺陷数", 80)
+            };
 
-		private void resetBtn_Click(object sender, EventArgs e)
-		{
-			if (this.startTime != null) this.startTime.Value = DateTime.Now.AddDays(-7);
-			if (this.endTime != null) this.endTime.Value = DateTime.Now;
-			if (this.uiTextBox1 != null) this.uiTextBox1.Text = "";
-			if (this.uiComboBox2 != null) this.uiComboBox2.SelectedIndex = 0;
-			this._defectChecks.ForEach(c => c.Checked = true);
-			LoadData();
-		}
+            foreach (var col in columns)
+            {
+                if (_currentData.Columns.Contains(col.Item1))
+                {
+                    dgvRecords.Columns.Add(new DataGridViewTextBoxColumn
+                    {
+                        Name = col.Item1,
+                        HeaderText = col.Item2,
+                        DataPropertyName = col.Item1,
+                        Width = col.Item3,
+                        ReadOnly = true,
+                        DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleCenter }
+                    });
+                }
+            }
+        }
 
-		private void saveBtn_Click(object sender, EventArgs e)
-		{
-			if (_currentData == null || _currentData.Rows.Count == 0)
-			{
-				MessageBox.Show("没有数据可导出！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-				return;
-			}
+        private void DgvRecords_SummaryCellFormatting(object sender, DataGridViewCellFormattingEventArgs e)
+        {
+            if (e.ColumnIndex >= 0 && e.ColumnIndex < dgvRecords.Columns.Count && dgvRecords.Columns[e.ColumnIndex].Name == "yield_rate" && e.Value != null)
+            {
+                if (decimal.TryParse(e.Value.ToString(), out decimal yield))
+                {
+                    e.Value = yield.ToString("F2");
+                    e.FormattingApplied = true;
+                }
+            }
+        }
 
-			SaveFileDialog sfd = new SaveFileDialog
-			{
-				Filter = "CSV文件|*.csv",
-				FileName = $"生产记录_{this.currentMode}_{DateTime.Now:yyyyMMddHHmmss}"
-			};
-			if (sfd.ShowDialog() != DialogResult.OK) return;
+        private void DgvRecords_DetailCellFormatting(object sender, DataGridViewCellFormattingEventArgs e)
+        {
+            if (e.ColumnIndex >= 0 && e.ColumnIndex < dgvRecords.Columns.Count)
+            {
+                string colName = dgvRecords.Columns[e.ColumnIndex].Name;
 
-			try
-			{
-				var headers = GetColumnHeaders();
-				using (StreamWriter sw = new StreamWriter(sfd.FileName, false, Encoding.UTF8))
-				{
-					// 写入中文表头
-					for (int i = 0; i < headers.Count; i++)
-					{
-						if (i > 0) sw.Write(",");
-						sw.Write(headers[i].DisplayName);
-					}
-					sw.WriteLine();
+                if (colName == "final_result" && e.Value != null)
+                {
+                    string result = e.Value.ToString();
+                    if (result == "OK")
+                    {
+                        e.CellStyle.BackColor = Color.FromArgb(230, 250, 230);
+                        e.CellStyle.ForeColor = Color.FromArgb(103, 194, 58);
+                    }
+                    else if (result == "NG")
+                    {
+                        e.CellStyle.BackColor = Color.FromArgb(253, 242, 242);
+                        e.CellStyle.ForeColor = Color.FromArgb(245, 108, 108);
+                    }
+                }
+            }
+        }
 
-					// 写入数据
-					foreach (DataRow row in _currentData.Rows)
-					{
-						for (int i = 0; i < headers.Count; i++)
-						{
-							if (i > 0) sw.Write(",");
-							string val = row[headers[i].ColumnName]?.ToString() ?? "";
-							if (val.Contains(",")) val = "\"" + val + "\"";
-							sw.Write(val);
-						}
-						sw.WriteLine();
-					}
-				}
-				MessageBox.Show("导出成功！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-			}
-			catch (Exception ex)
-			{
-				MessageBox.Show($"导出失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-			}
-		}
+        private void UpdateStatistics()
+        {
+            if (_currentData == null || _currentData.Rows.Count == 0)
+            {
+                lblTotal.Text = "0";
+                lblOK.Text = "0";
+                lblNG.Text = "0";
+                lblYield.Text = "0.00%";
+                return;
+            }
 
-		protected override void OnResize(EventArgs e)
-		{
-			base.OnResize(e);
+            int total = 0, ok = 0, ng = 0, excludeCount = 0;
 
-			if (this.pnlDefectFilter != null)
-			{
-				this.pnlDefectFilter.Width = this.ClientSize.Width - 30;
-				if (this.flpDefect != null) this.flpDefect.Width = this.pnlDefectFilter.Width - 170;
-				if (this.btnDefectAll != null) this.btnDefectAll.Location = new Point(this.pnlDefectFilter.Width - 105, 12);
-				if (this.btnDefectClear != null) this.btnDefectClear.Location = new Point(this.pnlDefectFilter.Width - 52, 12);
-			}
+            if (currentMode == "summary")
+            {
+                foreach (DataRow row in _currentData.Rows)
+                {
+                    total += Convert.ToInt32(row["total_count"]);
+                    ok += Convert.ToInt32(row["ok_count"]);
+                    ng += Convert.ToInt32(row["ng_count"]);
+                    if (_currentData.Columns.Contains("continuous_exclude_count"))
+                    {
+                        excludeCount += Convert.ToInt32(row["continuous_exclude_count"]);
+                    }
+                }
+            }
+            else
+            {
+                foreach (DataRow row in _currentData.Rows)
+                {
+                    total++;
+                    if (row["final_result"].ToString() == "OK") ok++;
+                    else ng++;
+                    if (_currentData.Columns.Contains("is_excluded"))
+                    {
+                        if (Convert.ToInt32(row["is_excluded"]) == 1)
+                        {
+                            excludeCount++;
+                        }
+                    }
+                }
+            }
 
-			if (customGrid != null)
-			{
-				customGrid.Width = this.ClientSize.Width;
-				if (this.currentMode == "detail")
-				{
-					customGrid.Location = new Point(0, 215);
-					customGrid.Height = this.ClientSize.Height - 260;
-				}
-				else
-				{
-					customGrid.Location = new Point(0, 50);
-					customGrid.Height = this.ClientSize.Height - 95;
-				}
-				// 刷新表格以适应新尺寸
-				customGrid.RefreshLayout();
-			}
+            lblTotal.Text = total.ToString("N0");
+            lblOK.Text = ok.ToString("N0");
+            lblNG.Text = ng.ToString("N0");
+            
+            // 良率计算公式：良率 = OK合格数 ÷（总检测数 - 被剔除的连续爆管异常数量）
+            double effectiveCount = total - excludeCount;
+            double yield = effectiveCount > 0 ? (double)ok / effectiveCount * 100 : 0;
+            lblYield.Text = yield.ToString("F2") + "%";
+        }
 
-			if (pnlPage != null)
-			{
-				btnPrev.Location = new Point(pnlPage.Width - 260, 6);
-				lblPageInfo.Location = new Point(pnlPage.Width - 170, 10);
-				btnNext.Location = new Point(pnlPage.Width - 85, 6);
-			}
-		}
-	}
+        private void UpdatePageInfo()
+        {
+            lblPageInfo.Text = $"第 {_currentPage} / {_totalPages} 页";
+            btnPrev.Enabled = _currentPage > 1;
+            btnNext.Enabled = _currentPage < _totalPages;
+        }
 
-	// 列头信息类
-	public class ColumnHeaderInfo
-	{
-		public string ColumnName { get; set; }
-		public string DisplayName { get; set; }
-		public int Width { get; set; }
+        private void BtnSearch_Click(object sender, EventArgs e)
+        {
+            LoadData();
+        }
 
-		public ColumnHeaderInfo(string colName, string displayName, int width)
-		{
-			ColumnName = colName;
-			DisplayName = displayName;
-			Width = width;
-		}
-	}
+        private void BtnReset_Click(object sender, EventArgs e)
+        {
+            dtStart.Value = DateTime.Now.AddDays(-7);
+            dtEnd.Value = DateTime.Now;
+            cboShift.SelectedIndex = 0;
+            cboResult.SelectedIndex = 0;
+            txtSearch.Text = "";
+            LoadData();
+        }
 
-	/// <summary>
-	/// GDI+ 高性能自定义表格控件 - 支持水平滚动和中文列名
-	/// </summary>
-	public class CustomDataGridView : Control
-	{
-		private List<DataRow> _dataRows = new List<DataRow>();
-		private DataColumnCollection _columns;
-		private List<ColumnHeaderInfo> _columnHeaders;
-		private int _rowHeight = 32;
-		private int _headerHeight = 36;
-		private int _scrollY = 0;
-		private int _scrollX = 0;
-		private int _visibleRows = 10;
-		private int _visibleCols = 8;
-		private int _hoverRow = -1;
+        private void BtnPrev_Click(object sender, EventArgs e)
+        {
+            if (_currentPage > 1)
+            {
+                _currentPage--;
+                RefreshGridData();
+            }
+        }
 
-		private Font _headerFont = new Font("微软雅黑", 10, FontStyle.Bold);
-		private Font _cellFont = new Font("微软雅黑", 9);
-		private Brush _headerBg = new SolidBrush(Color.FromArgb(47, 60, 76));
-		private Brush _headerText = new SolidBrush(Color.White);
-		private Brush _rowEven = new SolidBrush(Color.White);
-		private Brush _rowOdd = new SolidBrush(Color.FromArgb(248, 249, 250));
-		private Brush _rowHover = new SolidBrush(Color.FromArgb(230, 240, 255));
-		private Brush _ngBg = new SolidBrush(Color.FromArgb(255, 230, 230));
-		private Pen _gridPen = new Pen(Color.FromArgb(230, 235, 240));
+        private void BtnNext_Click(object sender, EventArgs e)
+        {
+            if (_currentPage < _totalPages)
+            {
+                _currentPage++;
+                RefreshGridData();
+            }
+        }
 
-		private int[] _colWidths;
-		private int _totalWidth;
-		private int _totalRows;
-		private VScrollBar _vScroll;
-		private HScrollBar _hScroll;
+        private void BtnExport_Click(object sender, EventArgs e)
+        {
+            if (_currentData == null || _currentData.Rows.Count == 0)
+            {
+                MessageBox.Show("没有数据可导出！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
 
-		public CustomDataGridView()
-		{
-			this.SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.DoubleBuffer | ControlStyles.ResizeRedraw, true);
-			this.BackColor = Color.White;
+            SaveFileDialog sfd = new SaveFileDialog
+            {
+                Filter = "CSV文件|*.csv",
+                FileName = $"生产记录_{currentMode}_{DateTime.Now:yyyyMMddHHmmss}",
+                DefaultExt = ".csv"
+            };
+            if (sfd.ShowDialog() != DialogResult.OK) return;
 
-			_vScroll = new VScrollBar { Dock = DockStyle.Right, Width = 18, SmallChange = 1, LargeChange = 10 };
-			_vScroll.Scroll += (s, e) => { _scrollY = _vScroll.Value; this.Invalidate(); };
+            try
+            {
+                var headers = GetExportHeaders();
+                using (StreamWriter sw = new StreamWriter(sfd.FileName, false, System.Text.Encoding.UTF8))
+                {
+                    sw.WriteLine(string.Join(",", headers.Select(h => h.Item2)));
 
-			_hScroll = new HScrollBar { Dock = DockStyle.Bottom, Height = 18, SmallChange = 20, LargeChange = 50 };
-			_hScroll.Scroll += (s, e) => { _scrollX = _hScroll.Value; this.Invalidate(); };
+                    foreach (DataRow row in _currentData.Rows)
+                    {
+                        List<string> values = new List<string>();
+                        foreach (var header in headers)
+                        {
+                            string val = row[header.Item1]?.ToString() ?? "";
 
-			this.Controls.Add(_vScroll);
-			this.Controls.Add(_hScroll);
-		}
+                            if (val.Contains(",") || val.Contains("\"") || val.Contains("\n"))
+                            {
+                                val = "\"" + val.Replace("\"", "\"\"") + "\"";
+                            }
+                            values.Add(val);
+                        }
+                        sw.WriteLine(string.Join(",", values));
+                    }
+                }
+                MessageBox.Show("导出成功！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"导出失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
 
-		public void SetData(List<DataRow> rows, DataColumnCollection cols, List<ColumnHeaderInfo> headers)
-		{
-			_dataRows = rows ?? new List<DataRow>();
-			_columns = cols;
-			_columnHeaders = headers;
-			_totalRows = _dataRows.Count;
+        private List<Tuple<string, string>> GetExportHeaders()
+        {
+            if (currentMode == "summary")
+            {
+                return new List<Tuple<string, string>>
+                {
+                    Tuple.Create("p_date", "统计日期"),
+                    Tuple.Create("p_shift", "班次"),
+                    Tuple.Create("sku", "SKU"),
+                    Tuple.Create("total_count", "总检数"),
+                    Tuple.Create("ok_count", "OK数"),
+                    Tuple.Create("ng_count", "NG数"),
+                    Tuple.Create("ng_异物", "管内异物"),
+                    Tuple.Create("ng_管盖有无", "管盖有无"),
+                    Tuple.Create("ng_管口圆度", "管口圆度"),
+                    Tuple.Create("ng_正面工号缺失", "正面工号缺失"),
+                    Tuple.Create("ng_背面工号缺失", "背面工号缺失"),
+                    Tuple.Create("ng_PCode", "P-Code"),
+                    Tuple.Create("ng_色标对中", "色标对中"),
+                    Tuple.Create("ng_爆管", "爆管"),
+                    Tuple.Create("ng_斜口", "斜口"),
+                    Tuple.Create("ng_未剪断", "未剪断"),
+                    Tuple.Create("ng_混合多种缺陷", "混合缺陷"),
+                    Tuple.Create("continuous_exclude_count", "连续爆管剔除"),
+                    Tuple.Create("yield_rate", "良率%")
+                };
+            }
+            else
+            {
+                return new List<Tuple<string, string>>
+                {
+                    Tuple.Create("p_time", "检测时间"),
+                    Tuple.Create("p_date", "检测日期"),
+                    Tuple.Create("p_shift", "班次"),
+                    Tuple.Create("sku", "SKU"),
+                    Tuple.Create("sequence_id", "流水号"),
+                    Tuple.Create("final_result", "结果"),
+                    Tuple.Create("defect_detail", "缺陷详情"),
+                    Tuple.Create("defect_count", "缺陷数")
+                };
+            }
+        }
 
-			if (_columnHeaders != null && _columnHeaders.Count > 0)
-			{
-				_colWidths = _columnHeaders.Select(h => h.Width).ToArray();
-				_totalWidth = _colWidths.Sum();
-			}
-			else if (_columns != null && _columns.Count > 0)
-			{
-				_colWidths = new int[_columns.Count];
-				_totalWidth = 0;
-				for (int i = 0; i < _columns.Count; i++)
-				{
-					_colWidths[i] = 100;
-					_totalWidth += 100;
-				}
-			}
-
-			UpdateScrollBars();
-			this.Invalidate();
-		}
-
-		public void RefreshLayout()
-		{
-			UpdateScrollBars();
-			this.Invalidate();
-		}
-
-		private void UpdateScrollBars()
-		{
-			int clientHeight = this.Height - _headerHeight - (_hScroll.Visible ? _hScroll.Height : 0);
-			_visibleRows = Math.Max(1, clientHeight / _rowHeight);
-
-			if (_totalRows > _visibleRows)
-			{
-				_vScroll.Visible = true;
-				_vScroll.Maximum = _totalRows - 1;
-				_vScroll.LargeChange = _visibleRows;
-			}
-			else
-			{
-				_vScroll.Visible = false;
-				_scrollY = 0;
-			}
-
-			int clientWidth = this.Width - (_vScroll.Visible ? _vScroll.Width : 0);
-			if (_totalWidth > clientWidth)
-			{
-				_hScroll.Visible = true;
-				_hScroll.Maximum = _totalWidth - clientWidth;
-				_hScroll.LargeChange = clientWidth / 2;
-				// 调整垂直滚动条的位置
-				if (_vScroll.Visible) _vScroll.Height = this.Height - _hScroll.Height;
-			}
-			else
-			{
-				_hScroll.Visible = false;
-				_scrollX = 0;
-				if (_vScroll.Visible) _vScroll.Height = this.Height;
-			}
-		}
-
-		protected override void OnResize(EventArgs e)
-		{
-			base.OnResize(e);
-			UpdateScrollBars();
-			this.Invalidate();
-		}
-
-		protected override void OnMouseMove(MouseEventArgs e)
-		{
-			base.OnMouseMove(e);
-			int row = (e.Y - _headerHeight) / _rowHeight + _scrollY;
-			int old = _hoverRow;
-			_hoverRow = (row >= 0 && row < _totalRows && e.Y > _headerHeight) ? row : -1;
-			if (old != _hoverRow) this.Invalidate();
-		}
-
-		protected override void OnMouseClick(MouseEventArgs e)
-		{
-			base.OnMouseClick(e);
-			int row = (e.Y - _headerHeight) / _rowHeight + _scrollY;
-			if (row >= 0 && row < _totalRows) this.OnDoubleClick(EventArgs.Empty);
-		}
-
-		protected override void OnMouseWheel(MouseEventArgs e)
-		{
-			base.OnMouseWheel(e);
-			int delta = e.Delta > 0 ? -3 : 3;
-			int val = _vScroll.Value + delta;
-			val = Math.Max(0, Math.Min(val, _vScroll.Maximum - _visibleRows + 1));
-			if (val != _vScroll.Value)
-			{
-				_vScroll.Value = val;
-				_scrollY = val;
-				this.Invalidate();
-			}
-		}
-
-		protected override void OnPaint(PaintEventArgs e)
-		{
-			base.OnPaint(e);
-			e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
-
-			if (_dataRows.Count == 0)
-			{
-				using (var brush = new SolidBrush(Color.FromArgb(150, 150, 150)))
-				using (var font = new Font("微软雅黑", 12))
-				{
-					string msg = "暂无数据";
-					SizeF sz = e.Graphics.MeasureString(msg, font);
-					e.Graphics.DrawString(msg, font, brush, (this.Width - sz.Width) / 2, (this.Height - sz.Height) / 2);
-				}
-				return;
-			}
-
-			if (_colWidths == null || _columnHeaders == null) return;
-
-			DrawHeader(e.Graphics);
-			DrawRows(e.Graphics);
-		}
-
-		private void DrawHeader(Graphics g)
-		{
-			g.FillRectangle(_headerBg, 0, 0, this.Width, _headerHeight);
-
-			int startCol = GetStartCol();
-			int endCol = Math.Min(startCol + _visibleCols + 2, _colWidths.Length);
-			int x = -_scrollX;
-
-			for (int i = 0; i < startCol; i++) x += _colWidths[i];
-
-			for (int i = startCol; i < endCol; i++)
-			{
-				int w = _colWidths[i];
-				if (x + w < 0) { x += w; continue; }
-				if (x > this.Width) break;
-
-				string text = i < _columnHeaders.Count ? _columnHeaders[i].DisplayName : _columns[i].ColumnName;
-
-				using (var fmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
-				{
-					g.DrawString(text, _headerFont, _headerText, new Rectangle(x, 0, w, _headerHeight), fmt);
-				}
-				g.DrawLine(_gridPen, x + w, 2, x + w, _headerHeight - 2);
-				x += w;
-			}
-			g.DrawLine(_gridPen, 0, _headerHeight - 1, this.Width, _headerHeight - 1);
-		}
-
-		private int GetStartCol()
-		{
-			int sum = 0;
-			for (int i = 0; i < _colWidths.Length; i++)
-			{
-				if (sum + _colWidths[i] > _scrollX) return i;
-				sum += _colWidths[i];
-			}
-			return 0;
-		}
-
-		private void DrawRows(Graphics g)
-		{
-			int startRow = _scrollY;
-			int endRow = Math.Min(startRow + _visibleRows + 1, _totalRows);
-			int y = _headerHeight;
-			int startCol = GetStartCol();
-			int endCol = Math.Min(startCol + _visibleCols + 2, _colWidths.Length);
-
-			for (int r = startRow; r < endRow; r++)
-			{
-				DataRow row = _dataRows[r];
-				Brush bg = (r == _hoverRow) ? _rowHover : ((r % 2 == 0) ? _rowEven : _rowOdd);
-				g.FillRectangle(bg, 0, y, this.Width, _rowHeight);
-
-				bool isNg = _columns != null && _columns.Contains("final_result") && row["final_result"]?.ToString() == "NG";
-				if (isNg) g.FillRectangle(_ngBg, 0, y, this.Width, _rowHeight);
-
-				int x = -_scrollX;
-				for (int i = 0; i < startCol; i++) x += _colWidths[i];
-
-				for (int c = startCol; c < endCol; c++)
-				{
-					int w = _colWidths[c];
-					if (x + w < 0) { x += w; continue; }
-					if (x > this.Width) break;
-
-					string text = row[c]?.ToString() ?? "";
-					Color textColor = isNg ? Color.FromArgb(200, 60, 60) : Color.FromArgb(60, 60, 60);
-
-					g.DrawLine(_gridPen, x, y, x + w, y);
-					g.DrawLine(_gridPen, x + w, y, x + w, y + _rowHeight);
-
-					using (var fmt = new StringFormat { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter })
-					using (var brush = new SolidBrush(textColor))
-					{
-						g.DrawString(text, _cellFont, brush, new Rectangle(x + 5, y, w - 10, _rowHeight), fmt);
-					}
-					x += w;
-				}
-				g.DrawLine(_gridPen, 0, y + _rowHeight, this.Width, y + _rowHeight);
-				y += _rowHeight;
-			}
-		}
-	}
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            if (btnPrev != null && lblPageInfo != null && btnNext != null)
+            {
+                int centerX = this.Width / 2;
+                btnPrev.Location = new Point(centerX - 220, 12);
+                lblPageInfo.Location = new Point(centerX - 50, 16);
+                btnNext.Location = new Point(centerX + 120, 12);
+            }
+        }
+    }
 }

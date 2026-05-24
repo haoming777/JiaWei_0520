@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.SQLite;
@@ -21,7 +21,29 @@ namespace CommonLib
 		/// <summary>
 		/// 数据库地址
 		/// </summary>
-		private string dataSource = Directory.GetCurrentDirectory() + @"\data\data.db";
+		//private string dataSource = Directory.GetCurrentDirectory() + @"\data\data.db";
+		private string dataSource = Directory.GetCurrentDirectory() + @"\data\data.db;Journal Mode=WAL;Pooling=True;Max Pool Size=100;";
+		/// <summary>
+		/// 默认构造函数
+		/// </summary>
+		public SQLiteHelper()
+		{
+		}
+
+		/// <summary>
+		/// 带数据库路径的构造函数
+		/// </summary>
+		public SQLiteHelper(string databasePath)
+		{
+			if (!string.IsNullOrEmpty(databasePath))
+			{
+				// 强制带上并发参数，防止路径传入时把高并发配置冲刷掉
+				if (!databasePath.Contains("Journal Mode=WAL"))
+					dataSource = databasePath + ";Journal Mode=WAL;Pooling=True;Max Pool Size=100;Synchronous=Normal;";
+				else
+					dataSource = databasePath;
+			}
+		}
 
 		/// <summary>
 		/// 用户 表名

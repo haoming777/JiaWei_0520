@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -112,6 +112,21 @@ namespace CommonLib
 			set
 			{
 				INIWriteValue(_iniPath, "system", "curSpec", value.ToString());
+			}
+		}
+
+		/// <summary>
+		/// 上次使用的SKU
+		/// </summary>
+		public string LastSku
+		{
+			get
+			{
+				return GetPrivateProfileString("system", "LastSku", "", _iniPath);
+			}
+			set
+			{
+				INIWriteValue(_iniPath, "system", "LastSku", value.ToString());
 			}
 		}
 
@@ -538,6 +553,21 @@ namespace CommonLib
 			set
 			{
 				INIWriteValue(_iniPath, "count", "ng_cam1", value.ToString());
+			}
+		}
+
+		/// <summary>
+		/// 连续爆管剔除数量
+		/// </summary>
+		public double burstExcludeCount
+		{
+			get
+			{
+				return GetPrivateProfileDouble("count", "burstExcludeCount", 0, _iniPath);
+			}
+			set
+			{
+				INIWriteValue(_iniPath, "count", "burstExcludeCount", value.ToString());
 			}
 		}
 

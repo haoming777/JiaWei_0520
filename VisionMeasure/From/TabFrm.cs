@@ -114,9 +114,20 @@ namespace VisionMeasure.From
 						//controlFrm.Show();
 						break;
 					case "生产记录":
-						RecordsFrm recordsFrm = new RecordsFrm();
-						recordsFrm.ShowDialog();
-
+						// 【关键修改】检查是否已经打开了记录窗体，避免无限制弹窗
+						RecordsFrm existingFrm = Application.OpenForms.OfType<RecordsFrm>().FirstOrDefault();
+						if (existingFrm != null)
+						{
+							// 如果已经打开，直接把它激活并带到最前面
+							existingFrm.WindowState = FormWindowState.Normal;
+							existingFrm.Activate();
+						}
+						else
+						{
+							// 如果没打开，才新建并显示
+							RecordsFrm recordsFrm = new RecordsFrm();
+							recordsFrm.Show();
+						}
 						break;
 					default:
 						break;
