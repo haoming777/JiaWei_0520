@@ -50,7 +50,7 @@ using static System.Windows.Forms.VisualStyles.VisualStyleElement.TaskbarClock;
 
 namespace VisionMeasure
 {
-	// ==================== 主窗体类1 ====================
+	// ==================== 主窗体类123 ====================
 
 	public partial class MainFrm : Form, ICamera
 	{
