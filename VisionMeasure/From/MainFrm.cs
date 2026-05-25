@@ -281,8 +281,19 @@ namespace VisionMeasure
 
 			InitializeDatabaseRecorder();
 
+			// 绑定导出按钮事件
+			exportBtn.Click += ExportBtn_Click;
+
 			// 加载保存的SKU
 			InitializeSavedSku();
+		}
+
+		/// <summary>
+		/// 导出按钮点击事件
+		/// </summary>
+		private void ExportBtn_Click(object sender, EventArgs e)
+		{
+			ManualSaveCurrentShiftReport();
 		}
 
 		/// <summary>
@@ -3571,65 +3582,11 @@ namespace VisionMeasure
 		/// </summary>
 		private void AutoSaveShiftReport(string date, string shift)
 		{
-			Task.Run(() =>
+			// 调用AsyncDatabaseRecorder的完整导出功能，异步执行，不影响主程序
+			if (_dbRecorder != null)
 			{
-				try
-				{
-					string imagePath = _Config.ImagePath;
-					if (string.IsNullOrEmpty(imagePath))
-						imagePath = Path.Combine(Directory.GetCurrentDirectory(), "image");
-
-					string reportDir = Path.Combine(imagePath, "Reports", date);
-					if (!Directory.Exists(reportDir))
-						Directory.CreateDirectory(reportDir);
-
-					// 获取该班次所有SKU的汇总数据
-					string sql = @"
-                SELECT 
-                    p_date as 日期,
-                    p_shift as 班次,
-                    sku as SKU,
-                    total_count as 总检数,
-                    ok_count as OK总数,
-                    ng_count as NG总数,
-                    ng_异物 as 管内异物NG数量,
-                    ng_管盖有无 as 管盖有无NG数量,
-                    ng_管口圆度 as 管口圆度NG数量,
-                    ng_正面工号缺失 as 正面工号缺失数量,
-                    ng_背面工号缺失 as 背面工号缺失数量,
-                    ng_PCode as [P-CodeNG数量],
-                    ng_色标对中 as 色标对中NG数量,
-                    ng_爆管 as 爆管数量,
-                    ng_斜口 as 斜口数量,
-                    ng_未剪断 as 未剪断数量,
-                    ng_混合多种缺陷 as 混合多种缺陷,
-                    continuous_exclude_count as 连续爆管剔除,
-                    yield_rate as 良率
-                FROM production_records_summary 
-                WHERE p_date = @date AND p_shift = @shift
-                ORDER BY sku";
-
-					// 这里需要执行SQL查询，使用之前创建的SQLiteHelper
-					// 由于SQLiteHelper在CommonLib命名空间，可以调用
-
-					// 生成Excel文件
-					string fileName = $"{date}_{shift}_生产报表.csv";
-					string filePath = Path.Combine(reportDir, fileName);
-
-					// 写入数据（简化版，实际可以从数据库查询后写入）
-					using (var writer = new StreamWriter(filePath, false, Encoding.UTF8))
-					{
-						writer.WriteLine("日期,班次,SKU,总检数,OK总数,NG总数,管内异物NG数量,管盖有无NG数量,管口圆度NG数量,正面工号缺失数量,背面工号缺失数量,P-CodeNG数量,色标对中NG数量,爆管数量,斜口数量,未剪断数量,混合多种缺陷,连续爆管剔除,良率(%)");
-						// 这里需要写入实际数据
-					}
-
-					toolClass.SaveLog($"班次报表已自动保存: {filePath}");
-				}
-				catch (Exception ex)
-				{
-					toolClass.SaveLog($"自动保存班次报表失败: {ex.Message}");
-				}
-			});
+				_dbRecorder.ExportFullShiftReport(date, shift);
+			}
 		}
 
 		/// <summary>
@@ -3639,9 +3596,13 @@ namespace VisionMeasure
 		{
 			if (!string.IsNullOrEmpty(_currentShiftDate) && !string.IsNullOrEmpty(_currentShift))
 			{
-				AutoSaveShiftReport(_currentShiftDate, _currentShift);
-				toolClass.SaveLog($"手动保存班次报表: {_currentShiftDate} {_currentShift}");
-				MessageBox.Show($"已保存{_currentShift}班次报表到存图路径下的Reports文件夹", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+				toolClass.SaveLog($"开始手动保存班次报表: {_currentShiftDate} {_currentShift}");
+
+				// 调用AsyncDatabaseRecorder的完整导出功能（异步执行，保存完成后自动打开文件夹）
+				if (_dbRecorder != null)
+				{
+					_dbRecorder.ExportFullShiftReport(_currentShiftDate, _currentShift, true);
+				}
 			}
 		}
 		#endregion

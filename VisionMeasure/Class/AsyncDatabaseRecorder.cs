@@ -682,6 +682,102 @@ namespace VisionMeasure
 			});
 		}
 
+		/// <summary>
+		/// 完整导出班次报表（包含所有SKU的汇总）
+		/// </summary>
+		/// <param name="date">班次归属日期</param>
+		/// <param name="shift">班次名称</param>
+		/// <param name="openFolderAfterExport">导出完成后是否打开文件夹</param>
+		public void ExportFullShiftReport(string date, string shift, bool openFolderAfterExport = false)
+		{
+			Task.Run(() =>
+			{
+				try
+				{
+					// 等待队列处理完成
+					while (_recordQueue.Count > 0)
+					{
+						Thread.Sleep(100);
+					}
+
+					// 首先生成所有SKU的汇总
+					GenerateShiftSummaryInternal(date, shift);
+
+					// 导出完整报表
+					string reportPath = ExportFullShiftReportToCSV(date, shift);
+
+					_toolClass.SaveLog($"完整班次报表已导出: {date} {shift}");
+
+					// 如果需要，打开保存报表的文件夹
+					if (openFolderAfterExport && !string.IsNullOrEmpty(reportPath) && Directory.Exists(reportPath))
+					{
+						System.Diagnostics.Process.Start("explorer.exe", reportPath);
+					}
+				}
+				catch (Exception ex)
+				{
+					_toolClass.SaveLog($"导出完整班次报表失败: {ex.Message}");
+				}
+			});
+		}
+
+		/// <summary>
+		/// 完整导出班次报表到CSV
+		/// </summary>
+		/// <returns>报表保存的文件夹路径</returns>
+		private string ExportFullShiftReportToCSV(string date, string shift)
+		{
+			try
+			{
+				string imagePath = GetImagePath();
+				if (string.IsNullOrEmpty(imagePath)) return null;
+
+				string exportDir = Path.Combine(imagePath, "Reports", date);
+				if (!Directory.Exists(exportDir))
+					Directory.CreateDirectory(exportDir);
+
+				string fileName = $"{date}_{shift}_完整生产报表.csv";
+				string filePath = Path.Combine(exportDir, fileName);
+
+				// 获取该班次所有SKU的汇总数据
+				string summarySql = @"
+					SELECT * FROM production_records_summary 
+					WHERE p_date = @date AND p_shift = @shift
+					ORDER BY sku";
+
+				var data = _dbHelper.ExecuteQuery(summarySql,
+					new SQLiteParameter("@date", date),
+					new SQLiteParameter("@shift", shift));
+
+				if (data.Rows.Count > 0)
+				{
+					using (var writer = new StreamWriter(filePath, false, Encoding.UTF8))
+					{
+						// 写入表头
+						writer.WriteLine("日期,班次,SKU,总检数,OK总数,NG总数,管内异物NG数量,管盖有无NG数量,管口圆度NG数量,正面工号不齐数量,背面工号不齐数量,P-CodeNG数量,色标对中NG数量,爆管数量,斜口数量,未剪断数量,混合多种缺陷,连续爆管剔除,良率(%)");
+
+						foreach (DataRow row in data.Rows)
+						{
+							writer.WriteLine($"{row["p_date"]},{row["p_shift"]},{row["sku"]},{row["total_count"]},{row["ok_count"]},{row["ng_count"]}," +
+								$"{row["ng_异物"]},{row["ng_管盖有无"]},{row["ng_管口圆度"]},{row["ng_正面工号缺失"]},{row["ng_背面工号缺失"]}," +
+								$"{row["ng_PCode"]},{row["ng_色标对中"]},{row["ng_爆管"]},{row["ng_斜口"]},{row["ng_未剪断"]}," +
+								$"{row["ng_混合多种缺陷"]},{row["continuous_exclude_count"]},{row["yield_rate"]}");
+						}
+					}
+
+					_toolClass.SaveLog($"完整报表已导出: {filePath}");
+				}
+
+				// 返回保存报表的文件夹路径
+				return exportDir;
+			}
+			catch (Exception ex)
+			{
+				_toolClass.SaveLog($"导出完整班次报表异常: {ex.Message}");
+				return null;
+			}
+		}
+
 		private void GenerateShiftSummaryInternal(string date, string shift)
 		{
 			// 获取该班次所有SKU
@@ -793,8 +889,8 @@ namespace VisionMeasure
 
 				_dbHelper.ExecuteNonQuery(upsertSql, upsertParams);
 
-				// 导出Excel文件
-				ExportSummaryToExcel(date, shift, sku);
+				// 移除：不再每一条记录都导出Excel文件，避免耗时
+				// ExportSummaryToExcel(date, shift, sku);
 			}
 		}
 

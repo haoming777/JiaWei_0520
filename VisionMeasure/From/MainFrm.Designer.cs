@@ -334,6 +334,8 @@ namespace VisionMeasure
 			this.uiLabel1 = new Sunny.UI.UILabel();
 			this.panel74 = new System.Windows.Forms.Panel();
 			this.SKU_Txt = new Sunny.UI.UITextBox();
+			this.panel75 = new System.Windows.Forms.Panel();
+			this.exportBtn = new Sunny.UI.UIButton();
 			this.panel23 = new System.Windows.Forms.Panel();
 			this.clearBtn = new Sunny.UI.UIButton();
 			this.panel53 = new System.Windows.Forms.Panel();
@@ -488,6 +490,7 @@ namespace VisionMeasure
 			this.tableLayoutPanel60.SuspendLayout();
 			this.panel73.SuspendLayout();
 			this.panel74.SuspendLayout();
+			this.panel75.SuspendLayout();
 			this.panel23.SuspendLayout();
 			this.panel53.SuspendLayout();
 			this.panel54.SuspendLayout();
@@ -4236,9 +4239,9 @@ namespace VisionMeasure
 			this.tableLayoutPanel9.Controls.Add(this.uiLabel3, 0, 4);
 			this.tableLayoutPanel9.Controls.Add(this.totalTxt, 0, 3);
 			this.tableLayoutPanel9.Controls.Add(this.uiLabel8, 0, 2);
-			this.tableLayoutPanel9.Controls.Add(this.panel7, 0, 14);
-			this.tableLayoutPanel9.Controls.Add(this.panel22, 0, 12);
-			this.tableLayoutPanel9.Controls.Add(this.panel23, 0, 16);
+			this.tableLayoutPanel9.Controls.Add(this.panel7, 0, 15);
+			this.tableLayoutPanel9.Controls.Add(this.panel22, 0, 13);
+			this.tableLayoutPanel9.Controls.Add(this.panel23, 0, 17);
 			this.tableLayoutPanel9.Controls.Add(this.panel53, 0, 11);
 			this.tableLayoutPanel9.Controls.Add(this.panel54, 0, 10);
 			this.tableLayoutPanel9.Controls.Add(this.tableLayoutPanel39, 0, 0);
@@ -4247,7 +4250,7 @@ namespace VisionMeasure
 			this.tableLayoutPanel9.Margin = new System.Windows.Forms.Padding(0);
 			this.tableLayoutPanel9.Name = "tableLayoutPanel9";
 			this.tableLayoutPanel9.Padding = new System.Windows.Forms.Padding(5, 0, 5, 5);
-			this.tableLayoutPanel9.RowCount = 17;
+			this.tableLayoutPanel9.RowCount = 18;
 			this.tableLayoutPanel9.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 150F));
 			this.tableLayoutPanel9.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 20F));
 			this.tableLayoutPanel9.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 25F));
@@ -4260,6 +4263,7 @@ namespace VisionMeasure
 			this.tableLayoutPanel9.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 35F));
 			this.tableLayoutPanel9.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 25F));
 			this.tableLayoutPanel9.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 35F));
+			this.tableLayoutPanel9.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 30F));
 			this.tableLayoutPanel9.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
 			this.tableLayoutPanel9.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 5F));
 			this.tableLayoutPanel9.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 30F));
@@ -4408,6 +4412,7 @@ namespace VisionMeasure
 			this.tableLayoutPanel20.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
 			this.tableLayoutPanel20.Size = new System.Drawing.Size(190, 30);
 			this.tableLayoutPanel20.TabIndex = 2;
+			this.tableLayoutPanel20.Visible = false;
 			// 
 			// uiComboBox1
 			// 
@@ -4451,10 +4456,10 @@ namespace VisionMeasure
 			// 
 			this.panel22.Controls.Add(this.panel52);
 			this.panel22.Dock = System.Windows.Forms.DockStyle.Fill;
-			this.panel22.Location = new System.Drawing.Point(5, 470);
+			this.panel22.Location = new System.Drawing.Point(5, 500);
 			this.panel22.Margin = new System.Windows.Forms.Padding(0);
 			this.panel22.Name = "panel22";
-			this.panel22.Size = new System.Drawing.Size(190, 399);
+			this.panel22.Size = new System.Drawing.Size(190, 369);
 			this.panel22.TabIndex = 16;
 			// 
 			// panel52
@@ -4465,7 +4470,7 @@ namespace VisionMeasure
 			this.panel52.Margin = new System.Windows.Forms.Padding(0);
 			this.panel52.Name = "panel52";
 			this.panel52.Padding = new System.Windows.Forms.Padding(0, 0, 0, 5);
-			this.panel52.Size = new System.Drawing.Size(190, 399);
+			this.panel52.Size = new System.Drawing.Size(190, 369);
 			this.panel52.TabIndex = 17;
 			// 
 			// tableLayoutPanel40
@@ -4489,7 +4494,7 @@ namespace VisionMeasure
 			this.tableLayoutPanel40.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 30F));
 			this.tableLayoutPanel40.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 30F));
 			this.tableLayoutPanel40.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
-			this.tableLayoutPanel40.Size = new System.Drawing.Size(190, 394);
+			this.tableLayoutPanel40.Size = new System.Drawing.Size(190, 364);
 			this.tableLayoutPanel40.TabIndex = 1;
 			// 
 			// tableLayoutPanel58
@@ -4804,7 +4809,7 @@ namespace VisionMeasure
 			this.panel72.Location = new System.Drawing.Point(0, 150);
 			this.panel72.Margin = new System.Windows.Forms.Padding(0);
 			this.panel72.Name = "panel72";
-			this.panel72.Size = new System.Drawing.Size(190, 244);
+			this.panel72.Size = new System.Drawing.Size(190, 214);
 			this.panel72.TabIndex = 5;
 			// 
 			// tableLayoutPanel59
@@ -4812,15 +4817,18 @@ namespace VisionMeasure
 			this.tableLayoutPanel59.ColumnCount = 1;
 			this.tableLayoutPanel59.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
 			this.tableLayoutPanel59.Controls.Add(this.uiPanel1, 0, 1);
+			this.tableLayoutPanel59.Controls.Add(this.panel75, 0, 3);
 			this.tableLayoutPanel59.Dock = System.Windows.Forms.DockStyle.Fill;
 			this.tableLayoutPanel59.Location = new System.Drawing.Point(0, 0);
 			this.tableLayoutPanel59.Margin = new System.Windows.Forms.Padding(0);
 			this.tableLayoutPanel59.Name = "tableLayoutPanel59";
-			this.tableLayoutPanel59.RowCount = 3;
+			this.tableLayoutPanel59.RowCount = 5;
 			this.tableLayoutPanel59.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 50F));
 			this.tableLayoutPanel59.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 100F));
+			this.tableLayoutPanel59.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 20F));
+			this.tableLayoutPanel59.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 45F));
 			this.tableLayoutPanel59.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 50F));
-			this.tableLayoutPanel59.Size = new System.Drawing.Size(190, 244);
+			this.tableLayoutPanel59.Size = new System.Drawing.Size(190, 214);
 			this.tableLayoutPanel59.TabIndex = 0;
 			// 
 			// uiPanel1
@@ -4829,7 +4837,7 @@ namespace VisionMeasure
 			this.uiPanel1.Dock = System.Windows.Forms.DockStyle.Fill;
 			this.uiPanel1.FillColor = System.Drawing.Color.White;
 			this.uiPanel1.Font = new System.Drawing.Font("宋体", 12F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-			this.uiPanel1.Location = new System.Drawing.Point(0, 72);
+			this.uiPanel1.Location = new System.Drawing.Point(0, 24);
 			this.uiPanel1.Margin = new System.Windows.Forms.Padding(0);
 			this.uiPanel1.MinimumSize = new System.Drawing.Size(1, 1);
 			this.uiPanel1.Name = "uiPanel1";
@@ -4908,6 +4916,43 @@ namespace VisionMeasure
 			this.SKU_Txt.Watermark = "";
 			this.SKU_Txt.TextChanged += new System.EventHandler(this.SKU_Txt_TextChanged);
 			this.SKU_Txt.KeyDown += new System.Windows.Forms.KeyEventHandler(this.SKU_Txt_Enter);
+			// 
+			// panel75
+			// 
+			this.panel75.Controls.Add(this.exportBtn);
+			this.panel75.Dock = System.Windows.Forms.DockStyle.Fill;
+			this.panel75.Location = new System.Drawing.Point(0, 144);
+			this.panel75.Margin = new System.Windows.Forms.Padding(0);
+			this.panel75.Name = "panel75";
+			this.panel75.Size = new System.Drawing.Size(190, 45);
+			this.panel75.TabIndex = 1;
+			// 
+			// exportBtn
+			// 
+			this.exportBtn.Cursor = System.Windows.Forms.Cursors.Hand;
+			this.exportBtn.Dock = System.Windows.Forms.DockStyle.Fill;
+			this.exportBtn.FillColor = System.Drawing.Color.FromArgb(((int)(((byte)(102)))), ((int)(((byte)(58)))), ((int)(((byte)(183)))));
+			this.exportBtn.FillColor2 = System.Drawing.Color.FromArgb(((int)(((byte)(102)))), ((int)(((byte)(58)))), ((int)(((byte)(183)))));
+			this.exportBtn.FillHoverColor = System.Drawing.Color.FromArgb(((int)(((byte)(133)))), ((int)(((byte)(97)))), ((int)(((byte)(198)))));
+			this.exportBtn.FillPressColor = System.Drawing.Color.FromArgb(((int)(((byte)(82)))), ((int)(((byte)(46)))), ((int)(((byte)(147)))));
+			this.exportBtn.FillSelectedColor = System.Drawing.Color.FromArgb(((int)(((byte)(82)))), ((int)(((byte)(46)))), ((int)(((byte)(147)))));
+			this.exportBtn.Font = new System.Drawing.Font("微软雅黑", 9.5F, System.Drawing.FontStyle.Bold);
+			this.exportBtn.LightColor = System.Drawing.Color.FromArgb(((int)(((byte)(244)))), ((int)(((byte)(242)))), ((int)(((byte)(251)))));
+			this.exportBtn.Location = new System.Drawing.Point(0, 0);
+			this.exportBtn.Margin = new System.Windows.Forms.Padding(0);
+			this.exportBtn.MinimumSize = new System.Drawing.Size(1, 1);
+			this.exportBtn.Name = "exportBtn";
+			this.exportBtn.Radius = 30;
+			this.exportBtn.RectColor = System.Drawing.Color.FromArgb(((int)(((byte)(102)))), ((int)(((byte)(58)))), ((int)(((byte)(183)))));
+			this.exportBtn.RectHoverColor = System.Drawing.Color.FromArgb(((int)(((byte)(133)))), ((int)(((byte)(97)))), ((int)(((byte)(198)))));
+			this.exportBtn.RectPressColor = System.Drawing.Color.FromArgb(((int)(((byte)(82)))), ((int)(((byte)(46)))), ((int)(((byte)(147)))));
+			this.exportBtn.RectSelectedColor = System.Drawing.Color.FromArgb(((int)(((byte)(82)))), ((int)(((byte)(46)))), ((int)(((byte)(147)))));
+			this.exportBtn.Size = new System.Drawing.Size(190, 45);
+			this.exportBtn.Style = Sunny.UI.UIStyle.Custom;
+			this.exportBtn.TabIndex = 4;
+			this.exportBtn.Text = "导出当前班次生产记录";
+			this.exportBtn.TipsFont = new System.Drawing.Font("宋体", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
+			this.exportBtn.Click += new System.EventHandler(this.ExportBtn_Click);
 			// 
 			// panel23
 			// 
@@ -5207,6 +5252,7 @@ namespace VisionMeasure
 			this.tableLayoutPanel60.ResumeLayout(false);
 			this.panel73.ResumeLayout(false);
 			this.panel74.ResumeLayout(false);
+			this.panel75.ResumeLayout(false);
 			this.panel23.ResumeLayout(false);
 			this.panel53.ResumeLayout(false);
 			this.panel54.ResumeLayout(false);
@@ -5539,6 +5585,8 @@ namespace VisionMeasure
 		private Sunny.UI.UITextBox SKU_Txt;
 		private Sunny.UI.UIPanel BaoGuanNGTxt;
 		private Sunny.UI.UILabel uiLabel7;
+		private System.Windows.Forms.Panel panel75;
+		private Sunny.UI.UIButton exportBtn;
 		// private Sunny.UI.UITextBox Result2;
 	}
 }
