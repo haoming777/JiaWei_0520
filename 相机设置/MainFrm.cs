@@ -247,13 +247,20 @@ namespace SetCamera
 		#region 相机回调事件
 		private void Cam1_OnImage(Bitmap bitmap, string cameraName, string cameraKey)
 		{
+			// 只显示当前选中相机的图片
+			if (daHuaSDK == null || daHuaSDK.curCameraKey != cameraKey)
+				return;
+
 			try
 			{
 				if (this.IsHandleCreated)
 				{
 					this.xlPictureBox1.Invoke((EventHandler)delegate
 					{
+						var old = this.xlPictureBox1.Image;
 						this.xlPictureBox1.Image = bitmap;
+						if (old != null && old != bitmap)
+						{ try { old.Dispose(); } catch { } }
 					});
 				}
 			}

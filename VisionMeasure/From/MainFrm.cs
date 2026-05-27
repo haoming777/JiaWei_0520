@@ -269,7 +269,7 @@ namespace VisionMeasure
 		{
 			InitializeComponent();
 			// 【新增优化】开启平滑低延迟垃圾回收模式，防止高并发高密集型计算时GC引起程序突发卡顿
-			System.Runtime.GCSettings.LatencyMode = System.Runtime.GCLatencyMode.SustainedLowLatency;
+			System.Runtime.GCSettings.LatencyMode = System.Runtime.GCLatencyMode.Batch;
 			// 【新增优化】提升当前进程在操作系统中的优先级，确保多线程调度更稳定
 			Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.High;
 
@@ -278,6 +278,11 @@ namespace VisionMeasure
 			InitializeImageProcessors();
 			InitializeHighSpeedSavers();
 			InitializeMemoryPools();
+			// 30秒定时刷新待写入数据库的记录
+			_batchFlushTimer = new System.Timers.Timer(30000);
+			_batchFlushTimer.Elapsed += (s, e) => FlushPendingRecords();
+			_batchFlushTimer.AutoReset = true;
+			_batchFlushTimer.Start();
 
 			InitializeDatabaseRecorder();
 
@@ -1424,6 +1429,7 @@ namespace VisionMeasure
 				#endregion
 
 				result = result_Segmentation;
+				context.ProcessResult = result;
 
 				if (!_isClosing)
 				{
@@ -1470,7 +1476,7 @@ namespace VisionMeasure
 			catch (Exception ex)
 			{
 				toolClass.SaveLog($"[Camera1] ID:{id} 处理异常: {ex.Message}\n{ex.StackTrace}");
-				context.ProcessResult = false;
+				// ProcessResult已在上方设置，异常时保留原值
 				_resultMatcher?.SignalNewResult();
 			}
 			finally
@@ -1605,6 +1611,7 @@ namespace VisionMeasure
 				stageTimer.Restart();
 				#endregion
 
+				context.ProcessResult = result;
 				result = result_flaw;
 
 				if (!_isClosing)
@@ -1652,7 +1659,7 @@ namespace VisionMeasure
 			catch (Exception ex)
 			{
 				toolClass.SaveLog($"[Camera2] ID:{id} 处理异常: {ex.Message}\n{ex.StackTrace}");
-				context.ProcessResult = false;
+				// ProcessResult已在上方设置，异常时保留原值
 				_resultMatcher?.SignalNewResult();
 			}
 			finally
@@ -1753,6 +1760,7 @@ namespace VisionMeasure
 						longEdge = detectionResult.LongEdge * _Config.K_Cam3;
 						roundness = Math.Round((longEdge - PipeDiameter) / PipeDiameter, 3);
 						result = _Config.Camera3RoundnessUp >= roundness && roundness >= _Config.Camera3RoundnessDown;
+					context.ProcessResult = result;
 
 						if (IFSaveLog)
 						{
@@ -1789,9 +1797,12 @@ namespace VisionMeasure
 							g.DrawString($"长边：{longEdge:F2}", Font_Text, result ? Brush_Green : Brush_Red, x, y); y += 70;
 							g.DrawString($"管径：{PipeDiameter}", Font_Text, result ? Brush_Green : Brush_Red, x, y); y += 70;
 
-							if (!result) g.DrawString($"圆度上限：{_Config.Camera3RoundnessUp}", Font_Text, Brush_Green, x, y); y += 70;
+							if (!result) { g.DrawString($"圆度上限：{_Config.Camera3RoundnessUp}", Font_Text, Brush_Green, x, y); y += 70; }
 							g.DrawString($"圆度：{roundness:F3}", Font_Text, result ? Brush_Green : Brush_Red, x, y); y += 70;
-							if (!result) g.DrawString($"圆度下限：{_Config.Camera3RoundnessDown}", Font_Text, Brush_Green, x, y); y += 70;
+							if (!result)
+							{
+								g.DrawString($"圆度下限：{_Config.Camera3RoundnessDown}", Font_Text, Brush_Green, x, y); y += 70;
+							}
 							g.DrawString($"SequenceId：{id}", Font_Text, Brush_Green, x, y); y += 70;
 						}
 					}
@@ -1832,7 +1843,7 @@ namespace VisionMeasure
 			catch (Exception ex)
 			{
 				toolClass.SaveLog($"[Camera3] ID:{context.SequenceId} 处理异常: {ex.Message}\n{ex.StackTrace}");
-				context.ProcessResult = false;
+				// ProcessResult已在上方设置，异常时保留原值
 				_resultMatcher?.SignalNewResult();
 			}
 			finally
@@ -2024,6 +2035,7 @@ namespace VisionMeasure
 					}
 					result_char = true;
 				}
+				context.ProcessResult = result;
 
 				result = result_char;
 				#endregion
@@ -2083,7 +2095,7 @@ namespace VisionMeasure
 			catch (Exception ex)
 			{
 				toolClass.SaveLog($"[Camera4] ID:{id} 处理异常: {ex.Message}\n{ex.StackTrace}");
-				context.ProcessResult = false;
+				// ProcessResult已在上方设置，异常时保留原值
 				_resultMatcher?.SignalNewResult();
 			}
 			finally
@@ -2387,9 +2399,11 @@ namespace VisionMeasure
 				{
 					result_char = true;
 					result_PCode_char = true;
+				context.ProcessResult = result;
 					toolClass.SaveLog($"[Camera5] ID:{id} 空杯产品");
 				}
 				result = result_char && result_PCode_char && result_flaw && result_Segmentation;
+				context.ProcessResult = result;
 				toolClass.SaveLog($"[Camera5] ID:{id} 最终结果 - result_char:{result_char}, result_PCode_char:{result_PCode_char}, result_flaw:{result_flaw}, result_Segmentation:{result_Segmentation}, FinalResult:{result}");
 
 				stageTimer.Stop();
@@ -2398,7 +2412,11 @@ namespace VisionMeasure
 
 				if (!_isClosing)
 				{
-					rawBmpForSave = labelImage.ToBitmap();
+					int queueDepth = _processor5?.ImageQueueCount ?? 0;
+					bool needOutput = queueDepth <= 2;
+
+					if (needOutput)
+						rawBmpForSave = labelImage.ToBitmap();
 					resBmpForSave = labelImage1.ToBitmap();
 
 					// 【关键修复】存入缓存之前画字
@@ -2438,10 +2456,17 @@ namespace VisionMeasure
 						}
 					}
 
-					CacheImageForDefectSave("Camera5", rawBmpForSave, resBmpForSave, context.SequenceId);
-
-					displayBitmap = new Bitmap(resBmpForSave);
-					UpdatePictureBox5(displayBitmap);
+					// Camera5积压时跳过保存/显示，省50ms提速追赶
+					if (needOutput)
+					{
+						CacheImageForDefectSave("Camera5", rawBmpForSave, resBmpForSave, context.SequenceId);
+						displayBitmap = new Bitmap(resBmpForSave);
+						UpdatePictureBox5(displayBitmap);
+					}
+					else if (queueDepth % 10 == 0)
+					{
+						toolClass.SaveLog($"[Camera5] 积压{queueDepth}帧，跳过显示/存图提效");
+					}
 
 					stageTimer.Stop();
 					context.StageTimes["显示更新及存储图像"] = stageTimer.ElapsedMilliseconds;
@@ -2479,7 +2504,7 @@ namespace VisionMeasure
 			catch (Exception ex)
 			{
 				toolClass.SaveLog($"[Camera5] ID:{context.SequenceId} 处理异常: {ex.Message}\n{ex.StackTrace}");
-				context.ProcessResult = false;
+				// ProcessResult已在上方设置，异常时保留原值
 				_resultMatcher?.SignalNewResult();
 			}
 			finally
@@ -2660,44 +2685,33 @@ namespace VisionMeasure
 		/// </summary>
 		private void CacheImageForDefectSave(string cameraName, Bitmap original, Bitmap result, long sequenceId)
 		{
+			Bitmap originalCopy = null, resultCopy = null;
 			try
 			{
-				// 创建Bitmap副本，防止原始图像被释放后缓存失效
-				Bitmap originalCopy = original != null ? new Bitmap(original) : null;
-				Bitmap resultCopy = result != null ? new Bitmap(result) : null;
+				originalCopy = original != null ? new Bitmap(original) : null;
+				resultCopy = result != null ? new Bitmap(result) : null;
 
-				// 缓存原图
-				_imageCache.AddOrUpdate(sequenceId,
-					new Dictionary<string, Bitmap> { { cameraName, originalCopy } },
-					(key, existingDict) =>
-					{
-						// 释放旧的缓存图像
-						if (existingDict.ContainsKey(cameraName) && existingDict[cameraName] != null)
-						{
-							existingDict[cameraName].Dispose();
-						}
-						existingDict[cameraName] = originalCopy;
-						return existingDict;
-					});
+				// 线程安全：GetOrAdd + lock，防止 AddOrUpdate 的 addFactory 并发覆盖
+				var origDict = _imageCache.GetOrAdd(sequenceId, _ => new Dictionary<string, Bitmap>());
+				lock (origDict)
+				{
+					if (origDict.TryGetValue(cameraName, out var oldBmp))
+						oldBmp?.Dispose();
+					origDict[cameraName] = originalCopy;
+				}
 
-				// 缓存结果图
-				_resultImageCache.AddOrUpdate(sequenceId,
-					new Dictionary<string, Bitmap> { { cameraName, resultCopy } },
-					(key, existingDict) =>
-					{
-						// 释放旧的缓存图像
-						if (existingDict.ContainsKey(cameraName) && existingDict[cameraName] != null)
-						{
-							existingDict[cameraName].Dispose();
-						}
-						existingDict[cameraName] = resultCopy;
-						return existingDict;
-					});
-
-				toolClass.SaveLog($"缓存图像成功: Camera={cameraName}, SequenceId={sequenceId}");
+				var resDict = _resultImageCache.GetOrAdd(sequenceId, _ => new Dictionary<string, Bitmap>());
+				lock (resDict)
+				{
+					if (resDict.TryGetValue(cameraName, out var oldBmp))
+						oldBmp?.Dispose();
+					resDict[cameraName] = resultCopy;
+				}
 			}
 			catch (Exception ex)
 			{
+				originalCopy?.Dispose();
+				resultCopy?.Dispose();
 				toolClass.SaveLog($"缓存图像异常: {ex.Message}");
 			}
 		}
@@ -2764,15 +2778,18 @@ namespace VisionMeasure
 
 				string dtFormat = DateTime.Now.ToString("yyMMddHHmmssfff");
 
-				// 保存各相机的图像
+				// 保存各相机的图像（加锁快照，防止并发修改内部字典）
 				if (_imageCache.TryGetValue(sequenceId, out var originalImages) &&
 					_resultImageCache.TryGetValue(sequenceId, out var resultImages))
 				{
-					foreach (var kvp in originalImages)
+					KeyValuePair<string, Bitmap>[] snap;
+					lock (originalImages) { snap = originalImages.ToArray(); }
+					foreach (var kvp in snap)
 					{
 						string cameraName = kvp.Key;
 						Bitmap original = kvp.Value;
-						Bitmap result = resultImages.ContainsKey(cameraName) ? resultImages[cameraName] : null;
+						Bitmap result = null;
+						lock (resultImages) { resultImages.TryGetValue(cameraName, out result); }
 
 						// 获取当前相机的缺陷类型和OK/NG状态
 						bool isCameraNg = IsCameraNg(cameraName, results);
@@ -2886,21 +2903,21 @@ namespace VisionMeasure
 		{
 			try
 			{
-				// 释放原图缓存
 				if (_imageCache.TryRemove(sequenceId, out var originalImages))
 				{
-					foreach (var kvp in originalImages)
+					lock (originalImages)
 					{
-						kvp.Value?.Dispose();
+						foreach (var kvp in originalImages) kvp.Value?.Dispose();
+						originalImages.Clear();
 					}
 				}
 
-				// 释放结果图缓存
 				if (_resultImageCache.TryRemove(sequenceId, out var resultImages))
 				{
-					foreach (var kvp in resultImages)
+					lock (resultImages)
 					{
-						kvp.Value?.Dispose();
+						foreach (var kvp in resultImages) kvp.Value?.Dispose();
+						resultImages.Clear();
 					}
 				}
 			}
@@ -3100,7 +3117,7 @@ namespace VisionMeasure
 
 				toolClass.SaveLog($"[ResultMatch] ID:{sequenceId} 汇总 - Cam1:{results[0].Result}, Cam2:{results[1].Result}, Cam3:{results[2].Result}, Cam4:{results[3].Result}, Cam5:{results[4].Result}, FinalResult:{finalResult}");
 
-				AddProductionRecord(results, finalResult);
+				AddProductionRecordBuffered(results, finalResult);
 
 				// 统一按缺陷类型保存所有相机的图像
 				SaveImagesByDefectType(sequenceId, results);
@@ -3212,6 +3229,76 @@ namespace VisionMeasure
 			catch (Exception ex)
 			{
 				toolClass.SaveLog($"添加生产记录异常: {ex.Message}");
+			}
+		}
+
+		private void AddProductionRecordBuffered(QueueResultItem[] results, bool finalResult)
+		{
+			if (_dbRecorder == null) return;
+			try
+			{
+				var record = new ProductionRecord
+				{
+					DetectionTime = DateTime.Now,
+					SequenceId = results[0].SequenceId,
+					FinalResult = finalResult ? "OK" : "NG",
+					Sku = GetCurrentSkuValue(),
+					Cam1Result = results[0].Result ? 1 : 0,
+					Cam2Result = results[1].Result ? 1 : 0,
+					Cam3Result = results[2].Result ? 1 : 0,
+					Cam4Result = results[3].Result ? 1 : 0,
+					Cam5Result = results[4].Result ? 1 : 0,
+					Cam5_CharResult = results[4].Cam5_CharResult,
+					Cam5_PCodeResult = results[4].Cam5_PCodeResult,
+					Cam5_SebiaoResult = results[4].Cam5_SebiaoResult,
+					Cam5_BaoguanResult = results[4].Cam5_BaoguanResult,
+					Cam5_XiekouResult = results[4].Cam5_XiekouResult,
+					Cam5_WeijianduanResult = results[4].Cam5_WeijianduanResult
+				};
+
+				bool isBurstNg = results[4].Cam5_BaoguanResult == 0;
+				_dbRecorder.UpdateConsecutiveBurst(results[0].SequenceId, isBurstNg);
+
+				List<ProductionRecord> flushList = null;
+				lock (_pendingLock)
+				{
+					_pendingRecords.Add(record);
+					_lastRecordTime = DateTime.Now;
+					if (_pendingRecords.Count >= 10)
+					{
+						flushList = _pendingRecords;
+						_pendingRecords = new List<ProductionRecord>();
+					}
+				}
+
+				if (flushList != null)
+				{
+					foreach (var r in flushList)
+					{
+						_dbRecorder.AddRecord(r);
+						if (r.IsExcluded && r.ExcludedReason == "连续爆管剔除")
+							_Config.burstExcludeCount += 3;
+					}
+					this.Invoke(new Action(() => { if (BaoGuanNGTxt != null) BaoGuanNGTxt.Text = _Config.burstExcludeCount.ToString(); }));
+				}
+			}
+			catch (Exception ex) { toolClass.SaveLog($"批量生产记录异常: {ex.Message}"); }
+		}
+
+		private void FlushPendingRecords()
+		{
+			List<ProductionRecord> flushList = null;
+			lock (_pendingLock)
+			{
+				if (_pendingRecords.Count > 0)
+				{
+					flushList = _pendingRecords;
+					_pendingRecords = new List<ProductionRecord>();
+				}
+			}
+			if (flushList != null && _dbRecorder != null)
+			{
+				foreach (var r in flushList) _dbRecorder.AddRecord(r);
 			}
 		}
 
@@ -3341,6 +3428,11 @@ namespace VisionMeasure
 
 				// 关闭相机
 				DisposeCameras();
+
+				// 停止定时器 + 刷新最后的数据库记录
+				_batchFlushTimer?.Stop();
+				_batchFlushTimer?.Dispose();
+				FlushPendingRecords();
 
 				// 清理其他资源
 				CleanupAllResources();
@@ -3647,12 +3739,14 @@ namespace VisionMeasure
 		}
 
 		bool testflag = true;
-		string imagePath1 = @"E:\公司-张皓茗\项目\高露洁\广州\夹尾正反面\广州高露洁牙膏字符测试\bin\AI\Cam1\Pic_2026_01_19_010943_412.bmp";
-		string imagePath2 = @"E:\公司-张皓茗\项目\高露洁\广州\夹尾正反面\广州高露洁牙膏字符测试\bin\AI\Cam2\Pic_2026_01_10_182835_24.bmp";
+		string imagePath1 = @"D:\bin\AI\Image\Camera1.bmp";
+		string imagePath2 = @"D:\bin\AI\Image\Camera2.bmp";
 		string imagePath2_1 = @"E:\公司-张皓茗\项目\高露洁\广州\夹尾正反面\广州高露洁牙膏字符测试\bin\AI\Cam2\Pic_2026_01_10_192517_1220.bmp";
-		string imagePath3 = @"E:\公司-张皓茗\项目\高露洁\广州\夹尾正反面\文件\高露洁-管圆OK&G成像\260118221100591_Y_ID2780_SequenceId2788_Offset8_result-False-NG.bmp";
-		string imagePath4 = @"E:\系统\Desktop\思谋\夹尾正面-多模型-model-2-3\251021141247365__random-4335957_result_flaw-True_result_char-FalseNG_Y.png";
-		string imagePath5 = @"E:\系统\Desktop\思谋\11-3背面\251103090229269__random-6482029_result_flaw-True_result_char-FalseNG_Y.bmp";
+		string imagePath3 = @"D:\bin\AI\Image\Camera3-6.bmp";
+		string imagePath4 = @"D:\bin\AI\Image\Camera4.bmp";
+		string imagePath5 = @"D:\bin\AI\Image\camera5_2.bmp";
+		string imagePath5_2 = @"D:\bin\AI\Image\Camera5_5.bmp";  // Camera5 第二张图，与 imagePath5 交替使用
+		string imagePath5_3 = @"D:\bin\AI\Image\Camera5_4.bmp";  // Camera5 第二张图，与 imagePath5 交替使用
 
 		private void uiButton4_Click(object sender, EventArgs e)
 		{
@@ -3699,14 +3793,7 @@ namespace VisionMeasure
 		{
 			try
 			{
-				_Config.total = 0;
-				_Config.ok = 0;
-				_Config.ng_cam1 = 0;
-				_Config.ng_cam2 = 0;
-				_Config.ng_cam3 = 0;
-				_Config.ng_cam4 = 0;
-				_Config.ng_cam5 = 0;
-				_Config.burstExcludeCount = 0;
+				Class_Config.ResetAllCounters();
 
 				if (totalTxt != null) totalTxt.Text = "0";
 				if (okTxt != null) okTxt.Text = "0";
@@ -3734,9 +3821,82 @@ namespace VisionMeasure
 			}
 		}
 
-		private void clearBtn_Click(object sender, EventArgs e)
+		private volatile bool _simRunning = false;
+		private int _simCam5Idx = 0;  // Camera5 三张图轮播
+		private long _simBatchNum = 0;  // 模拟批次计数
+		private Stopwatch _simGroupSw = new Stopwatch();
+		private List<ProductionRecord> _pendingRecords = new List<ProductionRecord>();
+		private readonly object _pendingLock = new object();
+		private DateTime _lastRecordTime = DateTime.Now;
+		private System.Timers.Timer _batchFlushTimer;
+
+		private async void clearBtn_Click(object sender, EventArgs e)
 		{
-			ClearStatisticsDisplay();
+			if (_simRunning)
+			{
+				_simRunning = false;
+				clearBtn.Text = "模拟运行";
+				toolClass.SaveLog("模拟运行已停止");
+				return;
+			}
+
+			if (!File.Exists(imagePath1)) { MessageBox.Show($"Camera1 图片不存在:\n{imagePath1}"); return; }
+			if (!File.Exists(imagePath2)) { MessageBox.Show($"Camera2 图片不存在:\n{imagePath2}"); return; }
+			if (!File.Exists(imagePath3)) { MessageBox.Show($"Camera3 图片不存在:\n{imagePath3}"); return; }
+			if (!File.Exists(imagePath4)) { MessageBox.Show($"Camera4 图片不存在:\n{imagePath4}"); return; }
+			if (!File.Exists(imagePath5)) { MessageBox.Show($"Camera5 图片不存在:\n{imagePath5}"); return; }
+
+			_simRunning = true;
+			_simBatchNum = 0;
+			clearBtn.Text = "停止模拟";
+			toolClass.SaveLog("模拟运行启动，3个/组 间隔10ms，平均200ms/张");
+
+			await Task.Run(() =>
+			{
+				while (_simRunning && !_isClosing)
+				{
+					_simGroupSw.Restart();
+					for (int g = 0; g < 3 && _simRunning && !_isClosing; g++)
+					{
+						try
+						{
+							_simBatchNum++;
+							var sw = Stopwatch.StartNew();
+
+							var bmp1 = new Bitmap(imagePath1);
+							var bmp2 = new Bitmap(imagePath2);
+							var bmp3 = new Bitmap(imagePath3);
+							var bmp4 = new Bitmap(imagePath4);
+							_simCam5Idx = (_simCam5Idx + 1) % 3;
+							string cam5Path = _simCam5Idx == 0 ? imagePath5 : _simCam5Idx == 1 ? imagePath5_2 : imagePath5_3;
+							var bmp5 = new Bitmap(cam5Path);
+
+							OnCamera1Image(bmp1, null, null);
+							OnCamera2Image(bmp2, null, null);
+							OnCamera3Image(bmp3, null, null);
+							OnCamera4Image(bmp4, null, null);
+							OnCamera5Image(bmp5, null, null);
+
+							sw.Stop();
+							toolClass.SaveLog($"[模拟] 批次{_simBatchNum} 添加耗时{sw.ElapsedMilliseconds}ms Cam5Idx={_simCam5Idx}");
+
+							if (g < 2)
+								Thread.Sleep(100);
+						}
+						catch (Exception ex) { toolClass.SaveLog($"模拟运行异常: {ex.Message}"); }
+					}
+
+					// 每组3张，平均200ms/张 → 组周期600ms，减去处理时间和组内间隔
+					_simGroupSw.Stop();
+					long remaining = 600 - _simGroupSw.ElapsedMilliseconds;
+					if (remaining > 10)
+						Thread.Sleep((int)remaining);
+				}
+			});
+
+			_simRunning = false;
+			this.Invoke(new Action(() => clearBtn.Text = "模拟运行"));
+			toolClass.SaveLog("模拟运行已停止");
 		}
 
 		private Stopwatch _sendIntervalTimer = Stopwatch.StartNew();
@@ -4524,13 +4684,19 @@ namespace VisionMeasure
 						long elapsedMs = context.ProcessingTimer.ElapsedMilliseconds;
 						_performanceStats.AddTime(elapsedMs);
 						StringBuilder stringBuilder = new StringBuilder();
-						stringBuilder.Append($"\r\nCamera: {context.Camera}\r\nID:{context.SequenceId - context.Offset}\r\n");
+						stringBuilder.Append($"\r\nCamera: {context.Camera}\r\nID:{context.SequenceId - context.Offset}\r\n总耗时: {elapsedMs}ms\r\n");
 						foreach (var stage in context.StageTimes)
 						{
 							_performanceStats.AddStageTime(stage.Key, stage.Value);
 							stringBuilder.Append($"{stage.Key}: {stage.Value}\r\n");
 						}
 						toolClass.SaveLog(stringBuilder.ToString());
+
+						// 每50帧输出性能汇总
+						if (_performanceStats.ProcessCount > 0 && _performanceStats.ProcessCount % 50 == 0)
+						{
+							toolClass.SaveLog($"[性能] {_cameraName} 累计{_performanceStats.ProcessCount}帧 Avg={_performanceStats.AverageTimeMs:F0}ms Min={_performanceStats.MinTimeMs}ms Max={_performanceStats.MaxTimeMs}ms");
+						}
 					}
 
 					context.OriginalBitmap?.Dispose();
@@ -4700,20 +4866,33 @@ namespace VisionMeasure
 				}
 				else
 				{
-					toolClass.SaveLog($"[ResultMatch] ID:{targetSequenceId} 匹配失败，跳过Camera1");
-					_processors[0].GetNextResult();
+					// 检查是否有相机的 productId 已经超过 target（等待也没用，丢弃）
+					bool anyPast = false;
 					for (int i = 1; i < _processors.Length; i++)
 					{
-						QueueResultItem current;
-						while ((current = _processors[i].PeekNextResult()) != null)
+						var peek = _processors[i].PeekNextResult();
+						if (peek != null && (peek.SequenceId - peek.Offset) > targetSequenceId)
+						{ anyPast = true; break; }
+					}
+
+					if (anyPast)
+					{
+						toolClass.SaveLog($"[ResultMatch] ID:{targetSequenceId} 匹配失败，跳过Camera1");
+						_processors[0].GetNextResult();
+						for (int i = 1; i < _processors.Length; i++)
 						{
-							long currentId = current.SequenceId - current.Offset;
-							if (currentId < targetSequenceId)
-								_processors[i].GetNextResult();
-							else
-								break;
+							QueueResultItem current;
+							while ((current = _processors[i].PeekNextResult()) != null)
+							{
+								long currentId = current.SequenceId - current.Offset;
+								if (currentId < targetSequenceId)
+									_processors[i].GetNextResult();
+								else
+									break;
+							}
 						}
 					}
+					// else: 后置相机还没追上，跳过本次匹配，等待更多结果
 				}
 			}
 			catch (Exception ex)

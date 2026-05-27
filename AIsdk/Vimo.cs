@@ -159,14 +159,12 @@ namespace AIsdk
 		{
 			try
 			{
-				Mat srcmat = image.Clone();
-				var req = new Request(srcmat);
+		var req = new Request(image);
 				stopwatch.Restart();
 				pipelines1.Run(req, out results);
 				Console.WriteLine($"运行SDK耗时{stopwatch.ElapsedMilliseconds}ms");
 				stopwatch.Stop();
-				srcmat?.Dispose();
-				return ERROR_OK;
+					return ERROR_OK;
 			}
 			catch (Exception ex)
 			{
@@ -189,10 +187,7 @@ namespace AIsdk
 		{
 			try
 			{
-				GC.Collect();
-
-				Mat srcmat = image.Clone();
-				var req = new Request(srcmat);
+				var req = new Request(image);
 				stopwatch.Restart();
 
 				pipelines1.Run(req, out results);
@@ -200,7 +195,6 @@ namespace AIsdk
 				toolClass.SaveLog($"运行分割SDK耗时{stopwatch.ElapsedMilliseconds}");
 
 				stopwatch.Stop();
-				srcmat?.Dispose();
 				return ERROR_OK;
 			}
 			catch (Exception ex)
@@ -224,15 +218,13 @@ namespace AIsdk
 		{
 			try
 			{
-				Mat srcmat = image.Clone();
-				var req = new Request(srcmat);
+		var req = new Request(image);
 				stopwatch.Restart();
 				pipelines1.Run(req, out results);
 				Console.WriteLine($"运行SDK耗时{stopwatch.ElapsedMilliseconds}");
 				toolClass.SaveLog($"运行分类SDK耗时{stopwatch.ElapsedMilliseconds}");
 				stopwatch.Stop();
-				srcmat?.Dispose();
-				return ERROR_OK;
+					return ERROR_OK;
 			}
 			catch (Exception ex)
 			{
@@ -254,16 +246,14 @@ namespace AIsdk
 		{
 			try
 			{
-				Mat srcmat = image.Clone();
-				var req = new Request(srcmat);
+		var req = new Request(image);
 				stopwatch.Restart();
 
 				pipelines1.Run(req, out results);
 				Console.WriteLine($"运行SDK耗时{stopwatch.ElapsedMilliseconds}");
 				//toolClass.SaveLog($"运行OcrSDK耗时{stopwatch.ElapsedMilliseconds}");
 				stopwatch.Stop();
-				srcmat?.Dispose();
-				return ERROR_OK;
+					return ERROR_OK;
 			}
 			catch (Exception ex)
 			{
@@ -279,16 +269,14 @@ namespace AIsdk
 		{
 			try
 			{
-				Mat srcmat = image.Clone();
-				var req = new Request(srcmat);
+		var req = new Request(image);
 				stopwatch.Restart();
 
 				module.Run(req, out results);
 				Console.WriteLine($"运行SDK耗时{stopwatch.ElapsedMilliseconds}");
 				//toolClass.SaveLog($"运行OcrSDK耗时{stopwatch.ElapsedMilliseconds}");
 				stopwatch.Stop();
-				srcmat?.Dispose();
-				return ERROR_OK;
+					return ERROR_OK;
 			}
 			catch (Exception ex)
 			{
@@ -304,16 +292,14 @@ namespace AIsdk
 		{
 			try
 			{
-				Mat srcmat = image.Clone();
-				var req = new Request(srcmat, roi);
+		var req = new Request(image, roi);
 				stopwatch.Restart();
 
 				module.Run(req, out results);
 				//Console.WriteLine($"运行SDK耗时{stopwatch.ElapsedMilliseconds}");
 				//toolClass.SaveLog($"运行OcrSDK耗时{stopwatch.ElapsedMilliseconds}");
 				stopwatch.Stop();
-				srcmat?.Dispose();
-				return ERROR_OK;
+					return ERROR_OK;
 			}
 			catch (Exception ex)
 			{
@@ -329,16 +315,14 @@ namespace AIsdk
 		{
 			try
 			{
-				Mat srcmat = image.Clone();
-				var req = new Request(srcmat);
+		var req = new Request(image);
 				stopwatch.Restart();
 
 				module_segmentation.Run(req, out results);
 				Console.WriteLine($"运行SDK耗时{stopwatch.ElapsedMilliseconds}");
 				toolClass.SaveLog($"运行Run_Segmentation耗时{stopwatch.ElapsedMilliseconds}");
 				stopwatch.Stop();
-				srcmat?.Dispose();
-				return ERROR_OK;
+					return ERROR_OK;
 			}
 			catch (Exception ex)
 			{
@@ -353,15 +337,13 @@ namespace AIsdk
 		{
 			try
 			{
-				Mat srcmat = image.Clone();
-				var req = new Request(srcmat, roi);
+		var req = new Request(image, roi);
 				stopwatch.Restart();
 				module_segmentation.Run(req, out results);
 				Console.WriteLine($"运行SDK耗时{stopwatch.ElapsedMilliseconds}");
 				toolClass.SaveLog($"运行Run_Color耗时{stopwatch.ElapsedMilliseconds}");
 				stopwatch.Stop();
-				srcmat?.Dispose();
-				return ERROR_OK;
+					return ERROR_OK;
 			}
 			catch (Exception ex)
 			{
@@ -377,16 +359,14 @@ namespace AIsdk
 		{
 			try
 			{
-				Mat srcmat = image.Clone();
-				var req = new Request(srcmat, roi);
+		var req = new Request(image, roi);
 				stopwatch.Restart();
 
 				module_class.Run(req, out results);
 				Console.WriteLine($"运行SDK耗时{stopwatch.ElapsedMilliseconds}");
 				toolClass.SaveLog($"运行Run_Class耗时{stopwatch.ElapsedMilliseconds}");
 				stopwatch.Stop();
-				srcmat?.Dispose();
-				return ERROR_OK;
+					return ERROR_OK;
 			}
 			catch (Exception ex)
 			{

@@ -4966,17 +4966,29 @@ namespace VisionMeasure
 			// 
 			// clearBtn
 			// 
-			this.clearBtn.Cursor = System.Windows.Forms.Cursors.Hand;
+			this.clearBtn.Cursor = System.Windows.Forms.Cursors.WaitCursor;
 			this.clearBtn.Dock = System.Windows.Forms.DockStyle.Fill;
+			this.clearBtn.FillColor = System.Drawing.Color.FromArgb(((int)(((byte)(255)))), ((int)(((byte)(128)))), ((int)(((byte)(0)))));
+			this.clearBtn.FillColor2 = System.Drawing.Color.FromArgb(((int)(((byte)(0)))), ((int)(((byte)(150)))), ((int)(((byte)(136)))));
+			this.clearBtn.FillHoverColor = System.Drawing.Color.FromArgb(((int)(((byte)(51)))), ((int)(((byte)(171)))), ((int)(((byte)(160)))));
+			this.clearBtn.FillPressColor = System.Drawing.Color.FromArgb(((int)(((byte)(0)))), ((int)(((byte)(120)))), ((int)(((byte)(109)))));
+			this.clearBtn.FillSelectedColor = System.Drawing.Color.FromArgb(((int)(((byte)(0)))), ((int)(((byte)(120)))), ((int)(((byte)(109)))));
 			this.clearBtn.Font = new System.Drawing.Font("微软雅黑", 12F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
+			this.clearBtn.LightColor = System.Drawing.Color.FromArgb(((int)(((byte)(238)))), ((int)(((byte)(248)))), ((int)(((byte)(248)))));
 			this.clearBtn.Location = new System.Drawing.Point(0, 0);
 			this.clearBtn.Margin = new System.Windows.Forms.Padding(0);
 			this.clearBtn.MinimumSize = new System.Drawing.Size(1, 1);
 			this.clearBtn.Name = "clearBtn";
+			this.clearBtn.RectColor = System.Drawing.Color.FromArgb(((int)(((byte)(0)))), ((int)(((byte)(150)))), ((int)(((byte)(136)))));
+			this.clearBtn.RectHoverColor = System.Drawing.Color.FromArgb(((int)(((byte)(51)))), ((int)(((byte)(171)))), ((int)(((byte)(160)))));
+			this.clearBtn.RectPressColor = System.Drawing.Color.FromArgb(((int)(((byte)(0)))), ((int)(((byte)(120)))), ((int)(((byte)(109)))));
+			this.clearBtn.RectSelectedColor = System.Drawing.Color.FromArgb(((int)(((byte)(0)))), ((int)(((byte)(120)))), ((int)(((byte)(109)))));
 			this.clearBtn.Size = new System.Drawing.Size(190, 30);
+			this.clearBtn.Style = Sunny.UI.UIStyle.Custom;
 			this.clearBtn.TabIndex = 3;
 			this.clearBtn.Text = "清  空";
 			this.clearBtn.TipsFont = new System.Drawing.Font("宋体", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
+			this.clearBtn.UseWaitCursor = true;
 			this.clearBtn.Visible = false;
 			this.clearBtn.Click += new System.EventHandler(this.clearBtn_Click);
 			// 

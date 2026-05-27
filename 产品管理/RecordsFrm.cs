@@ -18,7 +18,10 @@ namespace SetProduct
         private string _productionDbPath = Path.Combine(Directory.GetCurrentDirectory(), "data", "production.db");
         private XLToolClass _log = new XLToolClass();
         private string currentMode = "summary";
+        private string _previousMode = null;
         private DataTable _currentData;
+        private SQLiteConnection _sharedConnection;
+        private readonly object _dbLock = new object();
         private UIDataGridView dgvRecords;
         private UIPanel pnlTop;
         private UIPanel pnlStats;
@@ -32,6 +35,7 @@ namespace SetProduct
         private UIButton btnSearch;
         private UIButton btnReset;
         private UIButton btnExport;
+        private UIButton btnRefresh;
         private UILabel lblTotal;
         private UILabel lblOK;
         private UILabel lblNG;
@@ -229,7 +233,6 @@ namespace SetProduct
             };
             pnlTop.Controls.Add(txtSearch);
 
-            // 良率公式说明：放在查询按钮左边、筛选结果右边的空位置
             y = 58;
             x = this.Width - 850;
             var formulaLabel = new UILabel
@@ -290,6 +293,21 @@ namespace SetProduct
             };
             btnExport.Click += BtnExport_Click;
             pnlTop.Controls.Add(btnExport);
+			x += 120;
+
+			btnRefresh = new UIButton
+			{
+			Text = "🔄 刷新",
+			Location = new Point(x, y),
+			Size = new Size(110, 38),
+			FillColor = Color.FromArgb(255, 140, 0),
+			RectColor = Color.FromArgb(255, 140, 0),
+			ForeColor = Color.White,
+			Font = new Font("微软雅黑", 10F, FontStyle.Bold),
+			Radius = 6
+			};
+			btnRefresh.Click += BtnRefresh_Click;
+			pnlTop.Controls.Add(btnRefresh);
         }
 
         private void CreateStatsPanel()
@@ -460,16 +478,16 @@ namespace SetProduct
             dgvRecords.BringToFront();
         }
 
-        private void InitializeData()
+        private async void InitializeData()
         {
             try
             {
                 string checkDetailSql = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='production_records_detail'";
                 string checkSummarySql = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='production_records_summary'";
-                
+
                 var checkDetail = ExecuteProdQuery(checkDetailSql);
                 var checkSummary = ExecuteProdQuery(checkSummarySql);
-                
+
                 bool hasDetailTable = checkDetail.Rows.Count > 0 && Convert.ToInt32(checkDetail.Rows[0][0]) > 0;
                 bool hasSummaryTable = checkSummary.Rows.Count > 0 && Convert.ToInt32(checkSummary.Rows[0][0]) > 0;
 
@@ -478,7 +496,8 @@ namespace SetProduct
                     CreateTables();
                 }
 
-                LoadData();
+			await Task.Delay(500);
+			_ = LoadData();
             }
             catch (Exception ex)
             {
@@ -489,15 +508,25 @@ namespace SetProduct
 
 		private SQLiteConnection GetProductionConnection()
 		{
-			// 加入 Journal Mode=WAL; 和 Cache Size 优化
-			return new SQLiteConnection(@"Data Source=" + _productionDbPath + ";Journal Mode=WAL;Cache Size=10000;");
+			lock (_dbLock)
+			{
+				if (_sharedConnection == null)
+				{
+					_sharedConnection = new SQLiteConnection(
+						@"Data Source=" + _productionDbPath + ";Journal Mode=WAL;Cache Size=2000;Synchronous=Normal;wal_autocheckpoint=10000;");
+					_sharedConnection.Open();
+				}
+				else if (_sharedConnection.State != ConnectionState.Open)
+					_sharedConnection.Open();
+				return _sharedConnection;
+			}
 		}
 
 		private DataTable ExecuteProdQuery(string sql, params SQLiteParameter[] parameters)
         {
-            using (var conn = GetProductionConnection())
+            lock (_dbLock)
             {
-                using (var cmd = new SQLiteCommand(sql, conn))
+                using (var cmd = new SQLiteCommand(sql, GetProductionConnection()))
                 {
                     if (parameters != null && parameters.Length > 0)
                         cmd.Parameters.AddRange(parameters);
@@ -513,10 +542,9 @@ namespace SetProduct
         {
             try
             {
-                using (var conn = GetProductionConnection())
+                lock (_dbLock)
                 {
-                    conn.Open();
-                    using (var cmd = new SQLiteCommand(sql, conn))
+                    using (var cmd = new SQLiteCommand(sql, GetProductionConnection()))
                     {
                         if (parameters != null && parameters.Length > 0)
                             cmd.Parameters.AddRange(parameters);
@@ -530,6 +558,13 @@ namespace SetProduct
                 _log.SaveLog($"数据库操作异常: {ex.Message}");
                 return false;
             }
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            base.OnFormClosed(e);
+            lock (_dbLock) { _sharedConnection?.Close(); _sharedConnection?.Dispose(); _sharedConnection = null; }
+            _currentData?.Dispose(); _currentData = null;
         }
 
         private void CreateTables()
@@ -609,10 +644,10 @@ namespace SetProduct
             bool isDetail = cboTableType.SelectedIndex == 1;
             currentMode = isDetail ? "detail" : "summary";
             cboResult.Visible = isDetail;
-            LoadData();
+            _ = LoadData();
         }
 
-		private async void LoadData()
+		private async Task LoadData()
 		{
 			try
 			{
@@ -624,10 +659,10 @@ namespace SetProduct
                 if (currentMode == "summary")
                 {
                     sql = "SELECT * FROM production_records_summary WHERE 1=1";
-                    
+
                     DateTime startDate = dtStart.Value.Date;
                     DateTime endDate = dtEnd.Value.Date;
-                    
+
                     sql += " AND p_date >= @startDate AND p_date <= @endDate";
                     parameters.Add(new SQLiteParameter("@startDate", startDate.ToString("yyyy-MM-dd")));
                     parameters.Add(new SQLiteParameter("@endDate", endDate.ToString("yyyy-MM-dd")));
@@ -645,15 +680,15 @@ namespace SetProduct
                         parameters.Add(new SQLiteParameter("@search", $"%{txtSearch.Text}%"));
                     }
 
-                    sql += " ORDER BY p_date DESC, p_shift, sku";
+                    sql += " ORDER BY p_date DESC, p_shift, sku LIMIT 5000";
                 }
                 else
                 {
                     sql = "SELECT * FROM production_records_detail WHERE 1=1";
-                    
+
                     DateTime startDate = dtStart.Value.Date;
                     DateTime endDate = dtEnd.Value.Date.AddDays(1).AddSeconds(-1);
-                    
+
                     sql += " AND p_time >= @startTime AND p_time <= @endTime";
                     parameters.Add(new SQLiteParameter("@startTime", startDate));
                     parameters.Add(new SQLiteParameter("@endTime", endDate));
@@ -677,36 +712,35 @@ namespace SetProduct
                         parameters.Add(new SQLiteParameter("@result", cboResult.SelectedItem.ToString()));
                     }
 
-					sql += " ORDER BY p_time DESC LIMIT 3000";
-				}
+						sql += " ORDER BY p_time DESC LIMIT 3000";
+					}
 
-				// 将查库操作放入后台线程，绝对不阻塞UI
-				_currentData = await Task.Run(() => ExecuteProdQuery(sql, parameters.ToArray()));
+					_currentData = await Task.Run(() => ExecuteProdQuery(sql, parameters.ToArray()));
 
-				if (_currentData != null && _currentData.Rows.Count > 0)
-				{
-					_totalPages = (int)Math.Ceiling((double)_currentData.Rows.Count / _pageSize);
-					_currentPage = 1;
-					RefreshGridData();
-					UpdateStatistics();
+					if (_currentData != null && _currentData.Rows.Count > 0)
+					{
+						_totalPages = (int)Math.Ceiling((double)_currentData.Rows.Count / _pageSize);
+						_currentPage = 1;
+						await Task.Run(() => UpdateStatistics());
+						await RefreshGridDataAsync();
+					}
+					else
+					{
+						dgvRecords.DataSource = null;
+						dgvRecords.Columns.Clear();
+						UpdateStatistics();
+					}
 				}
-				else
+				catch (Exception ex)
 				{
-					dgvRecords.DataSource = null;
-					dgvRecords.Columns.Clear();
-					UpdateStatistics();
+					_log.SaveLog($"加载数据异常: {ex.Message}");
+					MessageBox.Show($"加载数据异常：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+				}
+				finally
+				{
+					this.Cursor = Cursors.Default;
 				}
 			}
-			catch (Exception ex)
-			{
-				_log.SaveLog($"加载数据异常: {ex.Message}");
-				MessageBox.Show($"加载数据异常：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-			}
-			finally
-			{
-				this.Cursor = Cursors.Default;
-			}
-		}
 
 		private void RefreshGridData()
         {
@@ -716,19 +750,47 @@ namespace SetProduct
                 dgvRecords.Columns.Clear();
                 return;
             }
-
-            ConfigureGridColumns();
-
+            if (_previousMode != currentMode)
+            {
+                _previousMode = currentMode;
+                ConfigureGridColumns();
+            }
+            var oldDS = dgvRecords.DataSource as DataTable;
             var displayData = _currentData.Clone();
             int start = (_currentPage - 1) * _pageSize;
             int end = Math.Min(start + _pageSize, _currentData.Rows.Count);
-
             for (int i = start; i < end; i++)
-            {
                 displayData.ImportRow(_currentData.Rows[i]);
-            }
-
             dgvRecords.DataSource = displayData;
+            if (oldDS != null && oldDS != displayData) oldDS.Dispose();
+            UpdatePageInfo();
+        }
+
+        private async Task RefreshGridDataAsync()
+        {
+            if (_currentData == null || _currentData.Rows.Count == 0)
+            {
+                dgvRecords.DataSource = null;
+                dgvRecords.Columns.Clear();
+                return;
+            }
+            if (_previousMode != currentMode)
+            {
+                _previousMode = currentMode;
+                ConfigureGridColumns();
+            }
+            int start = (_currentPage - 1) * _pageSize;
+            int end = Math.Min(start + _pageSize, _currentData.Rows.Count);
+            var displayData = await Task.Run(() =>
+            {
+                var dt = _currentData.Clone();
+                for (int i = start; i < end; i++)
+                    dt.ImportRow(_currentData.Rows[i]);
+                return dt;
+            });
+            var oldDS = dgvRecords.DataSource as DataTable;
+            dgvRecords.DataSource = displayData;
+            if (oldDS != null && oldDS != displayData) oldDS.Dispose();
             UpdatePageInfo();
         }
 
@@ -905,8 +967,7 @@ namespace SetProduct
             lblTotal.Text = total.ToString("N0");
             lblOK.Text = ok.ToString("N0");
             lblNG.Text = ng.ToString("N0");
-            
-            // 良率计算公式：良率 = OK合格数 ÷（总检测数 - 被剔除的连续爆管异常数量）
+
             double effectiveCount = total - excludeCount;
             double yield = effectiveCount > 0 ? (double)ok / effectiveCount * 100 : 0;
             lblYield.Text = yield.ToString("F2") + "%";
@@ -921,7 +982,7 @@ namespace SetProduct
 
         private void BtnSearch_Click(object sender, EventArgs e)
         {
-            LoadData();
+            _ = LoadData();
         }
 
         private void BtnReset_Click(object sender, EventArgs e)
@@ -931,7 +992,7 @@ namespace SetProduct
             cboShift.SelectedIndex = 0;
             cboResult.SelectedIndex = 0;
             txtSearch.Text = "";
-            LoadData();
+            _ = LoadData();
         }
 
         private void BtnPrev_Click(object sender, EventArgs e)
@@ -996,6 +1057,24 @@ namespace SetProduct
             catch (Exception ex)
             {
                 MessageBox.Show($"导出失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void BtnRefresh_Click(object sender, EventArgs e)
+        {
+            _ = LoadData();
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            if (e.CloseReason == CloseReason.UserClosing)
+            {
+                e.Cancel = true;
+                this.Hide();
+            }
+            else
+            {
+                base.OnFormClosing(e);
             }
         }
 

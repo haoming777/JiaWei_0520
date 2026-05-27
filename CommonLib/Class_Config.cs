@@ -513,123 +513,112 @@ namespace CommonLib
 			}
 		}
 
+		#region 计数器（内存缓存，5秒批量写盘）
+		private static double _totalVal = -1;
+		private static double _okVal, _ng1Val, _ng2Val, _ng3Val, _ng4Val, _ng5Val, _burstVal;
+		private static DateTime _cntLastFlush = DateTime.MinValue;
+		private static readonly object _cntLock = new object();
+
+		private static void LazyLoadCounters()
+		{
+			if (_totalVal >= 0) return;
+			lock (_cntLock)
+			{
+				if (_totalVal >= 0) return;
+				_totalVal = GetPrivateProfileDouble("count", "total", 0, _instance._iniPath);
+				_okVal = GetPrivateProfileDouble("count", "ok", 0, _instance._iniPath);
+				_ng1Val = GetPrivateProfileDouble("count", "ng_cam1", 0, _instance._iniPath);
+				_ng2Val = GetPrivateProfileDouble("count", "ng_cam2", 0, _instance._iniPath);
+				_ng3Val = GetPrivateProfileDouble("count", "ng_cam3", 0, _instance._iniPath);
+				_ng4Val = GetPrivateProfileDouble("count", "ng_cam4", 0, _instance._iniPath);
+				_ng5Val = GetPrivateProfileDouble("count", "ng_cam5", 0, _instance._iniPath);
+				_burstVal = GetPrivateProfileDouble("count", "burstExcludeCount", 0, _instance._iniPath);
+			}
+		}
+
+		private static void FlushCounters()
+		{
+			if ((DateTime.Now - _cntLastFlush).TotalMilliseconds < 5000) return;
+			lock (_cntLock)
+			{
+				if ((DateTime.Now - _cntLastFlush).TotalMilliseconds < 5000) return;
+				string ip = _instance._iniPath;
+				INIWriteValue(ip, "count", "total", _totalVal.ToString());
+				INIWriteValue(ip, "count", "ok", _okVal.ToString());
+				INIWriteValue(ip, "count", "ng_cam1", _ng1Val.ToString());
+				INIWriteValue(ip, "count", "ng_cam2", _ng2Val.ToString());
+				INIWriteValue(ip, "count", "ng_cam3", _ng3Val.ToString());
+				INIWriteValue(ip, "count", "ng_cam4", _ng4Val.ToString());
+				INIWriteValue(ip, "count", "ng_cam5", _ng5Val.ToString());
+				INIWriteValue(ip, "count", "burstExcludeCount", _burstVal.ToString());
+				_cntLastFlush = DateTime.Now;
+			}
+		}
+
 		/// <summary>
-		/// 检测总数
+		/// 批量清零所有计数器（原子操作，只写一次盘）
 		/// </summary>
+		public static void ResetAllCounters()
+		{
+			lock (_cntLock)
+			{
+				_totalVal = 0; _okVal = 0;
+				_ng1Val = 0; _ng2Val = 0; _ng3Val = 0; _ng4Val = 0; _ng5Val = 0;
+				_burstVal = 0;
+				string ip = _instance._iniPath;
+				INIWriteValue(ip, "count", "total", "0");
+				INIWriteValue(ip, "count", "ok", "0");
+				INIWriteValue(ip, "count", "ng_cam1", "0");
+				INIWriteValue(ip, "count", "ng_cam2", "0");
+				INIWriteValue(ip, "count", "ng_cam3", "0");
+				INIWriteValue(ip, "count", "ng_cam4", "0");
+				INIWriteValue(ip, "count", "ng_cam5", "0");
+				INIWriteValue(ip, "count", "burstExcludeCount", "0");
+				_cntLastFlush = DateTime.Now;
+			}
+		}
+
 		public double total
 		{
-			get
-			{
-				return GetPrivateProfileDouble("count", "total", 0, _iniPath);
-			}
-			set
-			{
-				INIWriteValue(_iniPath, "count", "total", value.ToString());
-			}
+			get { LazyLoadCounters(); return _totalVal; }
+			set { _totalVal = value; FlushCounters(); }
 		}
-		/// <summary>
-		/// 合格数
-		/// </summary>
 		public double ok
 		{
-			get
-			{
-				return GetPrivateProfileDouble("count", "ok", 0, _iniPath);
-			}
-			set
-			{
-				INIWriteValue(_iniPath, "count", "ok", value.ToString());
-			}
+			get { LazyLoadCounters(); return _okVal; }
+			set { _okVal = value; FlushCounters(); }
 		}
-		/// <summary>
-		/// 不良数
-		/// </summary>
 		public double ng_cam1
 		{
-			get
-			{
-				return GetPrivateProfileDouble("count", "ng_cam1", 0, _iniPath);
-			}
-			set
-			{
-				INIWriteValue(_iniPath, "count", "ng_cam1", value.ToString());
-			}
+			get { LazyLoadCounters(); return _ng1Val; }
+			set { _ng1Val = value; FlushCounters(); }
 		}
-
-		/// <summary>
-		/// 连续爆管剔除数量
-		/// </summary>
 		public double burstExcludeCount
 		{
-			get
-			{
-				return GetPrivateProfileDouble("count", "burstExcludeCount", 0, _iniPath);
-			}
-			set
-			{
-				INIWriteValue(_iniPath, "count", "burstExcludeCount", value.ToString());
-			}
+			get { LazyLoadCounters(); return _burstVal; }
+			set { _burstVal = value; FlushCounters(); }
 		}
-
-		/// <summary>
-		/// 不良数
-		/// </summary>
 		public double ng_cam2
 		{
-			get
-			{
-				return GetPrivateProfileDouble("count", "ng_cam2", 0, _iniPath);
-			}
-			set
-			{
-				INIWriteValue(_iniPath, "count", "ng_cam2", value.ToString());
-			}
+			get { LazyLoadCounters(); return _ng2Val; }
+			set { _ng2Val = value; FlushCounters(); }
 		}
-
-		/// <summary>
-		/// 不良数
-		/// </summary>
 		public double ng_cam3
 		{
-			get
-			{
-				return GetPrivateProfileDouble("count", "ng_cam3", 0, _iniPath);
-			}
-			set
-			{
-				INIWriteValue(_iniPath, "count", "ng_cam3", value.ToString());
-			}
+			get { LazyLoadCounters(); return _ng3Val; }
+			set { _ng3Val = value; FlushCounters(); }
 		}
-
-		/// <summary>
-		/// 不良数
-		/// </summary>
 		public double ng_cam4
 		{
-			get
-			{
-				return GetPrivateProfileDouble("count", "ng_cam4", 0, _iniPath);
-			}
-			set
-			{
-				INIWriteValue(_iniPath, "count", "ng_cam4", value.ToString());
-			}
+			get { LazyLoadCounters(); return _ng4Val; }
+			set { _ng4Val = value; FlushCounters(); }
 		}
-
-		/// <summary>
-		/// 不良数
-		/// </summary>
 		public double ng_cam5
 		{
-			get
-			{
-				return GetPrivateProfileDouble("count", "ng_cam5", 0, _iniPath);
-			}
-			set
-			{
-				INIWriteValue(_iniPath, "count", "ng_cam5", value.ToString());
-			}
+			get { LazyLoadCounters(); return _ng5Val; }
+			set { _ng5Val = value; FlushCounters(); }
 		}
+		#endregion
 
 		/// <summary>
 		/// 相机一运行总耗时

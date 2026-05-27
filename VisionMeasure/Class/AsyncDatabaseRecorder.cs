@@ -52,7 +52,7 @@ namespace VisionMeasure
 
 			// 【关键修复1】必须在这里强制带上 WAL 模式和连接池，防止 SQLiteHelper 内部被覆盖
 			// 增加 Synchronous=Normal 可以极大减少 SQLite 频繁刷写硬盘的动作，提升10倍写入性能
-			string connString = _databasePath + ";Journal Mode=WAL;Pooling=True;Max Pool Size=100;Synchronous=Normal;";
+			string connString = _databasePath + ";Journal Mode=WAL;Pooling=True;Max Pool Size=100;Synchronous=Normal;wal_autocheckpoint=10000;";
 			_dbHelper = new SQLiteHelper(connString);
 
 			_recordQueue = new BlockingCollection<ProductionRecord>(new ConcurrentQueue<ProductionRecord>(), 10000);
