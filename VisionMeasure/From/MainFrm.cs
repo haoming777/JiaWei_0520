@@ -272,6 +272,7 @@ namespace VisionMeasure
 			System.Runtime.GCSettings.LatencyMode = System.Runtime.GCLatencyMode.Batch;
 			// 【新增优化】提升当前进程在操作系统中的优先级，确保多线程调度更稳定
 			Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.High;
+				System.Threading.ThreadPool.SetMinThreads(30, 30);
 
 			_cts = new CancellationTokenSource();
 			InitializePerformanceMonitoring();
@@ -513,11 +514,11 @@ namespace VisionMeasure
 		{
 			try
 			{
-				_highSpeedSaver1 = new HighSpeedImageSaver("Camera1", 3, 200);
-				_highSpeedSaver2 = new HighSpeedImageSaver("Camera2", 3, 200);
-				_highSpeedSaver3 = new HighSpeedImageSaver("Camera3", 3, 200);
-				_highSpeedSaver4 = new HighSpeedImageSaver("Camera4", 3, 200);
-				_highSpeedSaver5 = new HighSpeedImageSaver("Camera5", 3, 200);
+				_highSpeedSaver1 = new HighSpeedImageSaver("Camera1", 1, 500);
+				_highSpeedSaver2 = new HighSpeedImageSaver("Camera2", 1, 500);
+				_highSpeedSaver3 = new HighSpeedImageSaver("Camera3", 1, 500);
+				_highSpeedSaver4 = new HighSpeedImageSaver("Camera4", 1, 500);
+				_highSpeedSaver5 = new HighSpeedImageSaver("Camera5", 1, 500);
 
 				_saveTimer = Stopwatch.StartNew();
 				_totalSaveCount = 0;
@@ -1439,18 +1440,18 @@ namespace VisionMeasure
 					// 【关键修复】每帧都必须绘制字体，决不能放在 id % 3 里面
 					using (Graphics g = Graphics.FromImage(resBmpForSave))
 					{
-						lock (_drawLock)
+						
 						{
 							int x = resBmpForSave.Width - 500; int y = 100;
-							g.DrawString("相机：底部异物检测", Font_Title, Brush_Green, x, y); y += 70;
-							g.DrawString($"检测时间：{DateTime.Now:HH:mm:ss.fff}", Font_Text, Brush_Green, x, y); y += 70;
-							g.DrawString($"综合结果：{(result ? "OK" : "NG")}", Font_Text, result ? Brush_Green : Brush_Red, x, y); y += 70;
+							g.DrawString("相机：底部异物检测", _processor1.DrawFontTitle, _processor1.DrawBrushGreen, x, y); y += 70;
+							g.DrawString($"检测时间：{DateTime.Now:HH:mm:ss.fff}", _processor1.DrawFontText, _processor1.DrawBrushGreen, x, y); y += 70;
+							g.DrawString($"综合结果：{(result ? "OK" : "NG")}", _processor1.DrawFontText, result ? _processor1.DrawBrushGreen : _processor1.DrawBrushRed, x, y); y += 70;
 
 							if (!result_Segmentation)
 							{
-								g.DrawString($"异物面积：{totalArea:F2} / {totalArea_Camera1}", Font_Text, Brush_Red, x, y); y += 70;
+								g.DrawString($"异物面积：{totalArea:F2} / {totalArea_Camera1}", _processor1.DrawFontText, _processor1.DrawBrushRed, x, y); y += 70;
 							}
-							g.DrawString($"SequenceId：{id}", Font_Text, Brush_Green, x, y); y += 70;
+							g.DrawString($"SequenceId：{id}", _processor1.DrawFontText, _processor1.DrawBrushGreen, x, y); y += 70;
 						}
 					}
 
@@ -1622,18 +1623,18 @@ namespace VisionMeasure
 					// 【关键修复】每帧必画字
 					using (Graphics g = Graphics.FromImage(resBmpForSave))
 					{
-						lock (_drawLock)
+						
 						{
 							int x = resBmpForSave.Width - 500; int y = 100;
-							g.DrawString("相机：瓶盖有无检测", Font_Title, Brush_Green, x, y); y += 70;
-							g.DrawString($"检测时间：{DateTime.Now:HH:mm:ss.fff}", Font_Text, Brush_Green, x, y); y += 70;
-							g.DrawString($"综合结果：{(result ? "OK" : "NG")}", Font_Text, result ? Brush_Green : Brush_Red, x, y); y += 70;
+							g.DrawString("相机：瓶盖有无检测", _processor2.DrawFontTitle, _processor2.DrawBrushGreen, x, y); y += 70;
+							g.DrawString($"检测时间：{DateTime.Now:HH:mm:ss.fff}", _processor2.DrawFontText, _processor2.DrawBrushGreen, x, y); y += 70;
+							g.DrawString($"综合结果：{(result ? "OK" : "NG")}", _processor2.DrawFontText, result ? _processor2.DrawBrushGreen : _processor2.DrawBrushRed, x, y); y += 70;
 
 							if (!string.IsNullOrEmpty(result_class))
 							{
-								g.DrawString($"缺陷标签：{result_class}", Font_Text, Brush_Red, x, y); y += 70;
+								g.DrawString($"缺陷标签：{result_class}", _processor2.DrawFontText, _processor2.DrawBrushRed, x, y); y += 70;
 							}
-							g.DrawString($"SequenceId：{id}", Font_Text, Brush_Green, x, y); y += 70;
+							g.DrawString($"SequenceId：{id}", _processor2.DrawFontText, _processor2.DrawBrushGreen, x, y); y += 70;
 						}
 					}
 
@@ -1786,23 +1787,23 @@ namespace VisionMeasure
 					// 【关键修复】每帧必画字
 					using (Graphics g = Graphics.FromImage(resBmpForSave))
 					{
-						lock (_drawLock)
+						
 						{
 							int x = resBmpForSave.Width - 500; int y = 100;
-							g.DrawString("相机：管口圆度检测", Font_Title, Brush_Green, x, y); y += 70;
-							g.DrawString($"检测时间：{DateTime.Now:HH:mm:ss.fff}", Font_Text, Brush_Green, x, y); y += 70;
-							g.DrawString($"综合结果：{(result ? "OK" : "NG")}", Font_Text, result ? Brush_Green : Brush_Red, x, y); y += 70;
+							g.DrawString("相机：管口圆度检测", _processor3.DrawFontTitle, _processor3.DrawBrushGreen, x, y); y += 70;
+							g.DrawString($"检测时间：{DateTime.Now:HH:mm:ss.fff}", _processor3.DrawFontText, _processor3.DrawBrushGreen, x, y); y += 70;
+							g.DrawString($"综合结果：{(result ? "OK" : "NG")}", _processor3.DrawFontText, result ? _processor3.DrawBrushGreen : _processor3.DrawBrushRed, x, y); y += 70;
 
-							g.DrawString($"长边：{longEdge:F2}", Font_Text, result ? Brush_Green : Brush_Red, x, y); y += 70;
-							g.DrawString($"管径：{PipeDiameter}", Font_Text, result ? Brush_Green : Brush_Red, x, y); y += 70;
+							g.DrawString($"长边：{longEdge:F2}", _processor3.DrawFontText, result ? _processor3.DrawBrushGreen : _processor3.DrawBrushRed, x, y); y += 70;
+							g.DrawString($"管径：{PipeDiameter}", _processor3.DrawFontText, result ? _processor3.DrawBrushGreen : _processor3.DrawBrushRed, x, y); y += 70;
 
-							if (!result) { g.DrawString($"圆度上限：{_Config.Camera3RoundnessUp}", Font_Text, Brush_Green, x, y); y += 70; }
-							g.DrawString($"圆度：{roundness:F3}", Font_Text, result ? Brush_Green : Brush_Red, x, y); y += 70;
+							if (!result) { g.DrawString($"圆度上限：{_Config.Camera3RoundnessUp}", _processor3.DrawFontText, _processor3.DrawBrushGreen, x, y); y += 70; }
+							g.DrawString($"圆度：{roundness:F3}", _processor3.DrawFontText, result ? _processor3.DrawBrushGreen : _processor3.DrawBrushRed, x, y); y += 70;
 							if (!result)
 							{
-								g.DrawString($"圆度下限：{_Config.Camera3RoundnessDown}", Font_Text, Brush_Green, x, y); y += 70;
+								g.DrawString($"圆度下限：{_Config.Camera3RoundnessDown}", _processor3.DrawFontText, _processor3.DrawBrushGreen, x, y); y += 70;
 							}
-							g.DrawString($"SequenceId：{id}", Font_Text, Brush_Green, x, y); y += 70;
+							g.DrawString($"SequenceId：{id}", _processor3.DrawFontText, _processor3.DrawBrushGreen, x, y); y += 70;
 						}
 					}
 
@@ -2050,15 +2051,15 @@ namespace VisionMeasure
 					// 【关键修复】每帧必画字
 					using (Graphics g = Graphics.FromImage(resBmpForSave))
 					{
-						lock (_drawLock)
+						
 						{
 							int x = resBmpForSave.Width - 500; int y = 100;
-							g.DrawString("相机：夹尾正面字符检测", Font_Title, Brush_Green, x, y); y += 70;
-							g.DrawString($"检测时间：{DateTime.Now:HH:mm:ss.fff}", Font_Text, Brush_Green, x, y); y += 70;
-							g.DrawString($"综合结果：{(result ? "OK" : "NG")}", Font_Text, result ? Brush_Green : Brush_Red, x, y); y += 70;
-							g.DrawString($"字符结果：{(result_char ? "OK" : "NG")}", Font_Text, result_char ? Brush_Green : Brush_Red, x, y); y += 70;
-							g.DrawString($"{order_ocr}", Font_Text, result_char ? Brush_Green : Brush_Red, x, y); y += 70;
-							g.DrawString($"SequenceId：{id}", Font_Text, Brush_Green, x, y); y += 70;
+							g.DrawString("相机：夹尾正面字符检测", _processor4.DrawFontTitle, _processor4.DrawBrushGreen, x, y); y += 70;
+							g.DrawString($"检测时间：{DateTime.Now:HH:mm:ss.fff}", _processor4.DrawFontText, _processor4.DrawBrushGreen, x, y); y += 70;
+							g.DrawString($"综合结果：{(result ? "OK" : "NG")}", _processor4.DrawFontText, result ? _processor4.DrawBrushGreen : _processor4.DrawBrushRed, x, y); y += 70;
+							g.DrawString($"字符结果：{(result_char ? "OK" : "NG")}", _processor4.DrawFontText, result_char ? _processor4.DrawBrushGreen : _processor4.DrawBrushRed, x, y); y += 70;
+							g.DrawString($"{order_ocr}", _processor4.DrawFontText, result_char ? _processor4.DrawBrushGreen : _processor4.DrawBrushRed, x, y); y += 70;
+							g.DrawString($"SequenceId：{id}", _processor4.DrawFontText, _processor4.DrawBrushGreen, x, y); y += 70;
 						}
 					}
 
@@ -2418,37 +2419,37 @@ namespace VisionMeasure
 					// 【关键修复】存入缓存之前画字
 					using (Graphics g = Graphics.FromImage(resBmpForSave))
 					{
-						lock (_drawLock)
+						
 						{
 							int x = resBmpForSave.Width - 600; int y = 100;
-							g.DrawString("相机：夹尾反面字符检测", Font_Title, Brush_Green, x, y); y += 70;
-							g.DrawString($"检测时间：{DateTime.Now:HH:mm:ss.fff}", Font_Text, Brush_Green, x, y); y += 70;
-							g.DrawString($"综合结果：{(result ? "OK" : "NG")}", Font_Text, result ? Brush_Green : Brush_Red, x, y); y += 70;
-							g.DrawString($"字符结果：{(result_char ? "OK" : "NG")}", Font_Text, result_char ? Brush_Green : Brush_Red, x, y); y += 70;
-							g.DrawString($"{order_ocr}", Font_Text, result_char ? Brush_Green : Brush_Red, x, y); y += 70;
+							g.DrawString("相机：夹尾反面字符检测", _processor5.DrawFontTitle, _processor5.DrawBrushGreen, x, y); y += 70;
+							g.DrawString($"检测时间：{DateTime.Now:HH:mm:ss.fff}", _processor5.DrawFontText, _processor5.DrawBrushGreen, x, y); y += 70;
+							g.DrawString($"综合结果：{(result ? "OK" : "NG")}", _processor5.DrawFontText, result ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70;
+							g.DrawString($"字符结果：{(result_char ? "OK" : "NG")}", _processor5.DrawFontText, result_char ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70;
+							g.DrawString($"{order_ocr}", _processor5.DrawFontText, result_char ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70;
 							if (_Config.Camera5IFPCode)
 							{
-								g.DrawString($"P-Code结果：{(result_PCode_char ? "OK" : "NG")}", Font_Text, result_PCode_char ? Brush_Green : Brush_Red, x, y); y += 70;
-								g.DrawString($"{pcode_ocr}", Font_Text, result_PCode_char ? Brush_Green : Brush_Red, x, y); y += 70;
+								g.DrawString($"P-Code结果：{(result_PCode_char ? "OK" : "NG")}", _processor5.DrawFontText, result_PCode_char ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70;
+								g.DrawString($"{pcode_ocr}", _processor5.DrawFontText, result_PCode_char ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70;
 								if (!result_PCode_char)
 								{
-									g.DrawString($"P-Code标准: {_Config.Standard_PCode}", Font_Text, Brush_Green, x, y); y += 70;
+									g.DrawString($"P-Code标准: {_Config.Standard_PCode}", _processor5.DrawFontText, _processor5.DrawBrushGreen, x, y); y += 70;
 									y += 70;
 								}
 							}
 
-							g.DrawString($"色标结果：{(result_Segmentation ? "OK" : "NG")}", Font_Text, result_Segmentation ? Brush_Green : Brush_Red, x, y); y += 70;
+							g.DrawString($"色标结果：{(result_Segmentation ? "OK" : "NG")}", _processor5.DrawFontText, result_Segmentation ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70;
 							if (segmentationResult.DetectedBoth)
 							{
-								g.DrawString($"色标测量值：{projectionLength:F2}mm", Font_Text, result_Segmentation ? Brush_Green : Brush_Red, x, y); y += 70;
+								g.DrawString($"色标测量值：{projectionLength:F2}mm", _processor5.DrawFontText, result_Segmentation ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70;
 							}
-							g.DrawString($"缺陷结果：{(result_flaw ? "OK" : "NG")}", Font_Text, result_flaw ? Brush_Green : Brush_Red, x, y); y += 70;
+							g.DrawString($"缺陷结果：{(result_flaw ? "OK" : "NG")}", _processor5.DrawFontText, result_flaw ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70;
 
 							if (!string.IsNullOrEmpty(result_class))
 							{
-								g.DrawString($"缺陷标签：{result_class}", Font_Text, result_flaw ? Brush_Green : Brush_Red, x, y); y += 70;
+								g.DrawString($"缺陷标签：{result_class}", _processor5.DrawFontText, result_flaw ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70;
 							}
-							g.DrawString($"SequenceId：{id}", Font_Text, Brush_Green, x, y); y += 70;
+							g.DrawString($"SequenceId：{id}", _processor5.DrawFontText, _processor5.DrawBrushGreen, x, y); y += 70;
 						}
 					}
 
@@ -2631,7 +2632,7 @@ namespace VisionMeasure
 				string yFileName = $"{dtFormat}_Y_ID{SequenceId - Offset}_SequenceId{SequenceId}_Offset{Offset}_result-{resultBool}-{(resultBool ? "OK" : "NG")}.jpg";
 				string yPath = Path.Combine(basePath, yFileName);
 
-				byte[] yData = BitmapFastConverter.ToBmpBytesFast(original);
+				byte[] yData = BitmapFastConverter.ToBmpBytesViaOpenCv(original);
 				if (yData != null && yData.Length > 0)
 				{
 					saver.AddSaveTask(yPath, yData, false, 100);
@@ -4573,6 +4574,11 @@ namespace VisionMeasure
 		private PerformanceStats _performanceStats;
 		private bool _disposed = false;
 		private bool _isProcessing = false;
+		// 每个相机独立的绘制资源
+		public readonly Font DrawFontTitle;
+		public readonly Font DrawFontText;
+		public readonly SolidBrush DrawBrushGreen;
+		public readonly SolidBrush DrawBrushRed;
 		XLToolClass toolClass = new XLToolClass();
 
 		public int ImageQueueCount => _imageQueue.Count;
@@ -4595,6 +4601,11 @@ namespace VisionMeasure
 				Priority = ThreadPriority.AboveNormal
 			};
 			_processorThread.Start();
+			// 每个相机独立创建
+			DrawFontTitle = new Font("微软雅黑", 24, FontStyle.Bold);
+			DrawFontText = new Font("微软雅黑", 24, FontStyle.Bold);
+			DrawBrushGreen = new SolidBrush(Color.LawnGreen);
+			DrawBrushRed = new SolidBrush(Color.Red);
 		}
 
 		public bool AddImage(long sequenceId, Bitmap bitmap, int offset, CameraSelect camera)
@@ -4762,6 +4773,10 @@ namespace VisionMeasure
 					catch { }
 				}
 
+				DrawFontTitle?.Dispose();
+				DrawFontText?.Dispose();
+				DrawBrushGreen?.Dispose();
+				DrawBrushRed?.Dispose();
 				_imageQueue?.Dispose();
 				_resultQueue?.Dispose();
 			}
@@ -5084,6 +5099,22 @@ namespace VisionMeasure
 			catch { return null; }
 		}
 
+
+
+		public static byte[] ToBmpBytesViaOpenCv(Bitmap bitmap)
+		{
+			if (bitmap == null) return null;
+			try
+			{
+				using (var mat = BitmapConverter.ToMat(bitmap))
+				{
+					byte[] buf;
+					bool success = Cv2.ImEncode(".bmp", mat, out buf);
+					return success ? buf : null;
+				}
+			}
+			catch { return null; }
+		}
 
 		public static byte[] ToJpegBytesFast(this Bitmap bitmap, int quality = 85)
 		{

@@ -57,6 +57,27 @@ namespace CommonLib
 		// 定义标识符确保多线程安全性
 		private static readonly object locker = new object();
 
+		// INI配置缓存：避免每次getter都P/Invoke读磁盘（每周期~35次）
+		private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _iniCache
+			= new System.Collections.Concurrent.ConcurrentDictionary<string, string>();
+
+		private string GetCachedValue(string section, string key, string defaultValue)
+		{
+			string cacheKey = section + "|" + key;
+			if (_iniCache.TryGetValue(cacheKey, out string cached))
+				return cached;
+			string value = GetPrivateProfileString(section, key, defaultValue, _iniPath);
+			_iniCache[cacheKey] = value;
+			return value;
+		}
+
+		private void SetCachedValue(string section, string key, string value)
+		{
+			string cacheKey = section + "|" + key;
+			_iniCache[cacheKey] = value;
+			INIWriteValue(_iniPath, section, key, value);
+		}
+
 		public static PLC plc;
 		public static Class_Config GetInstance()
 		{
@@ -107,11 +128,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("system", "curSpec", "A50", _iniPath);
+				return GetCachedValue("system", "curSpec", "A50");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "curSpec", value.ToString());
+				SetCachedValue("system", "curSpec", value.ToString());
 			}
 		}
 
@@ -122,11 +143,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("system", "LastSku", "", _iniPath);
+				return GetCachedValue("system", "LastSku", "");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "LastSku", value.ToString());
+				SetCachedValue("system", "LastSku", value.ToString());
 			}
 		}
 
@@ -137,11 +158,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("system", "curBa", "塑料把", _iniPath);
+				return GetCachedValue("system", "curBa", "塑料把");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "curBa", value.ToString());
+				SetCachedValue("system", "curBa", value.ToString());
 			}
 		}
 		/// <summary>
@@ -151,11 +172,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("system", "First", "MFG", _iniPath);
+				return GetCachedValue("system", "First", "MFG");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "First", value.ToString());
+				SetCachedValue("system", "First", value.ToString());
 			}
 		}
 		/// <summary>
@@ -165,11 +186,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("system", "Second", "MFG", _iniPath);
+				return GetCachedValue("system", "Second", "MFG");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "Second", value.ToString());
+				SetCachedValue("system", "Second", value.ToString());
 			}
 		}
 
@@ -181,7 +202,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "cameraDebug", value.ToString());
+				SetCachedValue("system", "cameraDebug", value.ToString());
 			}
 		}
 
@@ -193,11 +214,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("system", "CreateBa", "塑料把", _iniPath);
+				return GetCachedValue("system", "CreateBa", "塑料把");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "CreateBa", value.ToString());
+				SetCachedValue("system", "CreateBa", value.ToString());
 			}
 		}
 		/// <summary>
@@ -207,11 +228,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("system", "curId", "1", _iniPath);
+				return GetCachedValue("system", "curId", "1");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "curId", value.ToString());
+				SetCachedValue("system", "curId", value.ToString());
 			}
 		}
 
@@ -222,11 +243,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("system", "imagePath", _path + "\\image", _iniPath);
+				return GetCachedValue("system", "imagePath", _path + "\\image");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "imagePath", value.ToString());
+				SetCachedValue("system", "imagePath", value.ToString());
 			}
 		}
 
@@ -234,11 +255,11 @@ namespace CommonLib
 		//{
 		//	get
 		//	{
-		//		return GetPrivateProfileString("路径", "dataPath", _path + "\\data", _iniPath);
+		//		return GetCachedValue("路径", "dataPath", _path + "\\data");
 		//	}
 		//	set
 		//	{
-		//		INIWriteValue(_iniPath, "路径", "dataPath", value.ToString());
+		//		SetCachedValue("路径", "dataPath", value.ToString());
 		//	}
 		//}
 
@@ -249,11 +270,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("camera", "camera1sn", "DA1665132", _iniPath);
+				return GetCachedValue("camera", "camera1sn", "DA1665132");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "camera", "camera1sn", value.ToString());
+				SetCachedValue("camera", "camera1sn", value.ToString());
 			}
 		}
 
@@ -263,11 +284,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return bool.Parse(GetPrivateProfileString("system", "saveokimage", "true", _iniPath));
+				return bool.Parse(GetCachedValue("system", "saveokimage", "true"));
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "saveokimage", value.ToString());
+				SetCachedValue("system", "saveokimage", value.ToString());
 			}
 
 		}
@@ -275,11 +296,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return bool.Parse(GetPrivateProfileString("system", "savengimage", "true", _iniPath));
+				return bool.Parse(GetCachedValue("system", "savengimage", "true"));
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "savengimage", value.ToString());
+				SetCachedValue("system", "savengimage", value.ToString());
 			}
 
 		}
@@ -287,11 +308,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return bool.Parse(GetPrivateProfileString("system", "saveokrawimage", "true", _iniPath));
+				return bool.Parse(GetCachedValue("system", "saveokrawimage", "true"));
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "saveokrawimage", value.ToString());
+				SetCachedValue("system", "saveokrawimage", value.ToString());
 			}
 
 		}
@@ -299,11 +320,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return bool.Parse(GetPrivateProfileString("system", "savengrawimage", "true", _iniPath));
+				return bool.Parse(GetCachedValue("system", "savengrawimage", "true"));
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "savengrawimage", value.ToString());
+				SetCachedValue("system", "savengrawimage", value.ToString());
 			}
 
 		}
@@ -318,18 +339,18 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "imagedays", value.ToString());
+				SetCachedValue("system", "imagedays", value.ToString());
 			}
 		}
 		public string Camera2SN
 		{
 			get
 			{
-				return GetPrivateProfileString("camera", "camera2sn", "DA1665132", _iniPath);
+				return GetCachedValue("camera", "camera2sn", "DA1665132");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "camera", "camera2sn", value.ToString());
+				SetCachedValue("camera", "camera2sn", value.ToString());
 			}
 		}
 
@@ -341,11 +362,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("StandChar", "Camera1Ignore", "False", _iniPath);
+				return GetCachedValue("StandChar", "Camera1Ignore", "False");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "StandChar", "Camera1Ignore", value.ToString());
+				SetCachedValue("StandChar", "Camera1Ignore", value.ToString());
 			}
 		}
 		/// <summary>
@@ -355,11 +376,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("StandChar", "Camera2Ignore", "False", _iniPath);
+				return GetCachedValue("StandChar", "Camera2Ignore", "False");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "StandChar", "Camera2Ignore", value.ToString());
+				SetCachedValue("StandChar", "Camera2Ignore", value.ToString());
 			}
 		}
 
@@ -369,11 +390,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("camera", "camera3sn", "DA1665132", _iniPath);
+				return GetCachedValue("camera", "camera3sn", "DA1665132");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "camera", "camera3sn", value.ToString());
+				SetCachedValue("camera", "camera3sn", value.ToString());
 			}
 		}
 
@@ -381,11 +402,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("camera", "camera4sn", "DA1665132", _iniPath);
+				return GetCachedValue("camera", "camera4sn", "DA1665132");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "camera", "camera4sn", value.ToString());
+				SetCachedValue("camera", "camera4sn", value.ToString());
 			}
 		}
 
@@ -393,11 +414,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("camera", "camera5sn", "DA1665132", _iniPath);
+				return GetCachedValue("camera", "camera5sn", "DA1665132");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "camera", "camera5sn", value.ToString());
+				SetCachedValue("camera", "camera5sn", value.ToString());
 			}
 		}
 
@@ -405,11 +426,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("control", "ipaddr", "192.168000.0.11", _iniPath);
+				return GetCachedValue("control", "ipaddr", "192.168000.0.11");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "control", "ipaddr", value.ToString());
+				SetCachedValue("control", "ipaddr", value.ToString());
 			}
 		}
 
@@ -418,11 +439,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("modbus", "modbusIP", "127.0.0.1", _iniPath);
+				return GetCachedValue("modbus", "modbusIP", "127.0.0.1");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "modbus", "modbusIP", value.ToString());
+				SetCachedValue("modbus", "modbusIP", value.ToString());
 			}
 		}
 
@@ -434,7 +455,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "modbus", "modbusPort", value.ToString());
+				SetCachedValue("modbus", "modbusPort", value.ToString());
 			}
 		}
 		/// <summary>
@@ -448,7 +469,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "K", value.ToString());
+				SetCachedValue("system", "K", value.ToString());
 			}
 		}
 
@@ -463,7 +484,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "params", "K_Cam3", value.ToString());
+				SetCachedValue("params", "K_Cam3", value.ToString());
 			}
 		}
 
@@ -478,7 +499,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "Offset", value.ToString());
+				SetCachedValue("system", "Offset", value.ToString());
 			}
 		}
 
@@ -494,7 +515,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "Astrict", value.ToString());
+				SetCachedValue("system", "Astrict", value.ToString());
 			}
 		}
 
@@ -509,7 +530,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "Parameter", _Config.CurCheckSpec + "_Duancha", value.ToString());
+				SetCachedValue("Parameter", _Config.CurCheckSpec + "_Duancha", value.ToString());
 			}
 		}
 
@@ -631,7 +652,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "totalTimeCam1", value.ToString());
+				SetCachedValue("system", "totalTimeCam1", value.ToString());
 			}
 		}
 
@@ -646,7 +667,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "totalTimeCam2", value.ToString());
+				SetCachedValue("system", "totalTimeCam2", value.ToString());
 			}
 		}
 
@@ -661,7 +682,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "BaoGuan_minArea", value.ToString());
+				SetCachedValue("system", "BaoGuan_minArea", value.ToString());
 			}
 		}
 
@@ -673,11 +694,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("system", "IFInitCamera", "True", _iniPath);
+				return GetCachedValue("system", "IFInitCamera", "True");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "IFInitCamera", value.ToString());
+				SetCachedValue("system", "IFInitCamera", value.ToString());
 			}
 		}
 
@@ -685,11 +706,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return bool.Parse(GetPrivateProfileString("system", "IFRunSaveLog", "False", _iniPath));
+				return bool.Parse(GetCachedValue("system", "IFRunSaveLog", "False"));
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "IFRunSaveLog", value.ToString());
+				SetCachedValue("system", "IFRunSaveLog", value.ToString());
 			}
 		}
 
@@ -700,11 +721,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return bool.Parse(GetPrivateProfileString("system", "IFCamera4NG", "False", _iniPath));
+				return bool.Parse(GetCachedValue("system", "IFCamera4NG", "False"));
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "IFCamera4NG", value.ToString());
+				SetCachedValue("system", "IFCamera4NG", value.ToString());
 			}
 		}
 
@@ -712,11 +733,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("temp", "ImagePath1", "True", _iniPath);
+				return GetCachedValue("temp", "ImagePath1", "True");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "temp", "ImagePath1", value.ToString());
+				SetCachedValue("temp", "ImagePath1", value.ToString());
 			}
 		}
 
@@ -724,22 +745,22 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("temp", "ImagePath2", "True", _iniPath);
+				return GetCachedValue("temp", "ImagePath2", "True");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "temp", "ImagePath2", value.ToString());
+				SetCachedValue("temp", "ImagePath2", value.ToString());
 			}
 		}
 		public string ImagePath2_1
 		{
 			get
 			{
-				return GetPrivateProfileString("temp", "ImagePath2_1", "True", _iniPath);
+				return GetCachedValue("temp", "ImagePath2_1", "True");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "temp", "ImagePath2_1", value.ToString());
+				SetCachedValue("temp", "ImagePath2_1", value.ToString());
 			}
 		}
 
@@ -747,11 +768,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("temp", "ImagePath3", "True", _iniPath);
+				return GetCachedValue("temp", "ImagePath3", "True");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "temp", "ImagePath3", value.ToString());
+				SetCachedValue("temp", "ImagePath3", value.ToString());
 			}
 		}
 
@@ -759,11 +780,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("temp", "ImagePath4", "True", _iniPath);
+				return GetCachedValue("temp", "ImagePath4", "True");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "temp", "ImagePath4", value.ToString());
+				SetCachedValue("temp", "ImagePath4", value.ToString());
 			}
 		}
 
@@ -771,11 +792,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("temp", "ImagePath5", "True", _iniPath);
+				return GetCachedValue("temp", "ImagePath5", "True");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "temp", "ImagePath5", value.ToString());
+				SetCachedValue("temp", "ImagePath5", value.ToString());
 			}
 		}
 		#endregion
@@ -794,7 +815,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "input_port", "cam1", value.ToString());
+				SetCachedValue("input_port", "cam1", value.ToString());
 			}
 		}
 
@@ -809,7 +830,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "input_port", "cam2", value.ToString());
+				SetCachedValue("input_port", "cam2", value.ToString());
 			}
 		}
 
@@ -824,7 +845,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "input_port", "cam3", value.ToString());
+				SetCachedValue("input_port", "cam3", value.ToString());
 			}
 		}
 
@@ -839,7 +860,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "input_port", "cam4", value.ToString());
+				SetCachedValue("input_port", "cam4", value.ToString());
 			}
 		}
 
@@ -854,7 +875,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "input_port", "cam5", value.ToString());
+				SetCachedValue("input_port", "cam5", value.ToString());
 			}
 		}
 		#endregion
@@ -867,11 +888,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("output_port", "cam1", "MX7080.4", _iniPath);
+				return GetCachedValue("output_port", "cam1", "MX7080.4");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "output_port", "cam1", value.ToString());
+				SetCachedValue("output_port", "cam1", value.ToString());
 			}
 		}
 
@@ -882,11 +903,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("output_port", "cam2", "MX7080.3", _iniPath);
+				return GetCachedValue("output_port", "cam2", "MX7080.3");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "output_port", "cam2", value.ToString());
+				SetCachedValue("output_port", "cam2", value.ToString());
 			}
 		}
 
@@ -897,11 +918,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("output_port", "cam3", "MX7080.3", _iniPath);
+				return GetCachedValue("output_port", "cam3", "MX7080.3");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "output_port", "cam3", value.ToString());
+				SetCachedValue("output_port", "cam3", value.ToString());
 			}
 		}
 
@@ -912,11 +933,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("output_port", "cam4", "MX7080.1", _iniPath);
+				return GetCachedValue("output_port", "cam4", "MX7080.1");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "output_port", "cam4", value.ToString());
+				SetCachedValue("output_port", "cam4", value.ToString());
 			}
 		}
 
@@ -927,11 +948,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("output_port", "cam5", "MX7080.3", _iniPath);
+				return GetCachedValue("output_port", "cam5", "MX7080.3");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "output_port", "cam5", value.ToString());
+				SetCachedValue("output_port", "cam5", value.ToString());
 			}
 		}
 		#endregion
@@ -949,7 +970,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "output_delay", "cam1", value.ToString());
+				SetCachedValue("output_delay", "cam1", value.ToString());
 			}
 		}
 
@@ -964,7 +985,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "output_delay", "cam2", value.ToString());
+				SetCachedValue("output_delay", "cam2", value.ToString());
 			}
 		}
 
@@ -979,7 +1000,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "output_delay", "cam3", value.ToString());
+				SetCachedValue("output_delay", "cam3", value.ToString());
 			}
 		}
 
@@ -994,7 +1015,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "output_delay", "cam4", value.ToString());
+				SetCachedValue("output_delay", "cam4", value.ToString());
 			}
 		}
 
@@ -1009,7 +1030,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "output_delay", "cam5", value.ToString());
+				SetCachedValue("output_delay", "cam5", value.ToString());
 			}
 		}
 
@@ -1032,7 +1053,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "offset", "cam1", value.ToString());
+				SetCachedValue("offset", "cam1", value.ToString());
 			}
 		}
 
@@ -1047,7 +1068,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "offset", "cam2", value.ToString());
+				SetCachedValue("offset", "cam2", value.ToString());
 			}
 		}
 
@@ -1062,7 +1083,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "offset", "cam3", value.ToString());
+				SetCachedValue("offset", "cam3", value.ToString());
 			}
 		}
 
@@ -1077,7 +1098,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "offset", "cam4", value.ToString());
+				SetCachedValue("offset", "cam4", value.ToString());
 			}
 		}
 
@@ -1092,7 +1113,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "offset", "cam5", value.ToString());
+				SetCachedValue("offset", "cam5", value.ToString());
 			}
 		}
 
@@ -1107,7 +1128,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "offset", "send", value.ToString());
+				SetCachedValue("offset", "send", value.ToString());
 			}
 		}
 
@@ -1119,7 +1140,7 @@ namespace CommonLib
 		//	}
 		//	set
 		//	{
-		//		INIWriteValue(_iniPath, "offset", "send", value.ToString());
+		//		SetCachedValue("offset", "send", value.ToString());
 		//	}
 		//}
 
@@ -1137,7 +1158,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, _Config.CurCheckSpec + "_Position", "ZhengPosition", value.ToString());
+				SetCachedValue(_Config.CurCheckSpec + "_Position", "ZhengPosition", value.ToString());
 			}
 		}
 		/// <summary>
@@ -1151,7 +1172,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, _Config.CurCheckSpec + "_Position", "FanPosition", value.ToString());
+				SetCachedValue(_Config.CurCheckSpec + "_Position", "FanPosition", value.ToString());
 			}
 		}
 
@@ -1166,7 +1187,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, _Config.CurCheckSpec + "_Position", "RoundPosition", value.ToString());
+				SetCachedValue(_Config.CurCheckSpec + "_Position", "RoundPosition", value.ToString());
 			}
 		}
 		#endregion
@@ -1183,7 +1204,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "control", "Red_Light_Num", value.ToString());
+				SetCachedValue("control", "Red_Light_Num", value.ToString());
 			}
 		}
 
@@ -1198,7 +1219,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "control", "Green_Light_Num", value.ToString());
+				SetCachedValue("control", "Green_Light_Num", value.ToString());
 			}
 		}
 
@@ -1213,7 +1234,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "control", "Yellow_Light_Num", value.ToString());
+				SetCachedValue("control", "Yellow_Light_Num", value.ToString());
 			}
 		}
 
@@ -1228,7 +1249,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "control", "Buzzer_Num", value.ToString());
+				SetCachedValue("control", "Buzzer_Num", value.ToString());
 			}
 		}
 		#endregion
@@ -1247,7 +1268,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis0_Units", value.ToString());
+				SetCachedValue("axis", "axis0_Units", value.ToString());
 			}
 		}
 
@@ -1262,7 +1283,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis0_Speed", value.ToString());
+				SetCachedValue("axis", "axis0_Speed", value.ToString());
 			}
 		}
 
@@ -1277,7 +1298,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis0_Accel", value.ToString());
+				SetCachedValue("axis", "axis0_Accel", value.ToString());
 			}
 		}
 
@@ -1292,7 +1313,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis0_Decel", value.ToString());
+				SetCachedValue("axis", "axis0_Decel", value.ToString());
 			}
 		}
 
@@ -1307,7 +1328,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis0_Sramp", value.ToString());
+				SetCachedValue("axis", "axis0_Sramp", value.ToString());
 			}
 		}
 
@@ -1322,7 +1343,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis0_Lspeed", value.ToString());
+				SetCachedValue("axis", "axis0_Lspeed", value.ToString());
 			}
 		}
 
@@ -1340,7 +1361,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis1_Units", value.ToString());
+				SetCachedValue("axis", "axis1_Units", value.ToString());
 			}
 		}
 
@@ -1355,7 +1376,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis1_Speed", value.ToString());
+				SetCachedValue("axis", "axis1_Speed", value.ToString());
 			}
 		}
 
@@ -1370,7 +1391,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis1_Accel", value.ToString());
+				SetCachedValue("axis", "axis1_Accel", value.ToString());
 			}
 		}
 
@@ -1385,7 +1406,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis1_Decel", value.ToString());
+				SetCachedValue("axis", "axis1_Decel", value.ToString());
 			}
 		}
 
@@ -1400,7 +1421,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis1_Sramp", value.ToString());
+				SetCachedValue("axis", "axis1_Sramp", value.ToString());
 			}
 		}
 
@@ -1415,7 +1436,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis1_Lspeed", value.ToString());
+				SetCachedValue("axis", "axis1_Lspeed", value.ToString());
 			}
 		}
 		#endregion
@@ -1432,7 +1453,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis2_Units", value.ToString());
+				SetCachedValue("axis", "axis2_Units", value.ToString());
 			}
 		}
 
@@ -1447,7 +1468,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis2_Speed", value.ToString());
+				SetCachedValue("axis", "axis2_Speed", value.ToString());
 			}
 		}
 
@@ -1462,7 +1483,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis2_Accel", value.ToString());
+				SetCachedValue("axis", "axis2_Accel", value.ToString());
 			}
 		}
 
@@ -1477,7 +1498,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis2_Decel", value.ToString());
+				SetCachedValue("axis", "axis2_Decel", value.ToString());
 			}
 		}
 
@@ -1492,7 +1513,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis2_Sramp", value.ToString());
+				SetCachedValue("axis", "axis2_Sramp", value.ToString());
 			}
 		}
 
@@ -1507,7 +1528,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis2_Lspeed", value.ToString());
+				SetCachedValue("axis", "axis2_Lspeed", value.ToString());
 			}
 		}
 		#endregion
@@ -1527,7 +1548,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis0_Datum", value.ToString());
+				SetCachedValue("axis", "axis0_Datum", value.ToString());
 			}
 		}
 
@@ -1542,7 +1563,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis0_Fwd", value.ToString());
+				SetCachedValue("axis", "axis0_Fwd", value.ToString());
 			}
 		}
 
@@ -1557,7 +1578,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis0_Rev", value.ToString());
+				SetCachedValue("axis", "axis0_Rev", value.ToString());
 			}
 		}
 
@@ -1572,7 +1593,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis1_Datum", value.ToString());
+				SetCachedValue("axis", "axis1_Datum", value.ToString());
 			}
 		}
 
@@ -1587,7 +1608,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis1_Fwd", value.ToString());
+				SetCachedValue("axis", "axis1_Fwd", value.ToString());
 			}
 		}
 
@@ -1602,7 +1623,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis1_Rev", value.ToString());
+				SetCachedValue("axis", "axis1_Rev", value.ToString());
 			}
 		}
 
@@ -1617,7 +1638,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis2_Datum", value.ToString());
+				SetCachedValue("axis", "axis2_Datum", value.ToString());
 			}
 		}
 
@@ -1632,7 +1653,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis2_Fwd", value.ToString());
+				SetCachedValue("axis", "axis2_Fwd", value.ToString());
 			}
 		}
 
@@ -1647,7 +1668,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "axis2_Rev", value.ToString());
+				SetCachedValue("axis", "axis2_Rev", value.ToString());
 			}
 		}
 
@@ -1666,7 +1687,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "CreepSpeed_Init", value.ToString());
+				SetCachedValue("axis", "CreepSpeed_Init", value.ToString());
 			}
 		}
 
@@ -1681,7 +1702,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "Units_Init", value.ToString());
+				SetCachedValue("axis", "Units_Init", value.ToString());
 			}
 		}
 
@@ -1696,7 +1717,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "Speed_Init", value.ToString());
+				SetCachedValue("axis", "Speed_Init", value.ToString());
 			}
 		}
 
@@ -1711,7 +1732,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "Accel_Init", value.ToString());
+				SetCachedValue("axis", "Accel_Init", value.ToString());
 			}
 		}
 
@@ -1726,7 +1747,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "Decel_Init", value.ToString());
+				SetCachedValue("axis", "Decel_Init", value.ToString());
 			}
 		}
 
@@ -1741,7 +1762,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "Sramp_Init", value.ToString());
+				SetCachedValue("axis", "Sramp_Init", value.ToString());
 			}
 		}
 
@@ -1756,7 +1777,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "axis", "Lspeed_Init", value.ToString());
+				SetCachedValue("axis", "Lspeed_Init", value.ToString());
 			}
 		}
 
@@ -1769,11 +1790,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("plc", "ip", "192.160.1.88", _iniPath);
+				return GetCachedValue("plc", "ip", "192.160.1.88");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "plc", "ip", value.ToString());
+				SetCachedValue("plc", "ip", value.ToString());
 			}
 		}
 
@@ -1785,7 +1806,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "plc", "port", value.ToString());
+				SetCachedValue("plc", "port", value.ToString());
 			}
 		}
 
@@ -1796,11 +1817,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("plc_address", "keepAlive", "D10006", _iniPath);
+				return GetCachedValue("plc_address", "keepAlive", "D10006");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "plc_address", "keepAlive", value.ToString());
+				SetCachedValue("plc_address", "keepAlive", value.ToString());
 			}
 		}
 
@@ -1818,7 +1839,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "params", "minArea_Camera1", value.ToString());
+				SetCachedValue("params", "minArea_Camera1", value.ToString());
 			}
 		}
 
@@ -1833,7 +1854,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "params", "totalArea_Camera1", value.ToString());
+				SetCachedValue("params", "totalArea_Camera1", value.ToString());
 			}
 		}
 
@@ -1849,7 +1870,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "params", "standNum_Camera4", value.ToString());
+				SetCachedValue("params", "standNum_Camera4", value.ToString());
 			}
 		}
 
@@ -1864,7 +1885,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "params", "standNum_Camera5", value.ToString());
+				SetCachedValue("params", "standNum_Camera5", value.ToString());
 			}
 		}
 
@@ -1877,7 +1898,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "params", "thresh_Camera3", value.ToString());
+				SetCachedValue("params", "thresh_Camera3", value.ToString());
 			}
 		}
 
@@ -1889,7 +1910,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "params", "maxval_Camera3", value.ToString());
+				SetCachedValue("params", "maxval_Camera3", value.ToString());
 			}
 		}
 
@@ -1901,7 +1922,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "params", "LW_ratio_Camera3", value.ToString());
+				SetCachedValue("params", "LW_ratio_Camera3", value.ToString());
 			}
 		}
 
@@ -1913,7 +1934,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "params", "Roundness_Up_Camera3", value.ToString());
+				SetCachedValue("params", "Roundness_Up_Camera3", value.ToString());
 			}
 		}
 
@@ -1925,7 +1946,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "params", "Roundness_Down_Camera3", value.ToString());
+				SetCachedValue("params", "Roundness_Down_Camera3", value.ToString());
 			}
 		}
 
@@ -1937,7 +1958,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "params", "Pipe_Diameter_Camera3", value.ToString());
+				SetCachedValue("params", "Pipe_Diameter_Camera3", value.ToString());
 			}
 		}
 
@@ -1945,11 +1966,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return bool.Parse(GetPrivateProfileString("params", "BaoGuan_Camera5", "True", _iniPath));
+				return bool.Parse(GetCachedValue("params", "BaoGuan_Camera5", "True"));
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "params", "BaoGuan_Camera5", value.ToString());
+				SetCachedValue("params", "BaoGuan_Camera5", value.ToString());
 			}
 		}
 
@@ -1957,33 +1978,33 @@ namespace CommonLib
 		{
 			get
 			{
-				return bool.Parse(GetPrivateProfileString("params", "SeBiao_Camera5", "True", _iniPath));
+				return bool.Parse(GetCachedValue("params", "SeBiao_Camera5", "True"));
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "params", "SeBiao_Camera5", value.ToString());
+				SetCachedValue("params", "SeBiao_Camera5", value.ToString());
 			}
 		}
 		public bool Camera5IFWeiJianDuan
 		{
 			get
 			{
-				return bool.Parse(GetPrivateProfileString("params", "WeiJianDuan_Camera5", "True", _iniPath));
+				return bool.Parse(GetCachedValue("params", "WeiJianDuan_Camera5", "True"));
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "params", "WeiJianDuan_Camera5", value.ToString());
+				SetCachedValue("params", "WeiJianDuan_Camera5", value.ToString());
 			}
 		}
 		public bool Camera5IFOcr
 		{
 			get
 			{
-				return bool.Parse(GetPrivateProfileString("params", "Ocr_Camera5", "True", _iniPath));
+				return bool.Parse(GetCachedValue("params", "Ocr_Camera5", "True"));
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "params", "Ocr_Camera5", value.ToString());
+				SetCachedValue("params", "Ocr_Camera5", value.ToString());
 			}
 		}
 
@@ -1991,11 +2012,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return bool.Parse(GetPrivateProfileString("params", "XieKou_Camera5", "True", _iniPath));
+				return bool.Parse(GetCachedValue("params", "XieKou_Camera5", "True"));
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "params", "XieKou_Camera5", value.ToString());
+				SetCachedValue("params", "XieKou_Camera5", value.ToString());
 			}
 		}
 
@@ -2003,11 +2024,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return bool.Parse(GetPrivateProfileString("params", "PCode_Camera5", "True", _iniPath));
+				return bool.Parse(GetCachedValue("params", "PCode_Camera5", "True"));
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "params", "PCode_Camera5", value.ToString());
+				SetCachedValue("params", "PCode_Camera5", value.ToString());
 			}
 		}
 
@@ -2015,11 +2036,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("params", "Standard_PCode_Camera5", "5", _iniPath);
+				return GetCachedValue("params", "Standard_PCode_Camera5", "5");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "params", "Standard_PCode_Camera5", value.ToString());
+				SetCachedValue("params", "Standard_PCode_Camera5", value.ToString());
 			}
 		}
 		#endregion
@@ -2029,11 +2050,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return bool.Parse(GetPrivateProfileString("system", "IFRunCamera1", "True", _iniPath));
+				return bool.Parse(GetCachedValue("system", "IFRunCamera1", "True"));
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "IFRunCamera1", value.ToString());
+				SetCachedValue("system", "IFRunCamera1", value.ToString());
 			}
 		}
 
@@ -2041,11 +2062,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return bool.Parse(GetPrivateProfileString("system", "IFRunCamera2", "True", _iniPath));
+				return bool.Parse(GetCachedValue("system", "IFRunCamera2", "True"));
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "IFRunCamera2", value.ToString());
+				SetCachedValue("system", "IFRunCamera2", value.ToString());
 			}
 		}
 
@@ -2053,11 +2074,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return bool.Parse(GetPrivateProfileString("system", "IFRunCamera3", "True", _iniPath));
+				return bool.Parse(GetCachedValue("system", "IFRunCamera3", "True"));
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "IFRunCamera3", value.ToString());
+				SetCachedValue("system", "IFRunCamera3", value.ToString());
 			}
 		}
 
@@ -2065,11 +2086,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return bool.Parse(GetPrivateProfileString("system", "IFRunCamera4", "True", _iniPath));
+				return bool.Parse(GetCachedValue("system", "IFRunCamera4", "True"));
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "IFRunCamera4", value.ToString());
+				SetCachedValue("system", "IFRunCamera4", value.ToString());
 			}
 		}
 
@@ -2077,11 +2098,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return bool.Parse(GetPrivateProfileString("system", "IFRunCamera5", "True", _iniPath));
+				return bool.Parse(GetCachedValue("system", "IFRunCamera5", "True"));
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "IFRunCamera5", value.ToString());
+				SetCachedValue("system", "IFRunCamera5", value.ToString());
 			}
 		}
 
@@ -2089,11 +2110,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return bool.Parse(GetPrivateProfileString("system", "IFGroup", "True", _iniPath));
+				return bool.Parse(GetCachedValue("system", "IFGroup", "True"));
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "system", "IFGroup", value.ToString());
+				SetCachedValue("system", "IFGroup", value.ToString());
 			}
 		}
 
@@ -2107,11 +2128,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("AI_Params", "ModelPath_Cam1", @"D:\bin\AI\Cam1\model_trt_fp16.vimosln", _iniPath);
+				return GetCachedValue("AI_Params", "ModelPath_Cam1", @"D:\bin\AI\Cam1\model_trt_fp16.vimosln");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "AI_Params", "ModelPath_Cam1", value.ToString());
+				SetCachedValue("AI_Params", "ModelPath_Cam1", value.ToString());
 			}
 		}
 
@@ -2119,11 +2140,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return bool.Parse(GetPrivateProfileString("AI_Params", "UseGpu_Cam1", "True", _iniPath));
+				return bool.Parse(GetCachedValue("AI_Params", "UseGpu_Cam1", "True"));
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "AI_Params", "UseGpu_Cam1", value.ToString());
+				SetCachedValue("AI_Params", "UseGpu_Cam1", value.ToString());
 			}
 		}
 
@@ -2135,7 +2156,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "AI_Params", "DeviceId_Cam1", value.ToString());
+				SetCachedValue("AI_Params", "DeviceId_Cam1", value.ToString());
 			}
 		}
 
@@ -2143,11 +2164,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("AI_Params", "ModelId_Segmentation_Cam1", "3", _iniPath);
+				return GetCachedValue("AI_Params", "ModelId_Segmentation_Cam1", "3");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "AI_Params", "ModelId_Segmentation_Cam1", value.ToString());
+				SetCachedValue("AI_Params", "ModelId_Segmentation_Cam1", value.ToString());
 			}
 		}
 
@@ -2158,11 +2179,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("AI_Params", "ModelPath_Cam2", @"D:\bin\AI\Cam2\model_trt_fp16.vimosln", _iniPath);
+				return GetCachedValue("AI_Params", "ModelPath_Cam2", @"D:\bin\AI\Cam2\model_trt_fp16.vimosln");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "AI_Params", "ModelPath_Cam2", value.ToString());
+				SetCachedValue("AI_Params", "ModelPath_Cam2", value.ToString());
 			}
 		}
 
@@ -2170,11 +2191,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return bool.Parse(GetPrivateProfileString("AI_Params", "UseGpu_Cam2", "True", _iniPath));
+				return bool.Parse(GetCachedValue("AI_Params", "UseGpu_Cam2", "True"));
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "AI_Params", "UseGpu_Cam2", value.ToString());
+				SetCachedValue("AI_Params", "UseGpu_Cam2", value.ToString());
 			}
 		}
 
@@ -2186,7 +2207,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "AI_Params", "DeviceId_Cam1", value.ToString());
+				SetCachedValue("AI_Params", "DeviceId_Cam1", value.ToString());
 			}
 		}
 
@@ -2194,11 +2215,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("AI_Params", "ModelId_Class_Cam2", "5", _iniPath);
+				return GetCachedValue("AI_Params", "ModelId_Class_Cam2", "5");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "AI_Params", "ModelId_Class_Cam2", value.ToString());
+				SetCachedValue("AI_Params", "ModelId_Class_Cam2", value.ToString());
 			}
 		}
 
@@ -2209,11 +2230,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("AI_Params", "ModelPath_Cam4", @"D:\bin\AI\Cam4\model_trt_fp16.vimosln", _iniPath);
+				return GetCachedValue("AI_Params", "ModelPath_Cam4", @"D:\bin\AI\Cam4\model_trt_fp16.vimosln");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "AI_Params", "ModelPath_Cam4", value.ToString());
+				SetCachedValue("AI_Params", "ModelPath_Cam4", value.ToString());
 			}
 		}
 
@@ -2221,11 +2242,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return bool.Parse(GetPrivateProfileString("AI_Params", "UseGpu_Cam4", "True", _iniPath));
+				return bool.Parse(GetCachedValue("AI_Params", "UseGpu_Cam4", "True"));
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "AI_Params", "UseGpu_Cam4", value.ToString());
+				SetCachedValue("AI_Params", "UseGpu_Cam4", value.ToString());
 			}
 		}
 
@@ -2237,7 +2258,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "AI_Params", "DeviceId_Cam4", value.ToString());
+				SetCachedValue("AI_Params", "DeviceId_Cam4", value.ToString());
 			}
 		}
 
@@ -2245,11 +2266,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("AI_Params", "ModelId_Char_Cam4", "3", _iniPath);
+				return GetCachedValue("AI_Params", "ModelId_Char_Cam4", "3");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "AI_Params", "ModelId_Char_Cam4", value.ToString());
+				SetCachedValue("AI_Params", "ModelId_Char_Cam4", value.ToString());
 			}
 		}
 		
@@ -2257,11 +2278,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("AI_Params", "ModelId_Segmentation_Cam4", "2", _iniPath);
+				return GetCachedValue("AI_Params", "ModelId_Segmentation_Cam4", "2");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "AI_Params", "ModelId_Segmentation_Cam4", value.ToString());
+				SetCachedValue("AI_Params", "ModelId_Segmentation_Cam4", value.ToString());
 			}
 		}
 
@@ -2272,11 +2293,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("AI_Params", "ModelPath_Cam5", @"D:\bin\AI\Cam5\model_trt_fp16.vimosln", _iniPath);
+				return GetCachedValue("AI_Params", "ModelPath_Cam5", @"D:\bin\AI\Cam5\model_trt_fp16.vimosln");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "AI_Params", "ModelPath_Cam5", value.ToString());
+				SetCachedValue("AI_Params", "ModelPath_Cam5", value.ToString());
 			}
 		}
 
@@ -2284,11 +2305,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return bool.Parse(GetPrivateProfileString("AI_Params", "UseGpu_Cam5", "True", _iniPath));
+				return bool.Parse(GetCachedValue("AI_Params", "UseGpu_Cam5", "True"));
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "AI_Params", "UseGpu_Cam5", value.ToString());
+				SetCachedValue("AI_Params", "UseGpu_Cam5", value.ToString());
 			}
 		}
 
@@ -2300,7 +2321,7 @@ namespace CommonLib
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "AI_Params", "DeviceId_Cam5", value.ToString());
+				SetCachedValue("AI_Params", "DeviceId_Cam5", value.ToString());
 			}
 		}
 
@@ -2312,22 +2333,22 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("AI_Params", "ModelId_Char_Cam5", "5", _iniPath);
+				return GetCachedValue("AI_Params", "ModelId_Char_Cam5", "5");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "AI_Params", "ModelId_Char_Cam5", value.ToString());
+				SetCachedValue("AI_Params", "ModelId_Char_Cam5", value.ToString());
 			}
 		}
 		public string ModelId_Char_PCode_Cam5
 		{
 			get
 			{
-				return GetPrivateProfileString("AI_Params", "ModelId_Char_PCode_Cam5", "6", _iniPath);
+				return GetCachedValue("AI_Params", "ModelId_Char_PCode_Cam5", "6");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "AI_Params", "ModelId_Char_PCode_Cam5", value.ToString());
+				SetCachedValue("AI_Params", "ModelId_Char_PCode_Cam5", value.ToString());
 			}
 		}
 
@@ -2335,11 +2356,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("AI_Params", "ModelId_Class_Cam5", "4", _iniPath);
+				return GetCachedValue("AI_Params", "ModelId_Class_Cam5", "4");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "AI_Params", "ModelId_Class_Cam5", value.ToString());
+				SetCachedValue("AI_Params", "ModelId_Class_Cam5", value.ToString());
 			}
 		}
 
@@ -2347,11 +2368,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("AI_Params", "ModelId_Segmentation_Cam5", "2", _iniPath);
+				return GetCachedValue("AI_Params", "ModelId_Segmentation_Cam5", "2");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "AI_Params", "ModelId_Segmentation_Cam5", value.ToString());
+				SetCachedValue("AI_Params", "ModelId_Segmentation_Cam5", value.ToString());
 			}
 		}
 
@@ -2359,11 +2380,11 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileString("AI_Params", "ModelId_ColorSegmentation_Cam5", "3", _iniPath);
+				return GetCachedValue("AI_Params", "ModelId_ColorSegmentation_Cam5", "3");
 			}
 			set
 			{
-				INIWriteValue(_iniPath, "AI_Params", "ModelId_ColorSegmentation_Cam5", value.ToString());
+				SetCachedValue("AI_Params", "ModelId_ColorSegmentation_Cam5", value.ToString());
 			}
 		}
 

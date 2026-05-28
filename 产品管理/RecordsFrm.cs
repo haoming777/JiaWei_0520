@@ -498,7 +498,6 @@ namespace SetProduct
                     CreateTables();
                 }
 
-			await Task.Delay(500);
 			_ = LoadData();
             }
             catch (Exception ex)
@@ -508,27 +507,20 @@ namespace SetProduct
             }
         }
 
-		private SQLiteConnection GetProductionConnection()
+		private SQLiteConnection CreateConnection()
 		{
-			lock (_dbLock)
-			{
-				if (_sharedConnection == null)
-				{
-					_sharedConnection = new SQLiteConnection(
-						@"Data Source=" + _productionDbPath + ";Journal Mode=WAL;Cache Size=2000;Synchronous=Normal;wal_autocheckpoint=10000;");
-					_sharedConnection.Open();
-				}
-				else if (_sharedConnection.State != ConnectionState.Open)
-					_sharedConnection.Open();
-				return _sharedConnection;
-			}
+			var conn = new SQLiteConnection(
+				@"Data Source=" + _productionDbPath + ";Journal Mode=WAL;Cache Size=2000;Synchronous=Normal;wal_autocheckpoint=10000;");
+			conn.Open();
+			return conn;
 		}
 
 		private DataTable ExecuteProdQuery(string sql, params SQLiteParameter[] parameters)
         {
             lock (_dbLock)
             {
-                using (var cmd = new SQLiteCommand(sql, GetProductionConnection()))
+                using (var conn = CreateConnection())
+                using (var cmd = new SQLiteCommand(sql, conn))
                 {
                     if (parameters != null && parameters.Length > 0)
                         cmd.Parameters.AddRange(parameters);
@@ -546,7 +538,8 @@ namespace SetProduct
             {
                 lock (_dbLock)
                 {
-                    using (var cmd = new SQLiteCommand(sql, GetProductionConnection()))
+                    using (var conn = CreateConnection())
+                using (var cmd = new SQLiteCommand(sql, conn))
                     {
                         if (parameters != null && parameters.Length > 0)
                             cmd.Parameters.AddRange(parameters);
@@ -681,6 +674,7 @@ namespace SetProduct
 				var parameters = new List<SQLiteParameter>();
                 string sql;
 
+
                 if (currentMode == "summary")
                 {
                     sql = "SELECT p_date, p_shift, sku, total_count, ok_count, ng_count, " +
@@ -745,7 +739,7 @@ namespace SetProduct
 						sql += " ORDER BY p_time DESC LIMIT 3000";
 					}
 
-					_currentData = await Task.Run(() => ExecuteProdQuery(sql, parameters.ToArray()));
+					_currentData = await Task.Run(() => ExecuteProdQuery(sql, parameters.ToArray()), token);
 				token.ThrowIfCancellationRequested();
 
 					if (_currentData != null && _currentData.Rows.Count > 0)
@@ -836,6 +830,7 @@ namespace SetProduct
             dgvRecords.Columns.Clear();
             dgvRecords.CellFormatting -= DgvRecords_SummaryCellFormatting;
             dgvRecords.CellFormatting -= DgvRecords_DetailCellFormatting;
+
 
             if (currentMode == "summary")
             {
@@ -970,6 +965,8 @@ namespace SetProduct
 
             int total = 0, ok = 0, ng = 0, excludeCount = 0;
 
+				bool _hasExcludeColumn = _currentData.Columns.Contains("continuous_exclude_count");
+					bool _hasIsExcluded = _currentData.Columns.Contains("is_excluded");
             if (currentMode == "summary")
             {
                 foreach (DataRow row in _currentData.Rows)
@@ -977,7 +974,7 @@ namespace SetProduct
                     total += Convert.ToInt32(row["total_count"]);
                     ok += Convert.ToInt32(row["ok_count"]);
                     ng += Convert.ToInt32(row["ng_count"]);
-                    if (_currentData.Columns.Contains("continuous_exclude_count"))
+                    if (_hasExcludeColumn)
                     {
                         excludeCount += Convert.ToInt32(row["continuous_exclude_count"]);
                     }
@@ -990,7 +987,7 @@ namespace SetProduct
                     total++;
                     if (row["final_result"].ToString() == "OK") ok++;
                     else ng++;
-                    if (_currentData.Columns.Contains("is_excluded"))
+                    if (_hasIsExcluded)
                     {
                         if (Convert.ToInt32(row["is_excluded"]) == 1)
                         {
@@ -1120,6 +1117,7 @@ namespace SetProduct
 
         private List<Tuple<string, string>> GetExportHeaders()
         {
+
             if (currentMode == "summary")
             {
                 return new List<Tuple<string, string>>
