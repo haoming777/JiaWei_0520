@@ -48,6 +48,7 @@ namespace SetProduct
         private int _currentPage = 1;
         private int _totalPages = 1;
         private CancellationTokenSource _loadCts;
+        private bool _isLoaded = false;
 
         public RecordsFrm()
         {
@@ -498,6 +499,7 @@ namespace SetProduct
                     CreateTables();
                 }
 
+				_isLoaded = true;
 			_ = LoadData();
             }
             catch (Exception ex)
@@ -1102,7 +1104,7 @@ namespace SetProduct
         protected override void OnVisibleChanged(EventArgs e)
         {
             base.OnVisibleChanged(e);
-            if (this.Visible && _currentData == null)
+            if (this.Visible && _isLoaded && _currentData == null)
             {
                 _ = LoadData();
             }

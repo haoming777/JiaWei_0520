@@ -9,6 +9,7 @@ using MT.Camera.SDK;
 using OpenCvSharp;
 using OpenCvSharp.Dnn;
 using OpenCvSharp.Extensions;
+using Point = OpenCvSharp.Point;
 using PLCMonitor;
 using PLC调试.Class;
 using RoundnessDetection1;
@@ -1434,28 +1435,21 @@ namespace VisionMeasure
 
 				if (!_isClosing)
 				{
-					rawBmpForSave = labelImage.ToBitmap();
-					resBmpForSave = labelImage1.ToBitmap();
-
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+测试禁用】
-					// 绘制完字体后，再把带有字体的图像放入存图缓存
+				// OpenCV英文标注（零GDI+）
+				{
+					int x = labelImage1.Width - 500, y = 100;
+					var green = new Scalar(0, 255, 0);
+					var red = new Scalar(0, 0, 255);
+					var c = result ? green : red;
+					Cv2.PutText(labelImage1, "Camera1: Foreign Object", new Point(x, y), HersheyFonts.HersheySimplex, 0.7, green, 2); y += 45;
+					Cv2.PutText(labelImage1, $"Time: {DateTime.Now:HH:mm:ss.fff}", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, green, 2); y += 45;
+					Cv2.PutText(labelImage1, $"Result: {(result ? "OK" : "NG")}", new Point(x, y), HersheyFonts.HersheySimplex, 0.9, c, 3); y += 50;
+					if (!result_Segmentation)
+						Cv2.PutText(labelImage1, $"Area: {totalArea:F2} / {totalArea_Camera1}", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, red, 2); y += 45;
+					Cv2.PutText(labelImage1, $"SeqID: {id}", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, green, 2);
+				}
+				rawBmpForSave = labelImage.ToBitmap();
+				resBmpForSave = labelImage1.ToBitmap();
 					CacheImageForDefectSave("Camera1", rawBmpForSave, resBmpForSave, id);
 
 					// 仅仅是限制 PictureBox 控件界面的刷新频率
@@ -1617,28 +1611,21 @@ namespace VisionMeasure
 
 				if (!_isClosing)
 				{
-					rawBmpForSave = labelImage.ToBitmap();
-					resBmpForSave = labelImage1.ToBitmap();
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-
-					// 画完字再存
+				// OpenCV英文标注（零GDI+）
+				{
+					int x = labelImage1.Width - 500, y = 100;
+					var green = new Scalar(0, 255, 0);
+					var red = new Scalar(0, 0, 255);
+					var c = result ? green : red;
+					Cv2.PutText(labelImage1, "Camera2: Cap Detection", new Point(x, y), HersheyFonts.HersheySimplex, 0.7, green, 2); y += 45;
+					Cv2.PutText(labelImage1, $"Time: {DateTime.Now:HH:mm:ss.fff}", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, green, 2); y += 45;
+					Cv2.PutText(labelImage1, $"Result: {(result ? "OK" : "NG")}", new Point(x, y), HersheyFonts.HersheySimplex, 0.9, c, 3); y += 50;
+					if (!string.IsNullOrEmpty(result_class))
+						Cv2.PutText(labelImage1, $"Defect: {result_class}", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, red, 2); y += 45;
+					Cv2.PutText(labelImage1, $"SeqID: {id}", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, green, 2);
+				}
+				rawBmpForSave = labelImage.ToBitmap();
+				resBmpForSave = labelImage1.ToBitmap();
 					CacheImageForDefectSave("Camera2", rawBmpForSave, resBmpForSave, id);
 
 					// 降频刷新UI
@@ -1781,33 +1768,24 @@ namespace VisionMeasure
 
 				if (!_isClosing)
 				{
-					rawBmpForSave = labelImage.ToBitmap();
-					resBmpForSave = resultImage.ToBitmap();
-
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-
-					// 画完字再存缓存
+				// OpenCV英文标注（零GDI+）
+				{
+					int x = resultImage.Width - 500, y = 100;
+					var green = new Scalar(0, 255, 0);
+					var red = new Scalar(0, 0, 255);
+					var c = result ? green : red;
+					Cv2.PutText(resultImage, "Camera3: Roundness", new Point(x, y), HersheyFonts.HersheySimplex, 0.7, green, 2); y += 45;
+					Cv2.PutText(resultImage, $"Time: {DateTime.Now:HH:mm:ss.fff}", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, green, 2); y += 45;
+					Cv2.PutText(resultImage, $"Result: {(result ? "OK" : "NG")}", new Point(x, y), HersheyFonts.HersheySimplex, 0.9, c, 3); y += 50;
+					Cv2.PutText(resultImage, $"LongEdge: {longEdge:F2}", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, c, 2); y += 45;
+					Cv2.PutText(resultImage, $"Diameter: {PipeDiameter}", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, c, 2); y += 45;
+					if (!result) Cv2.PutText(resultImage, $"RoundUp: {_Config.Camera3RoundnessUp}", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, green, 2); y += 45;
+					Cv2.PutText(resultImage, $"Roundness: {roundness:F3}", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, c, 2); y += 45;
+					if (!result) Cv2.PutText(resultImage, $"RoundDown: {_Config.Camera3RoundnessDown}", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, green, 2); y += 45;
+					Cv2.PutText(resultImage, $"SeqID: {id}", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, green, 2);
+				}
+				rawBmpForSave = labelImage.ToBitmap();
+				resBmpForSave = resultImage.ToBitmap();
 					CacheImageForDefectSave("Camera3", rawBmpForSave, resBmpForSave, id);
 
 					// 降频刷新 UI
@@ -2045,12 +2023,20 @@ namespace VisionMeasure
 
 				if (!_isClosing)
 				{
-					rawBmpForSave = labelImage.ToBitmap();
-					resBmpForSave = labelImage1.ToBitmap();
-				// 【GDI+已禁用-无字测试】
-					// 【GDI+已禁用-无字测试】
-
-					// 画完字再存缓存
+				// OpenCV英文标注（零GDI+）
+				{
+					int x = labelImage1.Width - 500, y = 100;
+					var green = new Scalar(0, 255, 0);
+					var red = new Scalar(0, 0, 255);
+					Cv2.PutText(labelImage1, "Camera4: Front Char", new Point(x, y), HersheyFonts.HersheySimplex, 0.7, green, 2); y += 45;
+					Cv2.PutText(labelImage1, $"Time: {DateTime.Now:HH:mm:ss.fff}", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, green, 2); y += 45;
+					Cv2.PutText(labelImage1, $"Result: {(result ? "OK" : "NG")}", new Point(x, y), HersheyFonts.HersheySimplex, 0.9, result ? green : red, 3); y += 50;
+					Cv2.PutText(labelImage1, $"Char: {(result_char ? "OK" : "NG")}", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, result_char ? green : red, 2); y += 45;
+					Cv2.PutText(labelImage1, $"{order_ocr}", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, green, 2); y += 45;
+					Cv2.PutText(labelImage1, $"SeqID: {id}", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, green, 2);
+				}
+				rawBmpForSave = labelImage.ToBitmap();
+				resBmpForSave = labelImage1.ToBitmap();
 					CacheImageForDefectSave("Camera4", rawBmpForSave, resBmpForSave, id);
 
 					// 降频刷新 UI
@@ -2400,50 +2386,35 @@ namespace VisionMeasure
 					bool needOutput = queueDepth <= 2;
 
 					if (needOutput)
-						rawBmpForSave = labelImage.ToBitmap();
-					resBmpForSave = labelImage1.ToBitmap();
-
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-// 【GDI+已禁用-无字测试】
-
 					// Camera5积压时跳过保存/显示，省50ms提速追赶
+				// OpenCV英文标注（零GDI+）
+				{
+					int x = labelImage1.Width - 650, y = 100;
+					var green = new Scalar(0, 255, 0);
+					var red = new Scalar(0, 0, 255);
+					Cv2.PutText(labelImage1, "Camera5: Back Char", new Point(x, y), HersheyFonts.HersheySimplex, 0.7, green, 2); y += 45;
+					Cv2.PutText(labelImage1, $"Time: {DateTime.Now:HH:mm:ss.fff}", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, green, 2); y += 45;
+					Cv2.PutText(labelImage1, $"Result: {(result ? "OK" : "NG")}", new Point(x, y), HersheyFonts.HersheySimplex, 0.9, result ? green : red, 3); y += 50;
+					Cv2.PutText(labelImage1, $"Char: {(result_char ? "OK" : "NG")}", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, result_char ? green : red, 2); y += 45;
+					Cv2.PutText(labelImage1, $"{order_ocr}", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, green, 2); y += 45;
+					if (_Config.Camera5IFPCode)
+					{
+						Cv2.PutText(labelImage1, $"PCode: {(result_PCode_char ? "OK" : "NG")}", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, result_PCode_char ? green : red, 2); y += 45;
+						Cv2.PutText(labelImage1, $"{pcode_ocr}", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, green, 2); y += 45;
+					}
+					Cv2.PutText(labelImage1, $"ColorAlign: {(result_Segmentation ? "OK" : "NG")}", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, result_Segmentation ? green : red, 2); y += 45;
+					if (segmentationResult.DetectedBoth)
+						Cv2.PutText(labelImage1, $"AlignVal: {projectionLength:F2}mm", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, result_Segmentation ? green : red, 2); y += 45;
+					Cv2.PutText(labelImage1, $"Defect: {(result_flaw ? "OK" : "NG")}", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, result_flaw ? green : red, 2); y += 45;
+					if (!string.IsNullOrEmpty(result_class))
+						Cv2.PutText(labelImage1, $"Tag: {result_class}", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, red, 2); y += 45;
+					Cv2.PutText(labelImage1, $"SeqID: {id}", new Point(x, y), HersheyFonts.HersheySimplex, 0.6, green, 2);
+				}
+				rawBmpForSave = labelImage.ToBitmap();
+				resBmpForSave = labelImage1.ToBitmap();
+					CacheImageForDefectSave("Camera5", rawBmpForSave, resBmpForSave, id);
 					if (needOutput)
 					{
-						CacheImageForDefectSave("Camera5", rawBmpForSave, resBmpForSave, id);
 						displayBitmap = new Bitmap(resBmpForSave);
 						UpdatePictureBox5(displayBitmap);
 					}
