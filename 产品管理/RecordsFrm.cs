@@ -7,6 +7,7 @@ using System.Data.SQLite;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using XL.Tool;
@@ -46,6 +47,7 @@ namespace SetProduct
         private int _pageSize = 50;
         private int _currentPage = 1;
         private int _totalPages = 1;
+        private CancellationTokenSource _loadCts;
 
         public RecordsFrm()
         {
@@ -563,8 +565,26 @@ namespace SetProduct
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
             base.OnFormClosed(e);
-            lock (_dbLock) { _sharedConnection?.Close(); _sharedConnection?.Dispose(); _sharedConnection = null; }
+            CloseSharedConnection();
             _currentData?.Dispose(); _currentData = null;
+        }
+
+        private void CloseSharedConnection()
+        {
+            lock (_dbLock)
+            {
+                if (_sharedConnection != null)
+                {
+                    try
+                    {
+                        if (_sharedConnection.State == ConnectionState.Open)
+                            _sharedConnection.Close();
+                        _sharedConnection.Dispose();
+                    }
+                    catch { }
+                    _sharedConnection = null;
+                }
+            }
         }
 
         private void CreateTables()
@@ -649,6 +669,11 @@ namespace SetProduct
 
 		private async Task LoadData()
 		{
+			_loadCts?.Cancel();
+			_loadCts?.Dispose();
+			_loadCts = new CancellationTokenSource();
+			var token = _loadCts.Token;
+
 			try
 			{
 				this.Cursor = Cursors.WaitCursor;
@@ -658,7 +683,10 @@ namespace SetProduct
 
                 if (currentMode == "summary")
                 {
-                    sql = "SELECT * FROM production_records_summary WHERE 1=1";
+                    sql = "SELECT p_date, p_shift, sku, total_count, ok_count, ng_count, " +
+                          "ng_异物, ng_管盖有无, ng_管口圆度, ng_正面工号缺失, ng_背面工号缺失, " +
+                          "ng_PCode, ng_色标对中, ng_爆管, ng_斜口, ng_未剪断, ng_混合多种缺陷, " +
+                          "continuous_exclude_count, yield_rate FROM production_records_summary WHERE 1=1";
 
                     DateTime startDate = dtStart.Value.Date;
                     DateTime endDate = dtEnd.Value.Date;
@@ -684,7 +712,9 @@ namespace SetProduct
                 }
                 else
                 {
-                    sql = "SELECT * FROM production_records_detail WHERE 1=1";
+                    sql = "SELECT p_time, p_date, p_shift, sku, sequence_id, " +
+                          "final_result, defect_detail, defect_count " +
+                          "FROM production_records_detail WHERE 1=1";
 
                     DateTime startDate = dtStart.Value.Date;
                     DateTime endDate = dtEnd.Value.Date.AddDays(1).AddSeconds(-1);
@@ -716,12 +746,14 @@ namespace SetProduct
 					}
 
 					_currentData = await Task.Run(() => ExecuteProdQuery(sql, parameters.ToArray()));
+				token.ThrowIfCancellationRequested();
 
 					if (_currentData != null && _currentData.Rows.Count > 0)
 					{
 						_totalPages = (int)Math.Ceiling((double)_currentData.Rows.Count / _pageSize);
 						_currentPage = 1;
-						await Task.Run(() => UpdateStatistics());
+						UpdateStatistics();
+					token.ThrowIfCancellationRequested();
 						await RefreshGridDataAsync();
 					}
 					else
@@ -730,6 +762,10 @@ namespace SetProduct
 						dgvRecords.Columns.Clear();
 						UpdateStatistics();
 					}
+				}
+			catch (OperationCanceledException)
+				{
+					// Cancelled by a newer LoadData call - expected, no action needed
 				}
 				catch (Exception ex)
 				{
@@ -1071,9 +1107,13 @@ namespace SetProduct
             {
                 e.Cancel = true;
                 this.Hide();
+                CloseSharedConnection();
+                _currentData?.Dispose();
+                _currentData = null;
             }
             else
             {
+                CloseSharedConnection();
                 base.OnFormClosing(e);
             }
         }

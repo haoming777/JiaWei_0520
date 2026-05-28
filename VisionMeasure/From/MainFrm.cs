@@ -1455,7 +1455,7 @@ namespace VisionMeasure
 					}
 
 					// 绘制完字体后，再把带有字体的图像放入存图缓存
-					CacheImageForDefectSave("Camera1", rawBmpForSave, resBmpForSave, context.SequenceId);
+					CacheImageForDefectSave("Camera1", rawBmpForSave, resBmpForSave, id);
 
 					// 仅仅是限制 PictureBox 控件界面的刷新频率
 					if (id % 3 == 0)
@@ -1611,8 +1611,8 @@ namespace VisionMeasure
 				stageTimer.Restart();
 				#endregion
 
-				context.ProcessResult = result;
 				result = result_flaw;
+				context.ProcessResult = result;
 
 				if (!_isClosing)
 				{
@@ -1638,7 +1638,7 @@ namespace VisionMeasure
 					}
 
 					// 画完字再存
-					CacheImageForDefectSave("Camera2", rawBmpForSave, resBmpForSave, context.SequenceId);
+					CacheImageForDefectSave("Camera2", rawBmpForSave, resBmpForSave, id);
 
 					// 降频刷新UI
 					if (id % 3 == 0)
@@ -1652,14 +1652,12 @@ namespace VisionMeasure
 				context.StageTimes["存储图像"] = stageTimer.ElapsedMilliseconds;
 				stageTimer.Restart();
 
-				context.ProcessResult = result;
 				Interlocked.Increment(ref resultCount2);
 				_resultMatcher?.SignalNewResult();
 			}
 			catch (Exception ex)
 			{
 				toolClass.SaveLog($"[Camera2] ID:{id} 处理异常: {ex.Message}\n{ex.StackTrace}");
-				// ProcessResult已在上方设置，异常时保留原值
 				_resultMatcher?.SignalNewResult();
 			}
 			finally
@@ -1771,6 +1769,7 @@ namespace VisionMeasure
 					{
 						toolClass.SaveLog($"[Camera3] ID:{id} 圆度检测失败，设置为OK");
 						result = true;
+						context.ProcessResult = result;
 						resultImage = labelImage.Clone();
 					}
 				}
@@ -1808,7 +1807,7 @@ namespace VisionMeasure
 					}
 
 					// 画完字再存缓存
-					CacheImageForDefectSave("Camera3", rawBmpForSave, resBmpForSave, context.SequenceId);
+					CacheImageForDefectSave("Camera3", rawBmpForSave, resBmpForSave, id);
 
 					// 降频刷新 UI
 					if (id % 3 == 0)
@@ -2035,9 +2034,8 @@ namespace VisionMeasure
 					}
 					result_char = true;
 				}
-				context.ProcessResult = result;
-
 				result = result_char;
+				context.ProcessResult = result;
 				#endregion
 
 				stageTimer.Stop();
@@ -2065,7 +2063,7 @@ namespace VisionMeasure
 					}
 
 					// 画完字再存缓存
-					CacheImageForDefectSave("Camera4", rawBmpForSave, resBmpForSave, context.SequenceId);
+					CacheImageForDefectSave("Camera4", rawBmpForSave, resBmpForSave, id);
 
 					// 降频刷新 UI
 					if (id % 3 == 0)
@@ -2088,7 +2086,6 @@ namespace VisionMeasure
 				stageTimer.Restart();
 
 				toolClass.SaveLog($"[Camera4] ID:{id} 处理完成 - result_char:{result_char}, result:{result}");
-				context.ProcessResult = result;
 				Interlocked.Increment(ref resultCount4);
 				_resultMatcher?.SignalNewResult();
 			}
@@ -2399,7 +2396,6 @@ namespace VisionMeasure
 				{
 					result_char = true;
 					result_PCode_char = true;
-				context.ProcessResult = result;
 					toolClass.SaveLog($"[Camera5] ID:{id} 空杯产品");
 				}
 				result = result_char && result_PCode_char && result_flaw && result_Segmentation;
@@ -2459,7 +2455,7 @@ namespace VisionMeasure
 					// Camera5积压时跳过保存/显示，省50ms提速追赶
 					if (needOutput)
 					{
-						CacheImageForDefectSave("Camera5", rawBmpForSave, resBmpForSave, context.SequenceId);
+						CacheImageForDefectSave("Camera5", rawBmpForSave, resBmpForSave, id);
 						displayBitmap = new Bitmap(resBmpForSave);
 						UpdatePictureBox5(displayBitmap);
 					}
@@ -2654,7 +2650,7 @@ namespace VisionMeasure
 				string rFileName = $"{dtFormat}_R_ID{SequenceId - Offset}_SequenceId{SequenceId}_Offset{Offset}_result-{resultBool}-{(resultBool ? "OK" : "NG")}.jpg";
 				string rPath = Path.Combine(basePath, rFileName);
 
-				byte[] rData = BitmapFastConverter.ToJpegBytesFast(result, IMAGE_JPEG_QUALITY);
+				byte[] rData = BitmapFastConverter.ToJpegBytesViaOpenCv(result, IMAGE_JPEG_QUALITY);
 				if (rData != null && rData.Length > 0)
 				{
 					saver.AddSaveTask(rPath, rData, true, IMAGE_JPEG_QUALITY);
@@ -3113,14 +3109,14 @@ namespace VisionMeasure
 				}
 
 				bool finalResult = results[0].Result && results[1].Result && results[2].Result && results[3].Result && results[4].Result;
-				long sequenceId = results[0].SequenceId;
+				long unifiedId = results[0].SequenceId - results[0].Offset;
 
-				toolClass.SaveLog($"[ResultMatch] ID:{sequenceId} 汇总 - Cam1:{results[0].Result}, Cam2:{results[1].Result}, Cam3:{results[2].Result}, Cam4:{results[3].Result}, Cam5:{results[4].Result}, FinalResult:{finalResult}");
+				toolClass.SaveLog($"[ResultMatch] ID:{unifiedId} 汇总 - Cam1:{results[0].Result}, Cam2:{results[1].Result}, Cam3:{results[2].Result}, Cam4:{results[3].Result}, Cam5:{results[4].Result}, FinalResult:{finalResult}");
 
 				AddProductionRecordBuffered(results, finalResult);
 
 				// 统一按缺陷类型保存所有相机的图像
-				SaveImagesByDefectType(sequenceId, results);
+				SaveImagesByDefectType(unifiedId, results);
 
 				if (modbusClass.modbusState && !_isClosing)
 				{
@@ -3128,13 +3124,13 @@ namespace VisionMeasure
 					{
 						SendResultList.Add(new QueueResultItem
 						{
-							SequenceId = sequenceId,
+							SequenceId = unifiedId,
 							Offset = 0,
 							Result = finalResult,
 							Timestamp = DateTime.Now
 						});
 					}
-					toolClass.SaveLog($"time[{DateTime.Now:HH:mm:ss:fff}]结果匹配成功 ID: {sequenceId} Result: {finalResult}");
+					toolClass.SaveLog($"time[{DateTime.Now:HH:mm:ss:fff}]结果匹配成功 ID: {unifiedId} Result: {finalResult}");
 				}
 
 				if (!_isClosing)
@@ -3146,7 +3142,7 @@ namespace VisionMeasure
 						{
 							ResultCountMethod(results[0].Result, results[1].Result, results[2].Result, results[3].Result, results[4].Result);
 							ResultShowMethod(finalResult);
-							ImageIDTxt1.Text = results[0].SequenceId.ToString();
+							ImageIDTxt1.Text = unifiedId.ToString();
 							ImageIDTxt2.Text = results[1].SequenceId.ToString();
 							ImageIDTxt3.Text = results[2].SequenceId.ToString();
 							ImageIDTxt4.Text = results[3].SequenceId.ToString();
@@ -4436,7 +4432,7 @@ namespace VisionMeasure
 		}
 	}
 
-	public class ImageProcessingContext
+	public class ImageProcessingContext : IDisposable
 	{
 		public long SequenceId { get; set; }
 		public int Offset { get; set; }
@@ -4451,6 +4447,11 @@ namespace VisionMeasure
 		public bool ProcessResult { get; set; }
 
 		public ImageProcessingContext() { StageTimes = new Dictionary<string, long>(); }
+		public void Dispose()
+		{
+			OriginalBitmap?.Dispose();
+			OriginalBitmap = null;
+		}
 	}
 
 	public class OrderedQueueManager<T> : IDisposable where T : class
@@ -4669,7 +4670,7 @@ namespace VisionMeasure
 					{
 						SequenceId = context.SequenceId,
 						Offset = context.Offset,
-						Result = false,
+						Result = context.ProcessResult,
 						Timestamp = DateTime.Now
 					};
 					_resultQueue.Enqueue(context.SequenceId, errorResult);
@@ -5050,6 +5051,23 @@ namespace VisionMeasure
 				return null;
 			}
 		}
+
+
+			public static byte[] ToJpegBytesViaOpenCv(Bitmap bitmap, int quality = 85)
+			{
+				if (bitmap == null) return null;
+				try
+				{
+					using (var mat = BitmapConverter.ToMat(bitmap))
+					{
+						return ToJpegBytesViaOpenCv(mat, quality);
+					}
+				}
+				catch
+				{
+					return null;
+				}
+			}
 
 		// 保留原有的 Bmp 转换以向下兼容
 		public static byte[] ToBmpBytesFast(this Bitmap bitmap)

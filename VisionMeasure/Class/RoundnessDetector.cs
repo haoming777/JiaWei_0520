@@ -372,8 +372,8 @@ namespace RoundnessDetectionV3
 				}
 
 				// 清理资源
-				imgGray?.Dispose();
-				binary?.Dispose();
+
+
 			}
 
 			// 绘制外接矩形（绿色）
@@ -401,6 +401,10 @@ namespace RoundnessDetectionV3
 			//{
 			//    Cv2.ImWrite(savePath, resultImg);
 			//}
+
+			// 清理临时Mat资源（无论contours数量）
+			imgGray?.Dispose();
+			binary?.Dispose();
 
 			return resultImg;
 		}
