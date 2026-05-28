@@ -1437,24 +1437,24 @@ namespace VisionMeasure
 					rawBmpForSave = labelImage.ToBitmap();
 					resBmpForSave = labelImage1.ToBitmap();
 
-					// 【关键修复】每帧都必须绘制字体，决不能放在 id % 3 里面
-					using (Graphics g = Graphics.FromImage(resBmpForSave))
-					{
-						
-						{
-							int x = resBmpForSave.Width - 500; int y = 100;
-							g.DrawString("相机：底部异物检测", _processor1.DrawFontTitle, _processor1.DrawBrushGreen, x, y); y += 70;
-							g.DrawString($"检测时间：{DateTime.Now:HH:mm:ss.fff}", _processor1.DrawFontText, _processor1.DrawBrushGreen, x, y); y += 70;
-							g.DrawString($"综合结果：{(result ? "OK" : "NG")}", _processor1.DrawFontText, result ? _processor1.DrawBrushGreen : _processor1.DrawBrushRed, x, y); y += 70;
-
-							if (!result_Segmentation)
-							{
-								g.DrawString($"异物面积：{totalArea:F2} / {totalArea_Camera1}", _processor1.DrawFontText, _processor1.DrawBrushRed, x, y); y += 70;
-							}
-							g.DrawString($"SequenceId：{id}", _processor1.DrawFontText, _processor1.DrawBrushGreen, x, y); y += 70;
-						}
-					}
-
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+测试禁用】
 					// 绘制完字体后，再把带有字体的图像放入存图缓存
 					CacheImageForDefectSave("Camera1", rawBmpForSave, resBmpForSave, id);
 
@@ -1619,24 +1619,24 @@ namespace VisionMeasure
 				{
 					rawBmpForSave = labelImage.ToBitmap();
 					resBmpForSave = labelImage1.ToBitmap();
-
-					// 【关键修复】每帧必画字
-					using (Graphics g = Graphics.FromImage(resBmpForSave))
-					{
-						
-						{
-							int x = resBmpForSave.Width - 500; int y = 100;
-							g.DrawString("相机：瓶盖有无检测", _processor2.DrawFontTitle, _processor2.DrawBrushGreen, x, y); y += 70;
-							g.DrawString($"检测时间：{DateTime.Now:HH:mm:ss.fff}", _processor2.DrawFontText, _processor2.DrawBrushGreen, x, y); y += 70;
-							g.DrawString($"综合结果：{(result ? "OK" : "NG")}", _processor2.DrawFontText, result ? _processor2.DrawBrushGreen : _processor2.DrawBrushRed, x, y); y += 70;
-
-							if (!string.IsNullOrEmpty(result_class))
-							{
-								g.DrawString($"缺陷标签：{result_class}", _processor2.DrawFontText, _processor2.DrawBrushRed, x, y); y += 70;
-							}
-							g.DrawString($"SequenceId：{id}", _processor2.DrawFontText, _processor2.DrawBrushGreen, x, y); y += 70;
-						}
-					}
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
 
 					// 画完字再存
 					CacheImageForDefectSave("Camera2", rawBmpForSave, resBmpForSave, id);
@@ -1784,28 +1784,28 @@ namespace VisionMeasure
 					rawBmpForSave = labelImage.ToBitmap();
 					resBmpForSave = resultImage.ToBitmap();
 
-					// 【关键修复】每帧必画字
-					using (Graphics g = Graphics.FromImage(resBmpForSave))
-					{
-						
-						{
-							int x = resBmpForSave.Width - 500; int y = 100;
-							g.DrawString("相机：管口圆度检测", _processor3.DrawFontTitle, _processor3.DrawBrushGreen, x, y); y += 70;
-							g.DrawString($"检测时间：{DateTime.Now:HH:mm:ss.fff}", _processor3.DrawFontText, _processor3.DrawBrushGreen, x, y); y += 70;
-							g.DrawString($"综合结果：{(result ? "OK" : "NG")}", _processor3.DrawFontText, result ? _processor3.DrawBrushGreen : _processor3.DrawBrushRed, x, y); y += 70;
-
-							g.DrawString($"长边：{longEdge:F2}", _processor3.DrawFontText, result ? _processor3.DrawBrushGreen : _processor3.DrawBrushRed, x, y); y += 70;
-							g.DrawString($"管径：{PipeDiameter}", _processor3.DrawFontText, result ? _processor3.DrawBrushGreen : _processor3.DrawBrushRed, x, y); y += 70;
-
-							if (!result) { g.DrawString($"圆度上限：{_Config.Camera3RoundnessUp}", _processor3.DrawFontText, _processor3.DrawBrushGreen, x, y); y += 70; }
-							g.DrawString($"圆度：{roundness:F3}", _processor3.DrawFontText, result ? _processor3.DrawBrushGreen : _processor3.DrawBrushRed, x, y); y += 70;
-							if (!result)
-							{
-								g.DrawString($"圆度下限：{_Config.Camera3RoundnessDown}", _processor3.DrawFontText, _processor3.DrawBrushGreen, x, y); y += 70;
-							}
-							g.DrawString($"SequenceId：{id}", _processor3.DrawFontText, _processor3.DrawBrushGreen, x, y); y += 70;
-						}
-					}
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
 
 					// 画完字再存缓存
 					CacheImageForDefectSave("Camera3", rawBmpForSave, resBmpForSave, id);
@@ -2047,21 +2047,8 @@ namespace VisionMeasure
 				{
 					rawBmpForSave = labelImage.ToBitmap();
 					resBmpForSave = labelImage1.ToBitmap();
-
-					// 【关键修复】每帧必画字
-					using (Graphics g = Graphics.FromImage(resBmpForSave))
-					{
-						
-						{
-							int x = resBmpForSave.Width - 500; int y = 100;
-							g.DrawString("相机：夹尾正面字符检测", _processor4.DrawFontTitle, _processor4.DrawBrushGreen, x, y); y += 70;
-							g.DrawString($"检测时间：{DateTime.Now:HH:mm:ss.fff}", _processor4.DrawFontText, _processor4.DrawBrushGreen, x, y); y += 70;
-							g.DrawString($"综合结果：{(result ? "OK" : "NG")}", _processor4.DrawFontText, result ? _processor4.DrawBrushGreen : _processor4.DrawBrushRed, x, y); y += 70;
-							g.DrawString($"字符结果：{(result_char ? "OK" : "NG")}", _processor4.DrawFontText, result_char ? _processor4.DrawBrushGreen : _processor4.DrawBrushRed, x, y); y += 70;
-							g.DrawString($"{order_ocr}", _processor4.DrawFontText, result_char ? _processor4.DrawBrushGreen : _processor4.DrawBrushRed, x, y); y += 70;
-							g.DrawString($"SequenceId：{id}", _processor4.DrawFontText, _processor4.DrawBrushGreen, x, y); y += 70;
-						}
-					}
+				// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
 
 					// 画完字再存缓存
 					CacheImageForDefectSave("Camera4", rawBmpForSave, resBmpForSave, id);
@@ -2416,42 +2403,42 @@ namespace VisionMeasure
 						rawBmpForSave = labelImage.ToBitmap();
 					resBmpForSave = labelImage1.ToBitmap();
 
-					// 【关键修复】存入缓存之前画字
-					using (Graphics g = Graphics.FromImage(resBmpForSave))
-					{
-						
-						{
-							int x = resBmpForSave.Width - 600; int y = 100;
-							g.DrawString("相机：夹尾反面字符检测", _processor5.DrawFontTitle, _processor5.DrawBrushGreen, x, y); y += 70;
-							g.DrawString($"检测时间：{DateTime.Now:HH:mm:ss.fff}", _processor5.DrawFontText, _processor5.DrawBrushGreen, x, y); y += 70;
-							g.DrawString($"综合结果：{(result ? "OK" : "NG")}", _processor5.DrawFontText, result ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70;
-							g.DrawString($"字符结果：{(result_char ? "OK" : "NG")}", _processor5.DrawFontText, result_char ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70;
-							g.DrawString($"{order_ocr}", _processor5.DrawFontText, result_char ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70;
-							if (_Config.Camera5IFPCode)
-							{
-								g.DrawString($"P-Code结果：{(result_PCode_char ? "OK" : "NG")}", _processor5.DrawFontText, result_PCode_char ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70;
-								g.DrawString($"{pcode_ocr}", _processor5.DrawFontText, result_PCode_char ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70;
-								if (!result_PCode_char)
-								{
-									g.DrawString($"P-Code标准: {_Config.Standard_PCode}", _processor5.DrawFontText, _processor5.DrawBrushGreen, x, y); y += 70;
-									y += 70;
-								}
-							}
-
-							g.DrawString($"色标结果：{(result_Segmentation ? "OK" : "NG")}", _processor5.DrawFontText, result_Segmentation ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70;
-							if (segmentationResult.DetectedBoth)
-							{
-								g.DrawString($"色标测量值：{projectionLength:F2}mm", _processor5.DrawFontText, result_Segmentation ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70;
-							}
-							g.DrawString($"缺陷结果：{(result_flaw ? "OK" : "NG")}", _processor5.DrawFontText, result_flaw ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70;
-
-							if (!string.IsNullOrEmpty(result_class))
-							{
-								g.DrawString($"缺陷标签：{result_class}", _processor5.DrawFontText, result_flaw ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70;
-							}
-							g.DrawString($"SequenceId：{id}", _processor5.DrawFontText, _processor5.DrawBrushGreen, x, y); y += 70;
-						}
-					}
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
+// 【GDI+已禁用-无字测试】
 
 					// Camera5积压时跳过保存/显示，省50ms提速追赶
 					if (needOutput)

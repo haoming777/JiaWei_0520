@@ -119,6 +119,7 @@ namespace VisionMeasure.From
 						if (existingFrm != null)
 						{
 							// 如果已经打开，直接把它激活并带到最前面
+							existingFrm.Show();
 							existingFrm.WindowState = FormWindowState.Normal;
 							existingFrm.Activate();
 						}

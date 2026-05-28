@@ -1098,6 +1098,16 @@ namespace SetProduct
             _ = LoadData();
         }
 
+
+        protected override void OnVisibleChanged(EventArgs e)
+        {
+            base.OnVisibleChanged(e);
+            if (this.Visible && _currentData == null)
+            {
+                _ = LoadData();
+            }
+        }
+
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             if (e.CloseReason == CloseReason.UserClosing)
