@@ -4989,6 +4989,7 @@ namespace VisionMeasure
 			this.clearBtn.Text = "清  空";
 			this.clearBtn.TipsFont = new System.Drawing.Font("宋体", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
 			this.clearBtn.UseWaitCursor = true;
+			this.clearBtn.Visible = false;
 			this.clearBtn.Click += new System.EventHandler(this.clearBtn_Click);
 			// 
 			// panel53
