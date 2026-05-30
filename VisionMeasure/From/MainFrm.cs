@@ -1427,7 +1427,7 @@ namespace VisionMeasure
 				if (!_isClosing)
 				{
 
-					DrawEngCam1(labelImage1, result, id);
+					DrawGdiCam1(labelImage1, result, result_Segmentation, totalArea, totalArea_Camera1, id);
 					CacheImageForDefectSave("Camera1", labelImage, labelImage1, id);
 
 					// 仅仅是限制 PictureBox 控件界面的刷新频率
@@ -1586,7 +1586,7 @@ namespace VisionMeasure
 				if (!_isClosing)
 				{
 
-					DrawEngCam2(labelImage1, result, id);
+					DrawGdiCam2(labelImage1, result, result_class, id);
 					CacheImageForDefectSave("Camera2", labelImage, labelImage1, id);
 
 					// 降频刷新UI
@@ -1727,7 +1727,7 @@ namespace VisionMeasure
 				{
 
 
-					DrawEngCam3(resultImage, result, id);
+					DrawGdiCam3(resultImage, result, longEdge, PipeDiameter, roundness, id);
 					CacheImageForDefectSave("Camera3", labelImage, resultImage, id);
 
 					// 降频刷新 UI
@@ -1963,7 +1963,7 @@ namespace VisionMeasure
 				if (!_isClosing)
 				{
 
-					DrawEngCam4(labelImage1, result, id);
+					DrawGdiCam4(labelImage1, result, result_char, order_ocr, id);
 					CacheImageForDefectSave("Camera4", labelImage, labelImage1, id);
 
 					// 降频刷新 UI
@@ -2313,18 +2313,18 @@ namespace VisionMeasure
 					if (needOutput)
 
 
-					// Camera5积压时跳过保存/显示，省50ms提速追赶
-					if (needOutput)
-					{
-						DrawEngCam5(labelImage1, result, id);
-						CacheImageForDefectSave("Camera5", labelImage, labelImage1, id);
-						displayBitmap = labelImage1.ToBitmap();
-						UpdatePictureBox5(displayBitmap);
-					}
-					else if (queueDepth % 10 == 0)
-					{
-						toolClass.SaveLog($"[Camera5] 积压{queueDepth}帧，跳过显示/存图提效");
-					}
+						// Camera5积压时跳过保存/显示，省50ms提速追赶
+						if (needOutput)
+						{
+							DrawGdiCam5(labelImage1, result, result_char, result_PCode_char, result_flaw, result_Segmentation, result_class, order_ocr, pcode_ocr, projectionLength, segmentationResult, id);
+							CacheImageForDefectSave("Camera5", labelImage, labelImage1, id);
+							displayBitmap = labelImage1.ToBitmap();
+							UpdatePictureBox5(displayBitmap);
+						}
+						else if (queueDepth % 10 == 0)
+						{
+							toolClass.SaveLog($"[Camera5] 积压{queueDepth}帧，跳过显示/存图提效");
+						}
 
 					stageTimer.Stop();
 					context.StageTimes["显示更新及存储图像"] = stageTimer.ElapsedMilliseconds;
@@ -2491,10 +2491,10 @@ namespace VisionMeasure
 				string yFileName = $"{dtFormat}_Y_ID{SequenceId - Offset}_SequenceId{SequenceId}_Offset{Offset}_result-{resultBool}-{(resultBool ? "OK" : "NG")}.jpg";
 				string yPath = Path.Combine(basePath, yFileName);
 
-				byte[] yData = BitmapFastConverter.ToBmpBytesViaOpenCv_MatDirect(original);
+				byte[] yData = BitmapFastConverter.ToJpegBytesViaOpenCv(original, IMAGE_JPEG_QUALITY);
 				if (yData != null && yData.Length > 0)
 				{
-					saver.AddSaveTask(yPath, yData, false, 100);
+					saver.AddSaveTask(yPath, yData, true, IMAGE_JPEG_QUALITY);
 				}
 			}
 			catch (Exception ex)
@@ -2787,57 +2787,112 @@ namespace VisionMeasure
 		}
 		#endregion
 
-		#region OpenCV英文标注（零GDI+）
-		private static void DrawEngOverlay(Mat img, string[] lines, Scalar[] colors, int startX, int startY, int lineH)
+		#region GDI+中文绘制
+		private void DrawGdiCam1(Mat img, bool result, bool result_Segmentation, double totalArea, int totalArea_Camera1, long id)
 		{
 			try
 			{
-				for (int i = 0; i < lines.Length; i++)
+				using (var bmp = img.ToBitmap())
+				using (var g = Graphics.FromImage(bmp))
 				{
-					if (string.IsNullOrEmpty(lines[i])) continue;
-					var c = (colors != null && i < colors.Length) ? colors[i] : new Scalar(0, 255, 0);
-					Cv2.PutText(img, lines[i], new OpenCvSharp.Point(startX, startY + i * lineH),
-						HersheyFonts.HersheySimplex, 1.0, c, 2);
+					int x = bmp.Width - 500; int y = 30;
+					g.DrawString("相机：底部异物检测", _processor1.DrawFontTitle, _processor1.DrawBrushGreen, x, y); y += 70;
+					g.DrawString("检测时间：" + DateTime.Now.ToString("HH:mm:ss.fff"), _processor1.DrawFontText, _processor1.DrawBrushGreen, x, y); y += 70;
+					g.DrawString("综合结果：" + (result ? "OK" : "NG"), _processor1.DrawFontText, result ? _processor1.DrawBrushGreen : _processor1.DrawBrushRed, x, y); y += 70;
+					if (!result_Segmentation) { g.DrawString("异物面积：" + totalArea.ToString("F2") + " / " + totalArea_Camera1, _processor1.DrawFontText, _processor1.DrawBrushRed, x, y); y += 70; }
+					g.DrawString("SequenceId：" + id, _processor1.DrawFontText, _processor1.DrawBrushGreen, x, y);
+					using (var tmp = BitmapConverter.ToMat(bmp)) { tmp.CopyTo(img); }
 				}
 			}
 			catch { }
 		}
-		private static readonly Scalar CvGrn = new Scalar(0, 255, 0);
-		private static readonly Scalar CvRed = new Scalar(0, 0, 255);
-
-		private static void DrawEngCam1(Mat img, bool result, long id)
+		private void DrawGdiCam2(Mat img, bool result, string result_class, long id)
 		{
-			var L = new System.Collections.Generic.List<string> { "CAM1: BottomForeignObj", "Time: " + DateTime.Now.ToString("HH:mm:ss.fff"), "Result: " + (result ? "OK" : "NG"), "ID: " + id };
-			var C = new System.Collections.Generic.List<Scalar> { CvGrn, CvGrn, result ? CvGrn : CvRed, CvGrn };
-			DrawEngOverlay(img, L.ToArray(), C.ToArray(), img.Width - 500, 100, 70);
+			try
+			{
+				using (var bmp = img.ToBitmap())
+				using (var g = Graphics.FromImage(bmp))
+				{
+					int x = bmp.Width - 500; int y = 30;
+					g.DrawString("相机：瓶盖有无检测", _processor2.DrawFontTitle, _processor2.DrawBrushGreen, x, y); y += 70;
+					g.DrawString("检测时间：" + DateTime.Now.ToString("HH:mm:ss.fff"), _processor2.DrawFontText, _processor2.DrawBrushGreen, x, y); y += 70;
+					g.DrawString("综合结果：" + (result ? "OK" : "NG"), _processor2.DrawFontText, result ? _processor2.DrawBrushGreen : _processor2.DrawBrushRed, x, y); y += 70;
+					if (!string.IsNullOrEmpty(result_class)) { g.DrawString("缺陷标签：" + result_class, _processor2.DrawFontText, _processor2.DrawBrushRed, x, y); y += 70; }
+					g.DrawString("SequenceId：" + id, _processor2.DrawFontText, _processor2.DrawBrushGreen, x, y);
+					using (var tmp = BitmapConverter.ToMat(bmp)) { tmp.CopyTo(img); }
+				}
+			}
+			catch { }
 		}
-
-		private static void DrawEngCam2(Mat img, bool result, long id)
+		private void DrawGdiCam3(Mat img, bool result, double longEdge, double PipeDiameter, double roundness, long id)
 		{
-			var L = new System.Collections.Generic.List<string> { "CAM2: CapDetection", "Time: " + DateTime.Now.ToString("HH:mm:ss.fff"), "Result: " + (result ? "OK" : "NG"), "ID: " + id };
-			var C = new System.Collections.Generic.List<Scalar> { CvGrn, CvGrn, result ? CvGrn : CvRed, CvGrn };
-			DrawEngOverlay(img, L.ToArray(), C.ToArray(), img.Width - 500, 100, 70);
+			try
+			{
+				using (var bmp = img.ToBitmap())
+				using (var g = Graphics.FromImage(bmp))
+				{
+					int x = bmp.Width - 500; int y = 30;
+					g.DrawString("相机：管口圆度检测", _processor3.DrawFontTitle, _processor3.DrawBrushGreen, x, y); y += 70;
+					g.DrawString("检测时间：" + DateTime.Now.ToString("HH:mm:ss.fff"), _processor3.DrawFontText, _processor3.DrawBrushGreen, x, y); y += 70;
+					g.DrawString("综合结果：" + (result ? "OK" : "NG"), _processor3.DrawFontText, result ? _processor3.DrawBrushGreen : _processor3.DrawBrushRed, x, y); y += 70;
+					g.DrawString("长边：" + longEdge.ToString("F2"), _processor3.DrawFontText, _processor3.DrawBrushGreen, x, y); y += 70;
+					g.DrawString("管径：" + PipeDiameter.ToString(), _processor3.DrawFontText, result ? _processor3.DrawBrushGreen : _processor3.DrawBrushRed, x, y); y += 70;
+					if (!result) { g.DrawString("圆度上限：" + _Config.Camera3RoundnessUp, _processor3.DrawFontText, _processor3.DrawBrushGreen, x, y); y += 70; }
+					g.DrawString("圆度：" + roundness.ToString("F3"), _processor3.DrawFontText, result ? _processor3.DrawBrushGreen : _processor3.DrawBrushRed, x, y); y += 70;
+					if (!result) { g.DrawString("圆度下限：" + _Config.Camera3RoundnessDown, _processor3.DrawFontText, _processor3.DrawBrushGreen, x, y); y += 70; }
+					g.DrawString("SequenceId：" + id, _processor3.DrawFontText, _processor3.DrawBrushGreen, x, y);
+					using (var tmp = BitmapConverter.ToMat(bmp)) { tmp.CopyTo(img); }
+				}
+			}
+			catch { }
 		}
-
-		private static void DrawEngCam3(Mat img, bool result, long id)
+		private void DrawGdiCam4(Mat img, bool result, bool result_char, string order_ocr, long id)
 		{
-			var L = new System.Collections.Generic.List<string> { "CAM3: Roundness", "Time: " + DateTime.Now.ToString("HH:mm:ss.fff"), "Result: " + (result ? "OK" : "NG"), "ID: " + id };
-			var C = new System.Collections.Generic.List<Scalar> { CvGrn, CvGrn, result ? CvGrn : CvRed, CvGrn };
-			DrawEngOverlay(img, L.ToArray(), C.ToArray(), img.Width - 500, 100, 70);
+			try
+			{
+				using (var bmp = img.ToBitmap())
+				using (var g = Graphics.FromImage(bmp))
+				{
+					int x = bmp.Width - 500; int y = 30;
+					g.DrawString("相机：夹尾正面字符检测", _processor4.DrawFontTitle, _processor4.DrawBrushGreen, x, y); y += 70;
+					g.DrawString("检测时间：" + DateTime.Now.ToString("HH:mm:ss.fff"), _processor4.DrawFontText, _processor4.DrawBrushGreen, x, y); y += 70;
+					g.DrawString("综合结果：" + (result ? "OK" : "NG"), _processor4.DrawFontText, result ? _processor4.DrawBrushGreen : _processor4.DrawBrushRed, x, y); y += 70;
+					g.DrawString("字符结果：" + (result_char ? "OK" : "NG"), _processor4.DrawFontText, result_char ? _processor4.DrawBrushGreen : _processor4.DrawBrushRed, x, y); y += 70;
+					if (!string.IsNullOrEmpty(order_ocr)) { g.DrawString(order_ocr, _processor4.DrawFontText, result_char ? _processor4.DrawBrushGreen : _processor4.DrawBrushRed, x, y); y += 70; }
+					g.DrawString("SequenceId：" + id, _processor4.DrawFontText, _processor4.DrawBrushGreen, x, y);
+					using (var tmp = BitmapConverter.ToMat(bmp)) { tmp.CopyTo(img); }
+				}
+			}
+			catch { }
 		}
-
-		private static void DrawEngCam4(Mat img, bool result, long id)
+		private void DrawGdiCam5(Mat img, bool result, bool result_char, bool result_PCode_char, bool result_flaw, bool result_Segmentation, string result_class, string order_ocr, string pcode_ocr, double projectionLength, SegmentationResult segRst, long id)
 		{
-			var L = new System.Collections.Generic.List<string> { "CAM4: FrontChar", "Time: " + DateTime.Now.ToString("HH:mm:ss.fff"), "Result: " + (result ? "OK" : "NG"), "ID: " + id };
-			var C = new System.Collections.Generic.List<Scalar> { CvGrn, CvGrn, result ? CvGrn : CvRed, CvGrn };
-			DrawEngOverlay(img, L.ToArray(), C.ToArray(), img.Width - 500, 100, 70);
-		}
-
-		private static void DrawEngCam5(Mat img, bool result, long id)
-		{
-			var L = new System.Collections.Generic.List<string> { "CAM5: BackChar", "Time: " + DateTime.Now.ToString("HH:mm:ss.fff"), "Result: " + (result ? "OK" : "NG"), "ID: " + id };
-			var C = new System.Collections.Generic.List<Scalar> { CvGrn, CvGrn, result ? CvGrn : CvRed, CvGrn };
-			DrawEngOverlay(img, L.ToArray(), C.ToArray(), img.Width - 600, 100, 70);
+			try
+			{
+				using (var bmp = img.ToBitmap())
+				using (var g = Graphics.FromImage(bmp))
+				{
+					int x = bmp.Width - 600; int y = 30;
+					g.DrawString("相机：夹尾反面字符检测", _processor5.DrawFontTitle, _processor5.DrawBrushGreen, x, y); y += 70;
+					g.DrawString("检测时间：" + DateTime.Now.ToString("HH:mm:ss.fff"), _processor5.DrawFontText, _processor5.DrawBrushGreen, x, y); y += 70;
+					g.DrawString("综合结果：" + (result ? "OK" : "NG"), _processor5.DrawFontText, result ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70;
+					g.DrawString("字符结果：" + (result_char ? "OK" : "NG"), _processor5.DrawFontText, result_char ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70;
+					if (!string.IsNullOrEmpty(order_ocr)) { g.DrawString(order_ocr, _processor5.DrawFontText, result_char ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70; }
+					if (_Config.Camera5IFPCode)
+					{
+						g.DrawString("P-Code结果：" + (result_PCode_char ? "OK" : "NG"), _processor5.DrawFontText, result_PCode_char ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70;
+						if (!string.IsNullOrEmpty(pcode_ocr)) { g.DrawString(pcode_ocr, _processor5.DrawFontText, result_PCode_char ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70; }
+						if (!result_PCode_char) { g.DrawString("P-Code标准: " + _Config.Standard_PCode, _processor5.DrawFontText, _processor5.DrawBrushGreen, x, y); y += 70; }
+					}
+					g.DrawString("色标结果：" + (result_Segmentation ? "OK" : "NG"), _processor5.DrawFontText, result_Segmentation ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70;
+					if (segRst.DetectedBoth) { g.DrawString("色标测量值：" + projectionLength.ToString("F2") + "mm", _processor5.DrawFontText, result_Segmentation ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70; }
+					g.DrawString("缺陷结果：" + (result_flaw ? "OK" : "NG"), _processor5.DrawFontText, result_flaw ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70;
+					if (!string.IsNullOrEmpty(result_class)) { g.DrawString("缺陷标签：" + result_class, _processor5.DrawFontText, result_flaw ? _processor5.DrawBrushGreen : _processor5.DrawBrushRed, x, y); y += 70; }
+					g.DrawString("SequenceId：" + id, _processor5.DrawFontText, _processor5.DrawBrushGreen, x, y);
+					using (var tmp = BitmapConverter.ToMat(bmp)) { tmp.CopyTo(img); }
+				}
+			}
+			catch { }
 		}
 		#endregion
 		#region 性能优化辅助方法
@@ -4505,9 +4560,12 @@ namespace VisionMeasure
 		private PerformanceStats _performanceStats;
 		private bool _disposed = false;
 		private bool _isProcessing = false;
-		// 每个相机独立的绘制资源
+		// 每个相机独立的GDI+绘制资源
+		public readonly Font DrawFontTitle;
+		public readonly Font DrawFontText;
+		public readonly SolidBrush DrawBrushGreen;
+		public readonly SolidBrush DrawBrushRed;
 		XLToolClass toolClass = new XLToolClass();
-
 		public int ImageQueueCount => _imageQueue.Count;
 		public int ResultQueueCount => _resultQueue.Count;
 		public PerformanceStats Performance => _performanceStats;
@@ -4528,7 +4586,10 @@ namespace VisionMeasure
 				Priority = ThreadPriority.AboveNormal
 			};
 			_processorThread.Start();
-			// 每个相机独立创建
+			DrawFontTitle = new Font("Microsoft YaHei", 24, FontStyle.Bold);
+			DrawFontText = new Font("Microsoft YaHei", 24, FontStyle.Bold);
+			DrawBrushGreen = new SolidBrush(Color.LawnGreen);
+			DrawBrushRed = new SolidBrush(Color.Red);
 		}
 
 		public bool AddImage(long sequenceId, Bitmap bitmap, int offset, CameraSelect camera)
@@ -4696,6 +4757,10 @@ namespace VisionMeasure
 					catch { }
 				}
 
+				DrawFontTitle?.Dispose();
+				DrawFontText?.Dispose();
+				DrawBrushGreen?.Dispose();
+				DrawBrushRed?.Dispose();
 				_imageQueue?.Dispose();
 				_resultQueue?.Dispose();
 			}
