@@ -808,7 +808,20 @@ namespace VisionMeasure
                     COUNT(*) as total_count,
                     SUM(CASE WHEN final_result = 'OK' THEN 1 ELSE 0 END) as ok_count,
                     SUM(CASE WHEN final_result = 'NG' THEN 1 ELSE 0 END) as ng_count,
-                    SUM(CASE WHEN is_excluded = 1 THEN 1 ELSE 0 END) as exclude_count,
+                    -- 连续爆管剔除按组统计（与主界面一致，每组3支）
+                    (SELECT COUNT(*) * 3 FROM production_records_detail d2
+                     WHERE d2.p_shift_date = production_records_detail.p_shift_date
+                     AND d2.p_shift = production_records_detail.p_shift
+                     AND d2.sku = production_records_detail.sku
+                     AND d2.excluded_reason = '连续爆管剔除'
+                     AND NOT EXISTS (
+                         SELECT 1 FROM production_records_detail d3
+                         WHERE d3.sequence_id = d2.sequence_id - 1
+                         AND d3.p_shift_date = d2.p_shift_date
+                         AND d3.p_shift = d2.p_shift
+                         AND d3.sku = d2.sku
+                         AND d3.excluded_reason = '连续爆管剔除'
+                     )) as exclude_count,
                     
                     -- 单一缺陷统计（仅统计未被剔除且缺陷数=1的记录）
                     SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_异物 = 1 THEN 1 ELSE 0 END) as ng_异物,

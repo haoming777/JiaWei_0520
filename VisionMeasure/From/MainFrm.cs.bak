@@ -9,6 +9,7 @@ using MT.Camera.SDK;
 using OpenCvSharp;
 using OpenCvSharp.Dnn;
 using OpenCvSharp.Extensions;
+using SkiaSharp;
 using PLCMonitor;
 using PLC调试.Class;
 using RoundnessDetection1;
@@ -97,8 +98,7 @@ namespace VisionMeasure
 		string modelId_rests_cam5 = "3";
 		string modelId_segmentation_cam5 = "2";
 
-		// 静态资源定义
-
+		// 静态资源定义（仅模拟/手动模式使用）
 
 		private static readonly Font Font_Main = new Font("Microsoft YaHei", 30, FontStyle.Bold);
 		private static readonly Font Font_Sub = new Font("Microsoft YaHei", 24, FontStyle.Bold);
@@ -1302,6 +1302,8 @@ namespace VisionMeasure
 			Mat componentCentroidsMat = null;
 			Mat singleContourMaskMat = null;
 			Bitmap displayBitmap = null;
+			Bitmap rawBmpForSave = null;
+			Bitmap resBmpForSave = null;
 
 			var pool = GetBufferPool(CameraSelect.Camera1);
 			try
@@ -1426,14 +1428,34 @@ namespace VisionMeasure
 
 				if (!_isClosing)
 				{
+					rawBmpForSave = labelImage.ToBitmap();
+					resBmpForSave = labelImage1.ToBitmap();
 
-					DrawEngCam1(labelImage1, result, id);
-					CacheImageForDefectSave("Camera1", labelImage, labelImage1, id);
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+测试禁用】
+					// 绘制完字体后，再把带有字体的图像放入存图缓存
+					CacheImageForDefectSave("Camera1", rawBmpForSave, resBmpForSave, id);
 
 					// 仅仅是限制 PictureBox 控件界面的刷新频率
 					if (id % 3 == 0)
 					{
-						displayBitmap = labelImage1.ToBitmap();
+						displayBitmap = new Bitmap(resBmpForSave);
 						UpdatePictureBox1(displayBitmap);
 					}
 				}
@@ -1473,6 +1495,8 @@ namespace VisionMeasure
 				}
 
 				displayBitmap?.Dispose();
+				rawBmpForSave?.Dispose();
+				resBmpForSave?.Dispose();
 
 				EndMethod(CameraSelect.Camera1);
 			}
@@ -1489,6 +1513,8 @@ namespace VisionMeasure
 			Mat labelImage = null;
 			Mat labelImage1 = null;
 			Bitmap displayBitmap = null;
+			Bitmap rawBmpForSave = null;
+			Bitmap resBmpForSave = null;
 
 			var pool = GetBufferPool(CameraSelect.Camera2);
 			try
@@ -1585,14 +1611,34 @@ namespace VisionMeasure
 
 				if (!_isClosing)
 				{
+					rawBmpForSave = labelImage.ToBitmap();
+					resBmpForSave = labelImage1.ToBitmap();
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
 
-					DrawEngCam2(labelImage1, result, id);
-					CacheImageForDefectSave("Camera2", labelImage, labelImage1, id);
+					// 画完字再存
+					CacheImageForDefectSave("Camera2", rawBmpForSave, resBmpForSave, id);
 
 					// 降频刷新UI
 					if (id % 3 == 0)
 					{
-						displayBitmap = labelImage1.ToBitmap();
+						displayBitmap = new Bitmap(resBmpForSave);
 						UpdatePictureBox2(displayBitmap);
 					}
 				}
@@ -1624,6 +1670,8 @@ namespace VisionMeasure
 				}
 
 				displayBitmap?.Dispose();
+				rawBmpForSave?.Dispose();
+				resBmpForSave?.Dispose();
 
 				EndMethod(CameraSelect.Camera2);
 			}
@@ -1639,6 +1687,8 @@ namespace VisionMeasure
 			Mat labelImage = null;
 			Mat resultImage = null;
 			Bitmap displayBitmap = null;
+			Bitmap rawBmpForSave = null;
+			Bitmap resBmpForSave = null;
 
 			var pool = GetBufferPool(CameraSelect.Camera3);
 			try
@@ -1725,10 +1775,34 @@ namespace VisionMeasure
 
 				if (!_isClosing)
 				{
+					rawBmpForSave = labelImage.ToBitmap();
+					resBmpForSave = resultImage.ToBitmap();
 
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
 
-					DrawEngCam3(resultImage, result, id);
-					CacheImageForDefectSave("Camera3", labelImage, resultImage, id);
+					// 画完字再存缓存
+					CacheImageForDefectSave("Camera3", rawBmpForSave, resBmpForSave, id);
 
 					// 降频刷新 UI
 					if (id % 3 == 0)
@@ -1737,7 +1811,7 @@ namespace VisionMeasure
 						context.StageTimes["图像绘制"] = stageTimer.ElapsedMilliseconds;
 						stageTimer.Restart();
 
-						displayBitmap = resultImage.ToBitmap();
+						displayBitmap = new Bitmap(resBmpForSave);
 						UpdatePictureBox3(displayBitmap);
 
 						stageTimer.Stop();
@@ -1781,6 +1855,8 @@ namespace VisionMeasure
 				}
 
 				displayBitmap?.Dispose();
+				rawBmpForSave?.Dispose();
+				resBmpForSave?.Dispose();
 
 				EndMethod(CameraSelect.Camera3);
 			}
@@ -1796,6 +1872,8 @@ namespace VisionMeasure
 			Mat labelImage = null;
 			Mat labelImage1 = null;
 			Bitmap displayBitmap = null;
+			Bitmap rawBmpForSave = null;
+			Bitmap resBmpForSave = null;
 
 			var pool = GetBufferPool(CameraSelect.Camera4);
 			try
@@ -1962,9 +2040,13 @@ namespace VisionMeasure
 
 				if (!_isClosing)
 				{
+					rawBmpForSave = labelImage.ToBitmap();
+					resBmpForSave = labelImage1.ToBitmap();
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
 
-					DrawEngCam4(labelImage1, result, id);
-					CacheImageForDefectSave("Camera4", labelImage, labelImage1, id);
+					// 画完字再存缓存
+					CacheImageForDefectSave("Camera4", rawBmpForSave, resBmpForSave, id);
 
 					// 降频刷新 UI
 					if (id % 3 == 0)
@@ -1973,7 +2055,7 @@ namespace VisionMeasure
 						context.StageTimes["图像绘制"] = stageTimer.ElapsedMilliseconds;
 						stageTimer.Restart();
 
-						displayBitmap = labelImage1.ToBitmap();
+						displayBitmap = new Bitmap(resBmpForSave);
 						UpdatePictureBox4(displayBitmap);
 
 						stageTimer.Stop();
@@ -2011,6 +2093,8 @@ namespace VisionMeasure
 				}
 
 				displayBitmap?.Dispose();
+				rawBmpForSave?.Dispose();
+				resBmpForSave?.Dispose();
 
 				EndMethod(CameraSelect.Camera4);
 			}
@@ -2026,6 +2110,8 @@ namespace VisionMeasure
 			Mat labelImage = null;
 			Mat labelImage1 = null;
 			Bitmap displayBitmap = null;
+			Bitmap rawBmpForSave = null;
+			Bitmap resBmpForSave = null;
 
 			var pool = GetBufferPool(CameraSelect.Camera5);
 			try
@@ -2311,14 +2397,51 @@ namespace VisionMeasure
 					bool needOutput = queueDepth <= 2;
 
 					if (needOutput)
+						rawBmpForSave = labelImage.ToBitmap();
+					resBmpForSave = labelImage1.ToBitmap();
 
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
+					// 【GDI+已禁用-无字测试】
 
 					// Camera5积压时跳过保存/显示，省50ms提速追赶
 					if (needOutput)
 					{
-						DrawEngCam5(labelImage1, result, id);
-						CacheImageForDefectSave("Camera5", labelImage, labelImage1, id);
-						displayBitmap = labelImage1.ToBitmap();
+						CacheImageForDefectSave("Camera5", rawBmpForSave, resBmpForSave, id);
+						displayBitmap = new Bitmap(resBmpForSave);
 						UpdatePictureBox5(displayBitmap);
 					}
 					else if (queueDepth % 10 == 0)
@@ -2380,6 +2503,8 @@ namespace VisionMeasure
 				}
 
 				displayBitmap?.Dispose();
+				rawBmpForSave?.Dispose();
+				resBmpForSave?.Dispose();
 
 				EndMethod(CameraSelect.Camera5);
 			}
@@ -2387,7 +2512,7 @@ namespace VisionMeasure
 		#endregion
 
 		#region 高速保存方法
-		private void SaveImageIfNeeded_Fast(string cameraName, Mat original, Mat result, bool resultBool, long SequenceId, int Offset)
+		private void SaveImageIfNeeded_Fast(string cameraName, Bitmap original, Bitmap result, bool resultBool, long SequenceId, int Offset)
 		{
 			if (_isClosing) return;
 
@@ -2484,14 +2609,14 @@ namespace VisionMeasure
 			}
 		}
 
-		private void SaveOriginalImage_Fast(HighSpeedImageSaver saver, string cameraName, Mat original, string basePath, string dtFormat, long SequenceId, int Offset, bool resultBool)
+		private void SaveOriginalImage_Fast(HighSpeedImageSaver saver, string cameraName, Bitmap original, string basePath, string dtFormat, long SequenceId, int Offset, bool resultBool)
 		{
 			try
 			{
 				string yFileName = $"{dtFormat}_Y_ID{SequenceId - Offset}_SequenceId{SequenceId}_Offset{Offset}_result-{resultBool}-{(resultBool ? "OK" : "NG")}.jpg";
 				string yPath = Path.Combine(basePath, yFileName);
 
-				byte[] yData = BitmapFastConverter.ToBmpBytesViaOpenCv_MatDirect(original);
+				byte[] yData = BitmapFastConverter.ToBmpBytesViaOpenCv(original);
 				if (yData != null && yData.Length > 0)
 				{
 					saver.AddSaveTask(yPath, yData, false, 100);
@@ -2503,7 +2628,7 @@ namespace VisionMeasure
 			}
 		}
 
-		private void SaveResultImage_Fast(HighSpeedImageSaver saver, string cameraName, Mat result, string basePath, string dtFormat, long SequenceId, int Offset, bool resultBool)
+		private void SaveResultImage_Fast(HighSpeedImageSaver saver, string cameraName, Bitmap result, string basePath, string dtFormat, long SequenceId, int Offset, bool resultBool)
 		{
 			try
 			{
@@ -2539,13 +2664,13 @@ namespace VisionMeasure
 		/// 缓存图像，等结果匹配后统一按缺陷类型存图
 		/// 注意：必须创建Bitmap副本，因为原始Bitmap会在相机处理完成后被释放
 		/// </summary>
-		private void CacheImageForDefectSave(string cameraName, Mat original, Mat result, long sequenceId)
+		private void CacheImageForDefectSave(string cameraName, Bitmap original, Bitmap result, long sequenceId)
 		{
-			Mat originalCopy = null, resultCopy = null;
+			Bitmap originalCopy = null, resultCopy = null;
 			try
 			{
-				originalCopy = original != null ? original.Clone() : null;
-				resultCopy = result != null ? result.Clone() : null;
+				originalCopy = original != null ? new Bitmap(original) : null;
+				resultCopy = result != null ? new Bitmap(result) : null;
 
 				// 线程安全：GetOrAdd + lock，防止 AddOrUpdate 的 addFactory 并发覆盖
 				var origDict = _imageCache.GetOrAdd(sequenceId, _ => new Dictionary<string, Mat>());
@@ -2638,13 +2763,13 @@ namespace VisionMeasure
 				if (_imageCache.TryGetValue(sequenceId, out var originalImages) &&
 					_resultImageCache.TryGetValue(sequenceId, out var resultImages))
 				{
-					KeyValuePair<string, Mat>[] snap;
+					KeyValuePair<string, Bitmap>[] snap;
 					lock (originalImages) { snap = originalImages.ToArray(); }
 					foreach (var kvp in snap)
 					{
 						string cameraName = kvp.Key;
-						Mat original = kvp.Value;
-						Mat result = null;
+						Bitmap original = kvp.Value;
+						Bitmap result = null;
 						lock (resultImages) { resultImages.TryGetValue(cameraName, out result); }
 
 						// 获取当前相机的缺陷类型和OK/NG状态
@@ -2746,10 +2871,7 @@ namespace VisionMeasure
 				case "Camera5":
 					return results[4]?.Result == false ? (results[4]?.Cam5_BaoguanResult == 0 ? "爆管" :
 						results[4]?.Cam5_XiekouResult == 0 ? "斜口" :
-						results[4]?.Cam5_WeijianduanResult == 0 ? "未剪断" :
-						results[4]?.Cam5_CharResult == 0 ? "背面工号缺失" :
-						results[4]?.Cam5_PCodeResult == 0 ? "P-Code" :
-						results[4]?.Cam5_SebiaoResult == 0 ? "色标对中" : "NG") : "OK";
+						results[4]?.Cam5_WeijianduanResult == 0 ? "未剪断" : "NG") : "OK";
 				default:
 					return "OK";
 			}
@@ -2787,59 +2909,6 @@ namespace VisionMeasure
 		}
 		#endregion
 
-		#region OpenCV英文标注（零GDI+）
-		private static void DrawEngOverlay(Mat img, string[] lines, Scalar[] colors, int startX, int startY, int lineH)
-		{
-			try
-			{
-				for (int i = 0; i < lines.Length; i++)
-				{
-					if (string.IsNullOrEmpty(lines[i])) continue;
-					var c = (colors != null && i < colors.Length) ? colors[i] : new Scalar(0, 255, 0);
-					Cv2.PutText(img, lines[i], new OpenCvSharp.Point(startX, startY + i * lineH),
-						HersheyFonts.HersheySimplex, 1.0, c, 2);
-				}
-			}
-			catch { }
-		}
-		private static readonly Scalar CvGrn = new Scalar(0, 255, 0);
-		private static readonly Scalar CvRed = new Scalar(0, 0, 255);
-
-		private static void DrawEngCam1(Mat img, bool result, long id)
-		{
-			var L = new System.Collections.Generic.List<string> { "CAM1: BottomForeignObj", "Time: " + DateTime.Now.ToString("HH:mm:ss.fff"), "Result: " + (result ? "OK" : "NG"), "ID: " + id };
-			var C = new System.Collections.Generic.List<Scalar> { CvGrn, CvGrn, result ? CvGrn : CvRed, CvGrn };
-			DrawEngOverlay(img, L.ToArray(), C.ToArray(), img.Width - 500, 100, 70);
-		}
-
-		private static void DrawEngCam2(Mat img, bool result, long id)
-		{
-			var L = new System.Collections.Generic.List<string> { "CAM2: CapDetection", "Time: " + DateTime.Now.ToString("HH:mm:ss.fff"), "Result: " + (result ? "OK" : "NG"), "ID: " + id };
-			var C = new System.Collections.Generic.List<Scalar> { CvGrn, CvGrn, result ? CvGrn : CvRed, CvGrn };
-			DrawEngOverlay(img, L.ToArray(), C.ToArray(), img.Width - 500, 100, 70);
-		}
-
-		private static void DrawEngCam3(Mat img, bool result, long id)
-		{
-			var L = new System.Collections.Generic.List<string> { "CAM3: Roundness", "Time: " + DateTime.Now.ToString("HH:mm:ss.fff"), "Result: " + (result ? "OK" : "NG"), "ID: " + id };
-			var C = new System.Collections.Generic.List<Scalar> { CvGrn, CvGrn, result ? CvGrn : CvRed, CvGrn };
-			DrawEngOverlay(img, L.ToArray(), C.ToArray(), img.Width - 500, 100, 70);
-		}
-
-		private static void DrawEngCam4(Mat img, bool result, long id)
-		{
-			var L = new System.Collections.Generic.List<string> { "CAM4: FrontChar", "Time: " + DateTime.Now.ToString("HH:mm:ss.fff"), "Result: " + (result ? "OK" : "NG"), "ID: " + id };
-			var C = new System.Collections.Generic.List<Scalar> { CvGrn, CvGrn, result ? CvGrn : CvRed, CvGrn };
-			DrawEngOverlay(img, L.ToArray(), C.ToArray(), img.Width - 500, 100, 70);
-		}
-
-		private static void DrawEngCam5(Mat img, bool result, long id)
-		{
-			var L = new System.Collections.Generic.List<string> { "CAM5: BackChar", "Time: " + DateTime.Now.ToString("HH:mm:ss.fff"), "Result: " + (result ? "OK" : "NG"), "ID: " + id };
-			var C = new System.Collections.Generic.List<Scalar> { CvGrn, CvGrn, result ? CvGrn : CvRed, CvGrn };
-			DrawEngOverlay(img, L.ToArray(), C.ToArray(), img.Width - 600, 100, 70);
-		}
-		#endregion
 		#region 性能优化辅助方法
 		public static List<List<OpenCvSharp.Point>> SortByCenterX(List<List<OpenCvSharp.Point>> polygons, bool leftToRight = true)
 		{
@@ -3210,20 +3279,7 @@ namespace VisionMeasure
 			}
 			if (flushList != null && _dbRecorder != null)
 			{
-				foreach (var r in flushList)
-				{
-					_dbRecorder.AddRecord(r);
-					if (r.IsExcluded && r.ExcludedReason == "连续爆管剔除")
-						_Config.burstExcludeCount += 3;
-				}
-				if (_Config.burstExcludeCount > 0 || flushList.Any(r => r.IsExcluded))
-				{
-					this.Invoke(new Action(() =>
-					{
-						if (BaoGuanNGTxt != null)
-							BaoGuanNGTxt.Text = _Config.burstExcludeCount.ToString();
-					}));
-				}
+				foreach (var r in flushList) _dbRecorder.AddRecord(r);
 			}
 		}
 
@@ -3736,16 +3792,13 @@ namespace VisionMeasure
 		private void DrawChineseText(Bitmap bmp, string title, bool result, string id, string extraInfo)
 		{
 			using (Graphics g = Graphics.FromImage(bmp))
-			using (var brushGreen = new SolidBrush(Color.LawnGreen))
-			using (var brushRed = new SolidBrush(Color.Red))
-			using (var brushWhite = new SolidBrush(Color.White))
 			{
 				int drawX = bmp.Width - 550;
-				g.DrawString(title, Font_Main, brushGreen, drawX, 50);
-				g.DrawString($"综合结果：{(result ? "合格" : "NG")}", Font_Main, result ? brushGreen : brushRed, drawX, 100);
-				g.DrawString($"产品序号：{id}", Font_Sub, brushWhite, drawX, 150);
+				g.DrawString(title, Font_Main, Brush_Green, drawX, 50);
+				g.DrawString($"综合结果：{(result ? "合格" : "NG")}", Font_Main, result ? Brush_Green : Brush_Red, drawX, 100);
+				g.DrawString($"产品序号：{id}", Font_Sub, Brush_White, drawX, 150);
 				if (!string.IsNullOrEmpty(extraInfo))
-					g.DrawString(extraInfo, Font_Sub, brushWhite, drawX, 200);
+					g.DrawString(extraInfo, Font_Sub, Brush_White, drawX, 200);
 			}
 		}
 
@@ -4506,6 +4559,10 @@ namespace VisionMeasure
 		private bool _disposed = false;
 		private bool _isProcessing = false;
 		// 每个相机独立的绘制资源
+		public readonly Font DrawFontTitle;
+		public readonly Font DrawFontText;
+		public readonly SolidBrush DrawBrushGreen;
+		public readonly SolidBrush DrawBrushRed;
 		XLToolClass toolClass = new XLToolClass();
 
 		public int ImageQueueCount => _imageQueue.Count;
@@ -4529,6 +4586,10 @@ namespace VisionMeasure
 			};
 			_processorThread.Start();
 			// 每个相机独立创建
+			DrawFontTitle = new Font("微软雅黑", 24, FontStyle.Bold);
+			DrawFontText = new Font("微软雅黑", 24, FontStyle.Bold);
+			DrawBrushGreen = new SolidBrush(Color.LawnGreen);
+			DrawBrushRed = new SolidBrush(Color.Red);
 		}
 
 		public bool AddImage(long sequenceId, Bitmap bitmap, int offset, CameraSelect camera)
@@ -4696,6 +4757,10 @@ namespace VisionMeasure
 					catch { }
 				}
 
+				DrawFontTitle?.Dispose();
+				DrawFontText?.Dispose();
+				DrawBrushGreen?.Dispose();
+				DrawBrushRed?.Dispose();
 				_imageQueue?.Dispose();
 				_resultQueue?.Dispose();
 			}
@@ -5020,25 +5085,17 @@ namespace VisionMeasure
 
 
 
-		public static byte[] ToBmpBytesViaOpenCv_MatDirect(Mat mat)
-		{
-			if (mat == null || mat.Empty()) return null;
-			try
-			{
-				byte[] buf;
-				bool success = Cv2.ImEncode(".bmp", mat, out buf);
-				return success ? buf : null;
-			}
-			catch { return null; }
-		}
-
 		public static byte[] ToBmpBytesViaOpenCv(Bitmap bitmap)
 		{
 			if (bitmap == null) return null;
 			try
 			{
 				using (var mat = BitmapConverter.ToMat(bitmap))
-					return ToBmpBytesViaOpenCv_MatDirect(mat);
+				{
+					byte[] buf;
+					bool success = Cv2.ImEncode(".bmp", mat, out buf);
+					return success ? buf : null;
+				}
 			}
 			catch { return null; }
 		}

@@ -984,6 +984,8 @@ namespace SetProduct
             }
             else
             {
+                // 详细模式：收集连续爆管剔除的序列号，按组统计（与主界面逻辑一致）
+                var excludedIds = new List<long>();
                 foreach (DataRow row in _currentData.Rows)
                 {
                     total++;
@@ -991,12 +993,22 @@ namespace SetProduct
                     else ng++;
                     if (_hasIsExcluded)
                     {
-                        if (Convert.ToInt32(row["is_excluded"]) == 1)
+                        if (Convert.ToInt32(row["is_excluded"]) == 1
+                            && row["excluded_reason"].ToString() == "连续爆管剔除")
                         {
-                            excludeCount++;
+                            excludedIds.Add(Convert.ToInt64(row["sequence_id"]));
                         }
                     }
                 }
+                // 按连续组统计：每组3支（与主界面burstExcludeCount += 3一致）
+                excludedIds.Sort();
+                int groups = 0;
+                for (int i = 0; i < excludedIds.Count; i++)
+                {
+                    if (i == 0 || excludedIds[i] != excludedIds[i - 1] + 1)
+                        groups++;
+                }
+                excludeCount = groups * 3;
             }
 
             lblTotal.Text = total.ToString("N0");
