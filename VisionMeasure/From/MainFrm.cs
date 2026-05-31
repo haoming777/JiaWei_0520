@@ -275,7 +275,7 @@ namespace VisionMeasure
 			InitializeMemoryPools();
 			// 30秒定时刷新待写入数据库的记录
 			_batchFlushTimer = new System.Timers.Timer(30000);
-			_batchFlushTimer.Elapsed += (s, e) => FlushPendingRecords();
+			_batchFlushTimer.Elapsed += (s, e) => { FlushPendingRecords(); _dbRecorder?.RefreshCurrentSummary(); };
 			_batchFlushTimer.AutoReset = true;
 			_batchFlushTimer.Start();
 

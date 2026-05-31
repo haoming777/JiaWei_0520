@@ -655,13 +655,36 @@ namespace VisionMeasure
 					RetroactiveUpdateExcludedRecords(record.SequenceId, record.Sku);
 				}
 
-				// 实时更新汇总表
-				UpdateOrCreateSummary(record.ShiftDateStr, record.Shift, record.Sku);
+			// 汇总表改为定时更新（_batchFlushTimer 30秒），不再每产品触发
 			}
 			catch (Exception ex)
 			{
 				_toolClass.SaveLog($"[DB] 保存记录异常: {ex.Message}\n{ex.StackTrace}");
 			}
+		}
+
+		/// <summary>
+		/// 定时刷新当前班次的汇总表（30秒触发，替代之前的每产品更新）
+		/// </summary>
+		public void RefreshCurrentSummary()
+		{
+			try
+			{
+				string sku = GetCurrentSku?.Invoke() ?? "";
+				if (string.IsNullOrEmpty(sku)) return;
+				var now = DateTime.Now;
+				string shift = GetCurrentShift(now.Hour);
+				string date = shift == "夜班" && now.Hour < 8 ? now.AddDays(-1).ToString("yyMMdd") : now.ToString("yyMMdd");
+				UpdateOrCreateSummary(date, shift, sku);
+			}
+			catch { }
+		}
+
+		private static string GetCurrentShift(int hour)
+		{
+			if (hour >= 8 && hour <= 15) return "早班";
+			if (hour >= 16 && hour <= 23) return "中班";
+			return "夜班";
 		}
 
 		/// <summary>
