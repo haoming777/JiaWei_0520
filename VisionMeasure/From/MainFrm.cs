@@ -237,6 +237,7 @@ namespace VisionMeasure
 		#region 图像缓存（用于按缺陷类型存图）
 		private ConcurrentDictionary<long, Dictionary<string, Mat>> _imageCache = new ConcurrentDictionary<long, Dictionary<string, Mat>>();
 		private ConcurrentDictionary<long, Dictionary<string, Mat>> _resultImageCache = new ConcurrentDictionary<long, Dictionary<string, Mat>>();
+		private ConcurrentDictionary<long, QueueResultItem[]> _pendingImageSaves = new ConcurrentDictionary<long, QueueResultItem[]>();
 		#endregion
 
 		#region 光电信号
@@ -375,6 +376,7 @@ namespace VisionMeasure
 				_dbRecorder = new AsyncDatabaseRecorder();
 				// 设置获取当前SKU的委托
 				_dbRecorder.GetCurrentSku = () => GetCurrentSkuValue();
+				_dbRecorder.OnRecordCommitted = (unifiedId) => OnDbRecordCommitted(unifiedId);
 				toolClass.SaveLog("异步数据库记录器初始化完成");
 			}
 			catch (Exception ex)
@@ -433,6 +435,13 @@ namespace VisionMeasure
 					// 检查SKU是否发生变化
 					if (_savedSku != currentSku)
 					{
+						// SKU切换：先自动保存上一个SKU的班次报表
+						if (!string.IsNullOrEmpty(_savedSku) && _dbRecorder != null)
+						{
+							_dbRecorder.ExportFullShiftReport(_currentShiftDate, _currentShift);
+							toolClass.SaveLog($"SKU切换: {_savedSku} -> {currentSku}，已自动保存{_currentShift}班次报表");
+						}
+
 						// SKU发生变化，清空统计数据
 						ClearStatisticsDisplay();
 						_savedSku = currentSku;
@@ -2310,21 +2319,20 @@ namespace VisionMeasure
 					int queueDepth = _processor5?.ImageQueueCount ?? 0;
 					bool needOutput = queueDepth <= 2;
 
+					// Camera5积压时跳过显示，省50ms提速追赶
 					if (needOutput)
+					{
+						DrawGdiCam5(labelImage1, result, result_char, result_PCode_char, result_flaw, result_Segmentation, result_class, order_ocr, pcode_ocr, projectionLength, segmentationResult, id);
+						displayBitmap = labelImage1.ToBitmap();
+						UpdatePictureBox5(displayBitmap);
+					}
+					else if (queueDepth % 10 == 0)
+					{
+						toolClass.SaveLog($"[Camera5] 积压{queueDepth}帧，跳过显示提效");
+					}
 
-
-						// Camera5积压时跳过保存/显示，省50ms提速追赶
-						if (needOutput)
-						{
-							DrawGdiCam5(labelImage1, result, result_char, result_PCode_char, result_flaw, result_Segmentation, result_class, order_ocr, pcode_ocr, projectionLength, segmentationResult, id);
-							CacheImageForDefectSave("Camera5", labelImage, labelImage1, id);
-							displayBitmap = labelImage1.ToBitmap();
-							UpdatePictureBox5(displayBitmap);
-						}
-						else if (queueDepth % 10 == 0)
-						{
-							toolClass.SaveLog($"[Camera5] 积压{queueDepth}帧，跳过显示/存图提效");
-						}
+					// 始终缓存图像用于存图（无论是否积压）
+					CacheImageForDefectSave("Camera5", labelImage, labelImage1, id);
 
 					stageTimer.Stop();
 					context.StageTimes["显示更新及存储图像"] = stageTimer.ElapsedMilliseconds;
@@ -2342,9 +2350,9 @@ namespace VisionMeasure
 					Cam5_CharResult = result_char ? 1 : 0,
 					Cam5_PCodeResult = result_PCode_char ? 1 : 0,
 					Cam5_SebiaoResult = result_Segmentation ? 1 : 0,
-					Cam5_BaoguanResult = !result_class.Contains("爆管") ? 1 : 0,
-					Cam5_XiekouResult = !result_class.Contains("斜口") ? 1 : 0,
-					Cam5_WeijianduanResult = !result_class.Contains("未剪断") ? 1 : 0
+					Cam5_BaoguanResult = (_Config.Camera5IFBaoGuan && result_class.Contains("爆管")) ? 0 : 1,
+					Cam5_XiekouResult = (_Config.Camera5IFXieKou && result_class.Contains("斜口")) ? 0 : 1,
+					Cam5_WeijianduanResult = (_Config.Camera5IFWeiJianDuan && result_class.Contains("未剪断")) ? 0 : 1
 				};
 
 				if (!result && result_flaw == false &&
@@ -2611,6 +2619,35 @@ namespace VisionMeasure
 		/// 统一按缺陷类型保存所有相机的图像
 		/// 路径结构：日期 -> 班次 -> SKU -> OK/NG -> 相机名 -> 缺陷类型
 		/// </summary>
+
+		/// <summary>
+		/// DB记录提交后回调：从缓存中取出图像并保存
+		/// 确保记录已入库后才存图，保证记录与图片一一对应
+		/// </summary>
+		private void OnDbRecordCommitted(long unifiedId)
+		{
+			if (_pendingImageSaves.TryRemove(unifiedId, out var results))
+			{
+				// 卸载JPEG编码到线程池，不阻塞DB消费者线程
+				long captureId = unifiedId;
+				var captureResults = results;
+				System.Threading.ThreadPool.QueueUserWorkItem(_ =>
+				{
+					try
+					{
+						SaveImagesByDefectType(captureId, captureResults);
+					}
+					catch (Exception ex)
+					{
+						toolClass.SaveLog($"[存图] UnifiedId:{captureId} 存图异常: {ex.Message}");
+					}
+				});
+			}
+			else
+			{
+				// 可能已被ResultMatcher跳过或缓存已清理，属正常情况
+			}
+		}
 		private void SaveImagesByDefectType(long sequenceId, QueueResultItem[] results)
 		{
 			try
@@ -2895,6 +2932,7 @@ namespace VisionMeasure
 			catch { }
 		}
 		#endregion
+
 		#region 性能优化辅助方法
 		public static List<List<OpenCvSharp.Point>> SortByCenterX(List<List<OpenCvSharp.Point>> polygons, bool leftToRight = true)
 		{
@@ -3001,27 +3039,48 @@ namespace VisionMeasure
 									DrawPointFast(resultImage, minAreaRect.Center, new Scalar(160, 32, 240));
 									DrawRotatedRectangleFast(resultImage, minAreaRect, new Scalar(160, 32, 240));
 									break;
-								case "爆管":
-									Cv2.DrawContours(resultImage, contours, -1, new Scalar(0, 0, 255), 2);
-									if (classBuilder.Length > 0) classBuilder.Append("; ");
-									classBuilder.Append("爆管");
-									if (_Config.Camera5IFBaoGuan) result_Class_str += "1";
-									else result_Class_str += "0";
-									break;
-								case "未剪断":
-									Cv2.DrawContours(resultImage, contours, -1, new Scalar(0, 0, 255), 2);
-									if (classBuilder.Length > 0) classBuilder.Append("; ");
-									classBuilder.Append("未剪断");
-									if (_Config.Camera5IFWeiJianDuan) result_Class_str += "1";
-									else result_Class_str += "0";
-									break;
-								case "斜口":
-									Cv2.DrawContours(resultImage, contours, -1, new Scalar(0, 0, 255), 2);
-									if (classBuilder.Length > 0) classBuilder.Append("; ");
-									classBuilder.Append("斜口");
-									if (_Config.Camera5IFXieKou) result_Class_str += "1";
-									else result_Class_str += "0";
-									break;
+									case "爆管":
+										if (_Config.Camera5IFBaoGuan)
+										{
+											Cv2.DrawContours(resultImage, contours, -1, new Scalar(0, 0, 255), 2);
+											if (classBuilder.Length > 0) classBuilder.Append("; ");
+											classBuilder.Append("爆管");
+											result_Class_str += "1";
+										}
+										else
+										{
+											Cv2.DrawContours(resultImage, contours, -1, new Scalar(0, 165, 255), 2);
+											result_Class_str += "0";
+										}
+										break;
+									case "未剪断":
+										if (_Config.Camera5IFWeiJianDuan)
+										{
+											Cv2.DrawContours(resultImage, contours, -1, new Scalar(0, 0, 255), 2);
+											if (classBuilder.Length > 0) classBuilder.Append("; ");
+											classBuilder.Append("未剪断");
+											result_Class_str += "1";
+										}
+										else
+										{
+											Cv2.DrawContours(resultImage, contours, -1, new Scalar(0, 165, 255), 2);
+											result_Class_str += "0";
+										}
+										break;
+									case "斜口":
+										if (_Config.Camera5IFXieKou)
+										{
+											Cv2.DrawContours(resultImage, contours, -1, new Scalar(0, 0, 255), 2);
+											if (classBuilder.Length > 0) classBuilder.Append("; ");
+											classBuilder.Append("斜口");
+											result_Class_str += "1";
+										}
+										else
+										{
+											Cv2.DrawContours(resultImage, contours, -1, new Scalar(0, 165, 255), 2);
+											result_Class_str += "0";
+										}
+										break;
 								case "空杯":
 									result_Class_str = "0";
 									result_Segmentation_str = 1001;
@@ -3085,9 +3144,12 @@ namespace VisionMeasure
 				toolClass.SaveLog($"[ResultMatch] ID:{unifiedId} 汇总 - Cam1:{results[0].Result}, Cam2:{results[1].Result}, Cam3:{results[2].Result}, Cam4:{results[3].Result}, Cam5:{results[4].Result}, FinalResult:{finalResult}");
 
 				AddProductionRecordBuffered(results, finalResult);
+				// 计数器更新必须与burstExcludeCount同步，不能放在BeginInvoke中延迟
+				ResultCountMethod(results[0].Result, results[1].Result, results[2].Result, results[3].Result, results[4].Result);
 
-				// 统一按缺陷类型保存所有相机的图像
-				SaveImagesByDefectType(unifiedId, results);
+
+				// 图像保存改为DB记录提交后触发（OnDbRecordCommitted回调），确保记录与图片一一对应
+				_pendingImageSaves[unifiedId] = results;
 
 				if (modbusClass.modbusState && !_isClosing)
 				{
@@ -3111,7 +3173,6 @@ namespace VisionMeasure
 						if (_isClosing) return;
 						try
 						{
-							ResultCountMethod(results[0].Result, results[1].Result, results[2].Result, results[3].Result, results[4].Result);
 							ResultShowMethod(finalResult);
 							ImageIDTxt1.Text = unifiedId.ToString();
 							ImageIDTxt2.Text = results[1].SequenceId.ToString();
@@ -3147,6 +3208,7 @@ namespace VisionMeasure
 				{
 					DetectionTime = DateTime.Now,
 					SequenceId = results[0].SequenceId,
+						UnifiedId = results[0].SequenceId - results[0].Offset,
 					FinalResult = finalResult ? "OK" : "NG",
 					Sku = GetCurrentSkuValue(),
 
@@ -3208,6 +3270,7 @@ namespace VisionMeasure
 				{
 					DetectionTime = DateTime.Now,
 					SequenceId = results[0].SequenceId,
+					UnifiedId = results[0].SequenceId - results[0].Offset,
 					FinalResult = finalResult ? "OK" : "NG",
 					Sku = GetCurrentSkuValue(),
 					Cam1Result = results[0].Result ? 1 : 0,

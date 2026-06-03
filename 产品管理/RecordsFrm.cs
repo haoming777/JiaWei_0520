@@ -1000,15 +1000,8 @@ namespace SetProduct
                         }
                     }
                 }
-                // 按连续组统计：每组3支（与主界面burstExcludeCount += 3一致）
-                excludedIds.Sort();
-                int groups = 0;
-                for (int i = 0; i < excludedIds.Count; i++)
-                {
-                    if (i == 0 || excludedIds[i] != excludedIds[i - 1] + 1)
-                        groups++;
-                }
-                excludeCount = groups * 3;
+                // 统计被剔除记录数（与主界面burstExcludeCount一致，每条被剔除记录计为1支）
+                excludeCount = excludedIds.Count;
             }
 
             lblTotal.Text = total.ToString("N0");

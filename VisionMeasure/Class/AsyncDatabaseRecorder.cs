@@ -55,7 +55,7 @@ namespace VisionMeasure
 			string connString = _databasePath + ";Journal Mode=WAL;Pooling=True;Max Pool Size=100;Synchronous=Normal;wal_autocheckpoint=10000;";
 			_dbHelper = new SQLiteHelper(connString);
 
-			_recordQueue = new BlockingCollection<ProductionRecord>(new ConcurrentQueue<ProductionRecord>(), 10000);
+			_recordQueue = new BlockingCollection<ProductionRecord>(new ConcurrentQueue<ProductionRecord>(), 50000);
 
 			// 初始化数据库表
 			InitializeDatabase();
@@ -163,10 +163,10 @@ namespace VisionMeasure
 
 			// 【关键修复2：把 RetroactiveUpdateExcludedRecords 从这里删掉，绝不能在这里阻塞主线程】
 
-			// 添加到队列（瞬间完成）
-			if (!_recordQueue.TryAdd(record))
+			// 添加到队列（阻塞最多2秒等待消费者，防止记录丢失）
+			if (!_recordQueue.TryAdd(record, 2000))
 			{
-				_toolClass.SaveLog($"记录队列已满，丢弃记录: SequenceId={record.SequenceId}");
+				_toolClass.SaveLog($"[严重] 记录队列阻塞超2秒仍未空，丢弃记录: SequenceId={record.SequenceId}");
 			}
 		}
 
@@ -279,6 +279,11 @@ namespace VisionMeasure
 		/// 获取当前SKU（从主窗体获取）
 		/// </summary>
 		public Func<string> GetCurrentSku { get; set; }
+
+			// 记录提交回调：DB INSERT成功后触发，用于存图
+			public Action<long> OnRecordCommitted { get; set; }
+
+			// 记录提交回调：DB INSERT成功后触发，用于存图
 
 		/// <summary>
 		/// 计算班次和归属日期
@@ -647,15 +652,25 @@ namespace VisionMeasure
 				else
 				{
 					_toolClass.SaveLog($"[DB] 保存记录成功 - SequenceId:{record.SequenceId}");
-				}
-				// 【关键修复3：将回溯更新移到这里（真正的后台线程）执行】
-				// 传入 record.Sku 避免跨线程调用 GetCurrentSku
-				if (record.IsExcluded && record.ExcludedReason == "连续爆管剔除")
-				{
-					RetroactiveUpdateExcludedRecords(record.SequenceId, record.Sku);
-				}
 
-			// 汇总表改为定时更新（_batchFlushTimer 30秒），不再每产品触发
+					// 记录已入库，触发存图回调
+					if (record.UnifiedId > 0)
+					{
+						OnRecordCommitted?.Invoke(record.UnifiedId);
+					}
+
+					// 【关键修复3：将回溯更新移到这里（真正的后台线程）执行】
+					// 传入 record.Sku 避免跨线程调用 GetCurrentSku
+					if (record.IsExcluded && record.ExcludedReason == "连续爆管剔除")
+					{
+						RetroactiveUpdateExcludedRecords(record.SequenceId, record.Sku);
+					}
+
+					// 新SKU首条记录：立刻创建汇总行，避免30秒窗口期内报表查不到
+					EnsureSummaryExists(record);
+
+					// 汇总表定时全量更新（_batchFlushTimer 30秒）
+				}
 			}
 			catch (Exception ex)
 			{
@@ -831,20 +846,13 @@ namespace VisionMeasure
                     COUNT(*) as total_count,
                     SUM(CASE WHEN final_result = 'OK' THEN 1 ELSE 0 END) as ok_count,
                     SUM(CASE WHEN final_result = 'NG' THEN 1 ELSE 0 END) as ng_count,
-                    -- 连续爆管剔除按组统计（与主界面一致，每组3支）
-                    (SELECT COUNT(*) * 3 FROM production_records_detail d2
+                    -- 连续爆管剔除：直接统计被剔除记录数（与主界面burstExcludeCount一致）
+                    (SELECT COUNT(*) FROM production_records_detail d2
                      WHERE d2.p_shift_date = production_records_detail.p_shift_date
                      AND d2.p_shift = production_records_detail.p_shift
                      AND d2.sku = production_records_detail.sku
-                     AND d2.excluded_reason = '连续爆管剔除'
-                     AND NOT EXISTS (
-                         SELECT 1 FROM production_records_detail d3
-                         WHERE d3.sequence_id = d2.sequence_id - 1
-                         AND d3.p_shift_date = d2.p_shift_date
-                         AND d3.p_shift = d2.p_shift
-                         AND d3.sku = d2.sku
-                         AND d3.excluded_reason = '连续爆管剔除'
-                     )) as exclude_count,
+                         AND d2.excluded_reason = '连续爆管剔除'
+                                        ) as exclude_count,
                     
                     -- 单一缺陷统计（仅统计未被剔除且缺陷数=1的记录）
                     SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_异物 = 1 THEN 1 ELSE 0 END) as ng_异物,
@@ -1048,6 +1056,36 @@ namespace VisionMeasure
 			return skus;
 		}
 
+		/// <summary>
+		/// 确保汇总行存在并有初始计数：新SKU/新班次首条记录入库时立刻创建并填充
+		/// 后续记录由30秒定时器全量更新
+		/// </summary>
+		private void EnsureSummaryExists(ProductionRecord record)
+		{
+			try
+			{
+				// 检查是否已存在汇总行
+				string checkSql = "SELECT COUNT(*) FROM production_records_summary WHERE p_date = @date AND p_shift = @shift AND sku = @sku";
+				var result = _dbHelper.ExecuteQuery(checkSql,
+					new SQLiteParameter("@date", record.ShiftDateStr),
+					new SQLiteParameter("@shift", record.Shift),
+					new SQLiteParameter("@sku", record.Sku));
+
+				int existingCount = (result != null && result.Rows.Count > 0)
+					? Convert.ToInt32(result.Rows[0][0]) : 0;
+				if (existingCount == 0)
+				{
+					// 新SKU/新班次：立刻跑一次完整汇总，确保报表能立刻查到
+					UpdateOrCreateSummary(record.ShiftDateStr, record.Shift, record.Sku);
+				}
+				// 已有汇总行则跳过（30秒定时器会更新）
+			}
+			catch (Exception ex)
+			{
+				_toolClass.SaveLog($"首条汇总创建异常: {ex.Message}");
+			}
+		}
+
 		public void Dispose()
 		{
 			if (_disposed) return;
@@ -1077,6 +1115,7 @@ namespace VisionMeasure
 		public string ShiftDateStr { get; set; }
 		public string Sku { get; set; }
 		public long SequenceId { get; set; }
+		public long UnifiedId { get; set; }       // 统一产品ID（=Cam1SeqId-Cam1Offset）
 		public string FinalResult { get; set; }  // "OK" 或 "NG"
 
 		// 相机结果 (1=OK, 0=NG)
