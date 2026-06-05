@@ -667,11 +667,11 @@ namespace VisionMeasure
 				toolClass.SaveLog("系统开始初始化");
 				Loading.ShowLoadingScreen();
 
-				//if (!UsbDogClass.FindUsbDog())
-				//{
-				//	toolClass.SaveLog("初始化时，未找到加密狗");
-				//	throw new Exception("初始化时，未找到加密狗");
-				//}
+				if (!UsbDogClass.FindUsbDog())
+				{
+					toolClass.SaveLog("初始化时，未找到加密狗");
+					throw new Exception("初始化时，未找到加密狗");
+				}
 				_Config.cameraDebug = 0;
 
 				LoadConfiguration();
@@ -958,23 +958,23 @@ namespace VisionMeasure
 
 				IFSaveLog = _Config.IFSaveLog;
 
-				//modelpath_cam1 = _Config.ModelPath_Cam1;
+				modelpath_cam1 = _Config.ModelPath_Cam1;
 				UseGpu_cam1 = _Config.UseGpu_Cam1;
 				deviceid_cam1 = _Config.DeviceId_Cam1;
 				modelId_char_cam1 = _Config.ModelId_Segmentation_Cam1;
 
-				//modelpath_cam2 = _Config.ModelPath_Cam2;
+				modelpath_cam2 = _Config.ModelPath_Cam2;
 				UseGpu_cam2 = _Config.UseGpu_Cam2;
 				deviceid_cam2 = _Config.DeviceId_Cam2;
 				modelId_class_cam2 = _Config.ModelId_Class_Cam2;
 
-				//modelpath_cam4 = _Config.ModelPath_Cam4;
+				modelpath_cam4 = _Config.ModelPath_Cam4;
 				UseGpu_cam4 = _Config.UseGpu_Cam4;
 				deviceid_cam4 = _Config.DeviceId_Cam4;
 				modelId_char_cam4 = _Config.ModelId_Char_Cam4;
 				modelId_segmentation_cam4 = _Config.ModelId_Segmentation_Cam4;
 
-				//modelpath_cam5 = _Config.ModelPath_Cam5;
+				modelpath_cam5 = _Config.ModelPath_Cam5;
 				UseGpu_cam5 = _Config.UseGpu_Cam5;
 				deviceid_cam5 = _Config.DeviceId_Cam5;
 				modelId_char_cam5 = _Config.ModelId_Char_Cam5;
@@ -3020,7 +3020,6 @@ namespace VisionMeasure
 							RotatedRect minAreaRect = Cv2.MinAreaRect(contours[0]);
 							label_str += $"{kv.Key};";
 
-							// 【核心修正】将算法核心判定切换回原汁原味的中文，防结果串位与丢失
 							switch (kv.Key)
 							{
 								case "色标":

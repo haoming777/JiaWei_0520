@@ -4412,7 +4412,6 @@ namespace VisionMeasure
 			this.tableLayoutPanel20.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
 			this.tableLayoutPanel20.Size = new System.Drawing.Size(190, 30);
 			this.tableLayoutPanel20.TabIndex = 2;
-			this.tableLayoutPanel20.Visible = false;
 			// 
 			// uiComboBox1
 			// 
