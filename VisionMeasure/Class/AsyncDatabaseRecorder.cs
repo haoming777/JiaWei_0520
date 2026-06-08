@@ -190,6 +190,7 @@ namespace VisionMeasure
 				{
 					long targetId = currentSequenceId - i;
 					// 标记为剔除，清空详细缺陷记录，只保留"连续爆管剔除"标识
+					// 【防误伤】必须同时满足ng_爆管=1，防止程序重启后ID复用误伤OK品
 					string updateSql = @"
 						UPDATE production_records_detail 
 						SET is_excluded = 1, 
@@ -206,7 +207,7 @@ namespace VisionMeasure
 							ng_爆管 = 0,
 							ng_斜口 = 0,
 							ng_未剪断 = 0
-						WHERE sequence_id = @sequence_id AND sku = @sku";
+						WHERE sequence_id = @sequence_id AND sku = @sku AND ng_爆管 = 1";
 					
 					_dbHelper.ExecuteNonQuery(updateSql,
 						new SQLiteParameter("@sequence_id", targetId),
@@ -891,7 +892,7 @@ namespace VisionMeasure
 
 				// 良率计算：剔除的记录不计入分母
 				double yieldRate = (totalCount - excludeCount) > 0
-					? (double)okCount / (totalCount - excludeCount) * 100
+					? Math.Min(100.0, Math.Max(0.0, (double)okCount / (totalCount - excludeCount) * 100))
 					: 0;
 
 				// 更新汇总表

@@ -998,9 +998,12 @@ namespace VisionMeasure
 
 						if (yieldTxt != null && _Config.total > 0)
 						{
+							// 防呆：burstExcludeCount不能超过total NG（防止良率>100%）
+							if (_Config.burstExcludeCount > _Config.total - _Config.ok)
+								_Config.burstExcludeCount = _Config.total - _Config.ok;
 							// 良率 = OK合格数 ÷（总检测数 - 被剔除的连续爆管异常数量）
 							double effectiveCount = _Config.total - _Config.burstExcludeCount;
-							double yieldRate = effectiveCount > 0 ? (_Config.ok * 100.0) / effectiveCount : 0;
+							double yieldRate = effectiveCount > 0 ? Math.Min(100.0, Math.Max(0.0, (_Config.ok * 100.0) / effectiveCount)) : 0;
 							yieldTxt.Text = yieldRate.ToString("F2") + "%";
 							yieldTxt.ForeColor = yieldRate > 95 ? Color.Green : yieldRate > 90 ? Color.Orange : Color.Red;
 						}
@@ -3394,7 +3397,7 @@ namespace VisionMeasure
 						{
 							// 良率 = OK合格数 ÷（总检测数 - 被剔除的连续爆管异常数量）
 							double effectiveCount = _Config.total - _Config.burstExcludeCount;
-							double yieldRate = effectiveCount > 0 ? (_Config.ok * 100.0) / effectiveCount : 0;
+							double yieldRate = effectiveCount > 0 ? Math.Min(100.0, Math.Max(0.0, (_Config.ok * 100.0) / effectiveCount)) : 0;
 							yieldTxt.Text = yieldRate.ToString("F2") + "%";
 							yieldTxt.ForeColor = yieldRate > 95 ? Color.Green : yieldRate > 90 ? Color.Orange : Color.Red;
 						}

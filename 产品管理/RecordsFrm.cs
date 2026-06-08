@@ -1009,7 +1009,7 @@ namespace SetProduct
             lblNG.Text = ng.ToString("N0");
 
             double effectiveCount = total - excludeCount;
-            double yield = effectiveCount > 0 ? (double)ok / effectiveCount * 100 : 0;
+            double yield = effectiveCount > 0 ? Math.Min(100.0, Math.Max(0.0, (double)ok / effectiveCount * 100)) : 0;
             lblYield.Text = yield.ToString("F2") + "%";
         }
 
