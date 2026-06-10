@@ -778,34 +778,98 @@ namespace VisionMeasure
 				string fileName = $"{date}_{shift}_完整生产报表.csv";
 				string filePath = Path.Combine(exportDir, fileName);
 
-				// 获取该班次所有SKU的汇总数据
-				string summarySql = @"
-					SELECT * FROM production_records_summary 
-					WHERE p_date = @date AND p_shift = @shift
-					ORDER BY sku";
+				// 读取当前系统设置（兜底：当 DB 列为空时使用 INI 当前值）
+				var cfg = CommonLib.Class_Config._Config;
+				string fallbackCam1Stand = cfg.Camera1StandChar.ToString();
+				string fallbackCam2Stand = cfg.Camera2StandChar.ToString();
+				string fallbackTotalArea = cfg.totalArea_Camera1.ToString();
+				string fallbackBaoGuan = cfg.Camera5IFBaoGuan ? "开启" : "关闭";
+				string fallbackXieKou = cfg.Camera5IFXieKou ? "开启" : "关闭";
+				string fallbackWeiJianDuan = cfg.Camera5IFWeiJianDuan ? "开启" : "关闭";
+				string fallbackSeBiao = cfg.Camera5IFSeBiao ? "开启" : "关闭";
+				string fallbackOcr = cfg.Camera5IFOcr ? "开启" : "关闭";
 
-				var data = _dbHelper.ExecuteQuery(summarySql,
-					new SQLiteParameter("@date", date),
-					new SQLiteParameter("@shift", shift));
-
-				if (data.Rows.Count > 0)
+				using (var writer = new StreamWriter(filePath, false, Encoding.UTF8))
 				{
-					using (var writer = new StreamWriter(filePath, false, Encoding.UTF8))
-					{
-						// 写入表头
-						writer.WriteLine("日期,班次,SKU,总检数,OK总数,NG总数,管内异物NG数量,管盖有无NG数量,管口圆度NG数量,正面工号不齐数量,背面工号不齐数量,P-CodeNG数量,色标对中NG数量,爆管数量,斜口数量,未剪断数量,混合多种缺陷,连续爆管剔除,良率(%)");
+					// ══════════════════════════════════
+					// 汇总表：包含所有历史班次（倒序，最新在前）
+					// ══════════════════════════════════
+					string summarySql = @"
+						SELECT * FROM production_records_summary
+						ORDER BY p_date DESC, p_shift DESC, sku";
 
-						foreach (DataRow row in data.Rows)
+					var summaryData = _dbHelper.ExecuteQuery(summarySql);
+
+					writer.WriteLine("# ==== 汇总表（全部历史班次，倒序） ====");
+					writer.WriteLine("日期,班次,SKU,总检数,OK总数,NG总数,管内异物NG数量,管盖有无NG数量,管口圆度NG数量,正面工号不齐数量,背面工号不齐数量,P-CodeNG数量,色标对中NG数量,爆管数量,斜口数量,未剪断数量,混合多种缺陷,连续爆管剔除,良率(%),正面字符标准数量,反面字符标准数量,异物面积上限标准,爆管检测状态,斜口检测状态,未剪断检测状态,色标对中检测状态,反面字符检测状态");
+
+					if (summaryData.Rows.Count > 0)
+					{
+						foreach (DataRow row in summaryData.Rows)
 						{
-							writer.WriteLine($"{row["p_date"]},{row["p_shift"]},{row["sku"]},{row["total_count"]},{row["ok_count"]},{row["ng_count"]}," +
+							// 优先读 DB 列（生产时的真实快照），为空则用当前 INI 兜底
+							string c1 = (row["cfg_正面字符标准"]?.ToString()) ?? fallbackCam1Stand;
+							string c2 = (row["cfg_反面字符标准"]?.ToString()) ?? fallbackCam2Stand;
+							string c3 = (row["cfg_异物面积上限"]?.ToString()) ?? fallbackTotalArea;
+							string c4 = (row["cfg_爆管检测"]?.ToString()) ?? fallbackBaoGuan;
+							string c5 = (row["cfg_斜口检测"]?.ToString()) ?? fallbackXieKou;
+							string c6 = (row["cfg_未剪断检测"]?.ToString()) ?? fallbackWeiJianDuan;
+							string c7 = (row["cfg_色标检测"]?.ToString()) ?? fallbackSeBiao;
+							string c8 = (row["cfg_反面字符检测"]?.ToString()) ?? fallbackOcr;
+
+							writer.WriteLine(
+								$"{row["p_date"]},{row["p_shift"]},{row["sku"]}," +
+								$"{row["total_count"]},{row["ok_count"]},{row["ng_count"]}," +
 								$"{row["ng_异物"]},{row["ng_管盖有无"]},{row["ng_管口圆度"]},{row["ng_正面工号缺失"]},{row["ng_背面工号缺失"]}," +
 								$"{row["ng_PCode"]},{row["ng_色标对中"]},{row["ng_爆管"]},{row["ng_斜口"]},{row["ng_未剪断"]}," +
-								$"{row["ng_混合多种缺陷"]},{row["continuous_exclude_count"]},{row["yield_rate"]}");
+								$"{row["ng_混合多种缺陷"]},{row["continuous_exclude_count"]},{row["yield_rate"]}," +
+								$"{c1},{c2},{c3},{c4},{c5},{c6},{c7},{c8}");
 						}
 					}
+					else
+					{
+						writer.WriteLine("(无汇总记录)");
+					}
 
-					_toolClass.SaveLog($"完整报表已导出: {filePath}");
+					// ══════════════════════════════════
+					// 明细记录（仅当前班次，倒序）
+					// ══════════════════════════════════
+					writer.WriteLine("");
+					writer.WriteLine($"# ==== 检测明细记录（{date} {shift}，按时间倒序） ====");
+					writer.WriteLine("检测时间,日期,班次,SKU,流水号,结果,缺陷详情,缺陷数,是否被剔除,剔除原因");
+
+					string detailSql = @"
+						SELECT p_time, p_date, p_shift, sku, sequence_id,
+						       final_result, defect_detail, defect_count,
+						       is_excluded, excluded_reason
+						FROM production_records_detail
+						WHERE p_shift_date = @date AND p_shift = @shift
+						ORDER BY p_time DESC";
+
+					var detailData = _dbHelper.ExecuteQuery(detailSql,
+						new SQLiteParameter("@date", date),
+						new SQLiteParameter("@shift", shift));
+
+					if (detailData.Rows.Count > 0)
+					{
+						foreach (DataRow row in detailData.Rows)
+						{
+							string pTime = row["p_time"]?.ToString() ?? "";
+							string finalResult = row["final_result"]?.ToString() ?? "";
+							string defectDetail = (row["defect_detail"]?.ToString() ?? "").Replace(",", "；");
+							string excludedReason = (row["excluded_reason"]?.ToString() ?? "").Replace(",", "；");
+
+							writer.WriteLine($"{pTime},{row["p_date"]},{row["p_shift"]},{row["sku"]},{row["sequence_id"]}," +
+								$"{finalResult},{defectDetail},{row["defect_count"]},{row["is_excluded"]},{excludedReason}");
+						}
+					}
+					else
+					{
+						writer.WriteLine("(无明细记录)");
+					}
 				}
+
+				_toolClass.SaveLog($"完整报表已导出: {filePath}");
 
 				// 返回保存报表的文件夹路径
 				return exportDir;
@@ -816,6 +880,48 @@ namespace VisionMeasure
 				return null;
 			}
 		}
+
+		/// <summary>
+		/// 检查并自动补建汇总表中的检测标准列（向前兼容旧数据库）
+		/// </summary>
+		private void EnsureSummaryConfigColumns()
+		{
+			try
+			{
+				// 需要新增的列定义（列名, 类型, 默认值）
+				var columns = new (string Name, string Type, string Default)[]
+				{
+					("cfg_正面字符标准", "INTEGER", "0"),
+					("cfg_反面字符标准", "INTEGER", "0"),
+					("cfg_异物面积上限", "INTEGER", "0"),
+					("cfg_爆管检测", "TEXT", "''"),
+					("cfg_斜口检测", "TEXT", "''"),
+					("cfg_未剪断检测", "TEXT", "''"),
+					("cfg_色标检测", "TEXT", "''"),
+					("cfg_反面字符检测", "TEXT", "''"),
+				};
+
+				foreach (var col in columns)
+				{
+					// 检查列是否存在
+					string checkSql = "SELECT COUNT(*) FROM pragma_table_info('production_records_summary') WHERE name = '" + col.Name + "'";
+					var result = _dbHelper.ExecuteQuery(checkSql);
+					int count = (result != null && result.Rows.Count > 0) ? Convert.ToInt32(result.Rows[0][0]) : 0;
+
+					if (count == 0)
+					{
+						string alterSql = "ALTER TABLE production_records_summary ADD COLUMN " + col.Name + " " + col.Type + " DEFAULT " + col.Default;
+						_dbHelper.ExecuteNonQuery(alterSql);
+						_toolClass.SaveLog("[DB迁移] 已添加列: " + col.Name);
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				_toolClass.SaveLog("[DB迁移] 列检查失败: " + ex.Message);
+			}
+		}
+
 
 		private void GenerateShiftSummaryInternal(string date, string shift)
 		{
@@ -901,11 +1007,14 @@ namespace VisionMeasure
                         p_date, p_shift, sku, total_count, ok_count, ng_count,
                         ng_异物, ng_管盖有无, ng_管口圆度, ng_正面工号缺失, ng_背面工号缺失,
                         ng_爆管, ng_斜口, ng_未剪断, ng_混合多种缺陷, ng_PCode, ng_色标对中,
-                        continuous_exclude_count, yield_rate, summary_date
+                        continuous_exclude_count, yield_rate, summary_date,
+                        cfg_正面字符标准, cfg_反面字符标准, cfg_异物面积上限,
+                        cfg_爆管检测, cfg_斜口检测, cfg_未剪断检测, cfg_色标检测, cfg_反面字符检测
                     ) VALUES (
                         @date, @shift, @sku, @total, @ok, @ng,
                         @ng1, @ng2, @ng3, @ng4, @ng5, @ng8, @ng9, @ng10, @ng_mix, @ng6, @ng7,
-                        @exclude, @yield, @summary_date
+                        @exclude, @yield, @summary_date,
+                        @cfg1, @cfg2, @cfg3, @cfg4, @cfg5, @cfg6, @cfg7, @cfg8
                     )";
 
 				var upsertParams = new SQLiteParameter[]
@@ -929,7 +1038,16 @@ namespace VisionMeasure
 					new SQLiteParameter("@ng_mix", row["ng_混合多种缺陷"]),
 					new SQLiteParameter("@exclude", excludeCount),
 					new SQLiteParameter("@yield", Math.Round(yieldRate, 2)),
-					new SQLiteParameter("@summary_date", DateTime.Now.ToString("yyyy-MM-dd"))
+					new SQLiteParameter("@summary_date", DateTime.Now.ToString("yyyy-MM-dd")),
+					// 检测标准（每次汇总时从本地 INI 读取最新值，记录快照）
+					new SQLiteParameter("@cfg1", CommonLib.Class_Config._Config.Camera1StandChar),
+					new SQLiteParameter("@cfg2", CommonLib.Class_Config._Config.Camera2StandChar),
+					new SQLiteParameter("@cfg3", CommonLib.Class_Config._Config.totalArea_Camera1),
+					new SQLiteParameter("@cfg4", CommonLib.Class_Config._Config.Camera5IFBaoGuan ? "开启" : "关闭"),
+					new SQLiteParameter("@cfg5", CommonLib.Class_Config._Config.Camera5IFXieKou ? "开启" : "关闭"),
+					new SQLiteParameter("@cfg6", CommonLib.Class_Config._Config.Camera5IFWeiJianDuan ? "开启" : "关闭"),
+					new SQLiteParameter("@cfg7", CommonLib.Class_Config._Config.Camera5IFSeBiao ? "开启" : "关闭"),
+					new SQLiteParameter("@cfg8", CommonLib.Class_Config._Config.Camera5IFOcr ? "开启" : "关闭")
 				};
 
 				_dbHelper.ExecuteNonQuery(upsertSql, upsertParams);

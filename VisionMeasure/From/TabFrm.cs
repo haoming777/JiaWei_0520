@@ -7,6 +7,7 @@ using System.Drawing;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Threading;
 using System.Windows.Forms;
 using static CommonLib.Class_Config;
 using VisionMeasure;
@@ -24,6 +25,10 @@ namespace VisionMeasure.From
 		}
 		MainFrm mainFrm = new MainFrm();
 		XLToolClass toolClass = new XLToolClass();
+
+		// RecordsFrm 独立 UI 线程 —— 避免和 MainFrm 争抢 UI 线程
+		private static RecordsFrm _recordsFrmInstance;
+		private static Thread _recordsFrmThread;
 
 
 		public TabFrm(Point point, Form form)
@@ -134,6 +139,35 @@ namespace VisionMeasure.From
 						break;
 				}
 			}
+		}
+
+
+				private static void ShowRecordsFrm()
+		{
+			// RecordsFrm 独立 UI 线程：与 MainFrm 完全隔离，互不抢占
+			if (_recordsFrmInstance != null && _recordsFrmInstance.IsHandleCreated && !_recordsFrmInstance.IsDisposed)
+			{
+				// 已存在 → 跨线程激活
+				_recordsFrmInstance.BeginInvoke(new Action(() =>
+				{
+					if (!_recordsFrmInstance.Visible)
+						_recordsFrmInstance.Show();
+					_recordsFrmInstance.WindowState = FormWindowState.Normal;
+					_recordsFrmInstance.Activate();
+				}));
+				return;
+			}
+
+			// 首次创建 → 启动独立 STA 线程
+			_recordsFrmThread = new Thread(() =>
+			{
+				_recordsFrmInstance = new RecordsFrm();
+				_recordsFrmInstance.FormClosed += (s, e) => _recordsFrmInstance = null;
+				Application.Run(_recordsFrmInstance);
+			});
+			_recordsFrmThread.SetApartmentState(ApartmentState.STA);
+			_recordsFrmThread.IsBackground = true;
+			_recordsFrmThread.Start();
 		}
 
 

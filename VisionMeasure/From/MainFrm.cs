@@ -262,6 +262,8 @@ namespace VisionMeasure
 		#region 构造函数和初始化
 		public MainFrm()
 		{
+			try { FastLogger.Instance.Info("MainFrm 构造函数开始"); } catch { }
+
 			InitializeComponent();
 			// 【新增优化】开启平滑低延迟垃圾回收模式，防止高并发高密集型计算时GC引起程序突发卡顿
 			System.Runtime.GCSettings.LatencyMode = System.Runtime.GCLatencyMode.Batch;
@@ -287,6 +289,8 @@ namespace VisionMeasure
 
 			// 加载保存的SKU
 			InitializeSavedSku();
+
+			try { FastLogger.Instance.Info("MainFrm 构造函数完成"); } catch { }
 		}
 
 		/// <summary>
@@ -349,10 +353,12 @@ namespace VisionMeasure
 				_bufferPool5 = new ImageBufferPool(width45, height45, PixelFormat.Format8bppIndexed, 3, 10, 50 * 1024 * 1024) { PoolName = "Camera5_Pool" };
 
 				toolClass.SaveLog("内存池初始化完成");
+		try { FastLogger.Instance.Info("内存池初始化完成"); } catch { }
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog($"初始化内存池失败: {ex.Message}");
+				try { FastLogger.Instance.Error("内存池初始化失败", ex); } catch { }
+			toolClass.SaveLog($"初始化内存池失败: {ex.Message}");
 			}
 		}
 
@@ -378,10 +384,12 @@ namespace VisionMeasure
 				_dbRecorder.GetCurrentSku = () => GetCurrentSkuValue();
 				_dbRecorder.OnRecordCommitted = (unifiedId) => OnDbRecordCommitted(unifiedId);
 				toolClass.SaveLog("异步数据库记录器初始化完成");
+			try { FastLogger.Instance.Info("异步数据库记录器初始化完成"); } catch { }
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog($"初始化数据库记录器失败: {ex.Message}");
+				try { FastLogger.Instance.Error("数据库记录器初始化失败", ex); } catch { }
+			toolClass.SaveLog($"初始化数据库记录器失败: {ex.Message}");
 			}
 		}
 
@@ -424,10 +432,10 @@ namespace VisionMeasure
 				{
 					string currentSku = GetCurrentSkuValue();
 
-					if (currentSku.Length != 8)
+					if (currentSku.Length < 6)
 					{
 						SetSkuTextBoxBorderColor(UIStyle.Red);
-						MessageBox.Show($"SKU正确长度为8位 目前检测到{currentSku.Length}位！请检查！！！");
+						MessageBox.Show($"SKU长度不能低于6位！当前仅{currentSku.Length}位，请检查！");
 						return;
 					}
 
@@ -577,10 +585,12 @@ namespace VisionMeasure
 				_resultMatcher = new ResultMatcher(processors, OnResultsMatched);
 
 				toolClass.SaveLog("图像处理器初始化完成");
+			try { FastLogger.Instance.Info("图像处理器初始化完成"); } catch { }
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog($"初始化图像处理器失败: {ex.Message}");
+				try { FastLogger.Instance.Error("图像处理器初始化失败", ex); } catch { }
+			toolClass.SaveLog($"初始化图像处理器失败: {ex.Message}");
 			}
 		}
 
@@ -664,6 +674,7 @@ namespace VisionMeasure
 		{
 			try
 			{
+				try { FastLogger.Instance.Info("MainFrm_Load 开始初始化"); } catch { }
 				toolClass.SaveLog("系统开始初始化");
 				Loading.ShowLoadingScreen();
 
@@ -717,9 +728,11 @@ namespace VisionMeasure
 				modbusClass.RuningMethod();
 
 				toolClass.SaveLog("系统初始化完成");
+				try { FastLogger.Instance.Info("MainFrm_Load 初始化完成"); } catch { }
 			}
 			catch (Exception ex)
 			{
+				try { FastLogger.Instance.Error("MainFrm_Load 初始化失败", ex); } catch { }
 				toolClass.SaveLog($"初始化时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
 				MessageBox.Show($"系统初始化失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
 			}
@@ -866,6 +879,7 @@ namespace VisionMeasure
 				toolClass.SaveLog($"相机五加载成功：{_Config.Camera5SN}");
 
 				toolClass.SaveLog("相机初始化完成");
+			try { FastLogger.Instance.Info("相机初始化完成，5台相机全部连接"); } catch { }
 			}
 			catch (Exception ex)
 			{
@@ -1048,10 +1062,12 @@ namespace VisionMeasure
 					Model_Segmentation_Cam5.Init(modelpath_cam5, UseGpu_cam5, deviceid_cam5, modelId_segmentation_cam5);
 				}
 				toolClass.SaveLog("AI模型初始化完成");
+			try { FastLogger.Instance.Info("AI模型初始化完成"); } catch { }
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog($"AI模型初始化失败: {ex.Message}");
+				try { FastLogger.Instance.Error("AI模型初始化失败", ex); } catch { }
+			toolClass.SaveLog($"AI模型初始化失败: {ex.Message}");
 			}
 		}
 
@@ -2678,7 +2694,10 @@ namespace VisionMeasure
 				if (_imageCache.TryGetValue(sequenceId, out var originalImages) &&
 					_resultImageCache.TryGetValue(sequenceId, out var resultImages))
 				{
-					KeyValuePair<string, Mat>[] snap;
+					// 判断产品整体缺陷类型（混合缺陷 → 所有相机统一存放）
+				string overallDefect = GetDefectTypeFolder(results);
+
+				KeyValuePair<string, Mat>[] snap;
 					lock (originalImages) { snap = originalImages.ToArray(); }
 					foreach (var kvp in snap)
 					{
@@ -2691,6 +2710,12 @@ namespace VisionMeasure
 						bool isCameraNg = IsCameraNg(cameraName, results);
 						string defectFolder = GetDefectTypeForCamera(cameraName, results);
 						bool isOk = defectFolder == "OK";
+
+						// 如果是混合缺陷 → 覆盖为"混合缺陷"文件夹（统一存放）
+						if (overallDefect == "混合缺陷" && !isOk)
+						{
+							defectFolder = "混合缺陷";
+						}
 
 						// 如果只保存NG图片且当前相机是OK，则跳过
 						if (!IFSaveOKImage && !IFSaveOKRawImage && isOk)
@@ -2709,7 +2734,7 @@ namespace VisionMeasure
 							basePath = Path.Combine(basePath, defectFolder);
 						}
 
-						toolClass.SaveLog($"开始存图: SequenceId={sequenceId}, Camera={cameraName}, Defect={defectFolder}, Path={basePath}");
+						toolClass.SaveLog($"开始存图: SequenceId={sequenceId}, Camera={cameraName}, OverallDefect={overallDefect}, Defect={defectFolder}, Path={basePath}");
 
 						// 保存原图
 						if (original != null && ((isOk && IFSaveOKRawImage) || (!isOk && IFSaveNGRawImage)))
@@ -3444,6 +3469,7 @@ namespace VisionMeasure
 
 			try
 			{
+				try { FastLogger.Instance.Info("MainFrm_FormClosing 开始关闭流程"); } catch { }
 				toolClass.SaveLog("应用程序正在关闭...");
 
 				// 取消所有任务
@@ -3488,10 +3514,12 @@ namespace VisionMeasure
 				// 释放数据库记录器
 				_dbRecorder?.Dispose();
 
+				try { FastLogger.Instance.Info("MainFrm_FormClosing 关闭完成"); } catch { }
 				toolClass.SaveLog("应用程序关闭完成");
 			}
 			catch (Exception ex)
 			{
+				try { FastLogger.Instance.Error("MainFrm_FormClosing 异常", ex); } catch { }
 				toolClass.SaveLog($"关闭时异常: {ex.Message}");
 			}
 			finally
