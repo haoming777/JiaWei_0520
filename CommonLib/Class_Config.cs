@@ -1790,7 +1790,7 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetCachedValue("plc", "ip", "192.160.1.88");
+				return GetCachedValue("plc", "ip", "192.168.1.88");
 			}
 			set
 			{
@@ -1802,7 +1802,7 @@ namespace CommonLib
 		{
 			get
 			{
-				return GetPrivateProfileInt("plc", "port", 502, _iniPath);
+				return GetPrivateProfileInt("plc", "port", 102, _iniPath);
 			}
 			set
 			{
@@ -2105,6 +2105,44 @@ namespace CommonLib
 				SetCachedValue("system", "IFRunCamera5", value.ToString());
 			}
 		}
+
+		#region 工位启用配置（程序启动时读一次，运行期不生效）
+		public bool ActiveCam1
+		{
+			get
+			{
+				return bool.Parse(GetCachedValue("system", "ActiveCam1", "True"));
+			}
+		}
+		public bool ActiveCam2
+		{
+			get
+			{
+				return bool.Parse(GetCachedValue("system", "ActiveCam2", "True"));
+			}
+		}
+		public bool ActiveCam3
+		{
+			get
+			{
+				return bool.Parse(GetCachedValue("system", "ActiveCam3", "True"));
+			}
+		}
+		public bool ActiveCam4
+		{
+			get
+			{
+				return bool.Parse(GetCachedValue("system", "ActiveCam4", "True"));
+			}
+		}
+		public bool ActiveCam5
+		{
+			get
+			{
+				return bool.Parse(GetCachedValue("system", "ActiveCam5", "True"));
+			}
+		}
+		#endregion
 
 		public bool IFGroup
 		{

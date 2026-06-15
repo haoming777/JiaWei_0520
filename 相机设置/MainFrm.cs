@@ -29,7 +29,15 @@ namespace SetCamera
 		{
 			InitializeComponent();
 			g_handle = handle;
-			modbusClass = modbusClass1;
+			_modbusHc = modbusClass1;
+			_modbusType = 1;
+		}
+		public MainFrm(IntPtr handle, S7_1200Class s7Class)
+		{
+			InitializeComponent();
+			g_handle = handle;
+			_modbusS7 = s7Class;
+			_modbusType = 2;
 		}
 		static IntPtr g_handle;
 		takephotoVm myZmcaux = new takephotoVm();
@@ -38,7 +46,13 @@ namespace SetCamera
 		public DaHuaSDK cam1, cam2, cam3, cam4, cam5;
 		Bitmap bitmap = null;
 		XLToolClass toolClass = new XLToolClass();
-		HCModbusClass modbusClass;
+		HCModbusClass _modbusHc;
+		S7_1200Class _modbusS7;
+		int _modbusType = 0; // 0=none, 1=HCModbus, 2=S7_1200
+
+		// 工位启用状态（与 MainFrm 联动）
+		private bool[] _cameraEnabled = { true, true, true, true, true };
+		private int _lastValidCamIndex = 0;
 
 		/// <summary>
 		/// 指向当前选中得相机
@@ -66,6 +80,13 @@ namespace SetCamera
 		{
 			try
 			{
+				// 读取工位启用状态（与 MainFrm 联动）
+				_cameraEnabled[0] = _Config.ActiveCam1;
+				_cameraEnabled[1] = _Config.ActiveCam2;
+				_cameraEnabled[2] = _Config.ActiveCam3;
+				_cameraEnabled[3] = _Config.ActiveCam4;
+				_cameraEnabled[4] = _Config.ActiveCam5;
+
 				updeteThread = new Thread(UpdateLocation);
 				updeteThread.IsBackground = true;
 				updeteThread.Start();
@@ -82,7 +103,11 @@ namespace SetCamera
 				//cam4.OnImage += Cam1_OnImage;
 				//cam5.OnImage += Cam1_OnImage;
 
-				uiComboBox_cam.SelectedIndex = 0;
+				// 默认选中第一个启用的相机
+				int firstEnabled = 0;
+				for (int i = 0; i < 5; i++) { if (_cameraEnabled[i]) { firstEnabled = i; break; } }
+				_lastValidCamIndex = firstEnabled;
+				uiComboBox_cam.SelectedIndex = firstEnabled;
 				uiComboBox_axis.SelectedIndex = 0;
 
 				cam1TriggerPath = _Config.Output_Camera1;
@@ -113,11 +138,11 @@ namespace SetCamera
 					MessageBox.Show("请先停止实时取像模式！", "系统提示", MessageBoxButtons.OK, MessageBoxIcon.Stop);
 					e.Cancel = true;
 				}
-				cam1.OnImage -= Cam1_OnImage;
-				cam2.OnImage -= Cam1_OnImage;
-				cam3.OnImage -= Cam1_OnImage;
-				cam4.OnImage -= Cam1_OnImage;
-				cam5.OnImage -= Cam1_OnImage;
+				if (cam1 != null) if(cam1!=null) cam1.OnImage -= Cam1_OnImage;
+				if (cam2 != null) if(cam2!=null) cam2.OnImage -= Cam1_OnImage;
+				if (cam3 != null) if(cam3!=null) cam3.OnImage -= Cam1_OnImage;
+				if (cam4 != null) if(cam4!=null) cam4.OnImage -= Cam1_OnImage;
+				if (cam5 != null) if(cam5!=null) cam5.OnImage -= Cam1_OnImage;
 			}
 			catch (Exception ex)
 			{
@@ -308,16 +333,27 @@ namespace SetCamera
 		{
 			try
 			{
-				switch (uiComboBox_cam.SelectedIndex + 1)
+				int selectedIndex = uiComboBox_cam.SelectedIndex;
+				// 禁用工位不可选中
+				if (selectedIndex >= 0 && selectedIndex < 5 && !_cameraEnabled[selectedIndex])
+				{
+					MessageBox.Show($"相机{selectedIndex + 1}工位未启用（ActiveCam{selectedIndex + 1}=False），无法选中！",
+						"工位已禁用", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+					uiComboBox_cam.SelectedIndex = _lastValidCamIndex;
+					return;
+				}
+				_lastValidCamIndex = selectedIndex;
+
+				switch (selectedIndex + 1)
 				{
 					case 1:
 						tempTriggerPath = cam1TriggerPath;
-						cam2.OnImage -= Cam1_OnImage;
-						cam3.OnImage -= Cam1_OnImage;
-						cam4.OnImage -= Cam1_OnImage;
-						cam5.OnImage -= Cam1_OnImage;
+						if(cam2!=null) cam2.OnImage -= Cam1_OnImage;
+						if(cam3!=null) cam3.OnImage -= Cam1_OnImage;
+						if(cam4!=null) cam4.OnImage -= Cam1_OnImage;
+						if(cam5!=null) cam5.OnImage -= Cam1_OnImage;
 						cam1.OnImage += Cam1_OnImage;
-						daHuaSDK = cam1;
+						daHuaSDK = cam1; if(daHuaSDK==null) return;
 						toolClass.SaveLog($"切换为相机一：tempTriggerPath: {tempTriggerPath} ------------------------------------------------------------------------");
 
 
@@ -325,22 +361,22 @@ namespace SetCamera
 						break;
 					case 2:
 						tempTriggerPath = cam2TriggerPath;
-						cam1.OnImage -= Cam1_OnImage;
-						cam3.OnImage -= Cam1_OnImage;
-						cam4.OnImage -= Cam1_OnImage;
-						cam5.OnImage -= Cam1_OnImage;
+						if(cam1!=null) cam1.OnImage -= Cam1_OnImage;
+						if(cam3!=null) cam3.OnImage -= Cam1_OnImage;
+						if(cam4!=null) cam4.OnImage -= Cam1_OnImage;
+						if(cam5!=null) cam5.OnImage -= Cam1_OnImage;
 						cam2.OnImage += Cam1_OnImage;
-						daHuaSDK = cam2;
+						daHuaSDK = cam2; if(daHuaSDK==null) return;
 						toolClass.SaveLog($"切换为相机二：tempTriggerPath: {tempTriggerPath}	------------------------------------------------------------------------");
 						break;
 					case 3:
 						tempTriggerPath = cam3TriggerPath;
-						cam1.OnImage -= Cam1_OnImage;
-						cam2.OnImage -= Cam1_OnImage;
-						cam4.OnImage -= Cam1_OnImage;
-						cam5.OnImage -= Cam1_OnImage;
+						if(cam1!=null) cam1.OnImage -= Cam1_OnImage;
+						if(cam2!=null) cam2.OnImage -= Cam1_OnImage;
+						if(cam4!=null) cam4.OnImage -= Cam1_OnImage;
+						if(cam5!=null) cam5.OnImage -= Cam1_OnImage;
 						cam3.OnImage += Cam1_OnImage;
-						daHuaSDK = cam3;
+						daHuaSDK = cam3; if(daHuaSDK==null) return;
 
 						uiComboBox_axis.SelectedIndex = 2;
 
@@ -348,23 +384,23 @@ namespace SetCamera
 						break;
 					case 4:
 						tempTriggerPath = cam4TriggerPath;
-						cam1.OnImage -= Cam1_OnImage;
-						cam3.OnImage -= Cam1_OnImage;
-						cam2.OnImage -= Cam1_OnImage;
-						cam5.OnImage -= Cam1_OnImage;
+						if(cam1!=null) cam1.OnImage -= Cam1_OnImage;
+						if(cam3!=null) cam3.OnImage -= Cam1_OnImage;
+						if(cam2!=null) cam2.OnImage -= Cam1_OnImage;
+						if(cam5!=null) cam5.OnImage -= Cam1_OnImage;
 						cam4.OnImage += Cam1_OnImage;
-						daHuaSDK = cam4;
+						daHuaSDK = cam4; if(daHuaSDK==null) return;
 						uiComboBox_axis.SelectedIndex = 0;
 						toolClass.SaveLog($"切换为相机四：tempTriggerPath: {tempTriggerPath}------------------------------------------------------------------------");
 						break;
 					case 5:
 						tempTriggerPath = cam5TriggerPath;
-						cam1.OnImage -= Cam1_OnImage;
-						cam3.OnImage -= Cam1_OnImage;
-						cam4.OnImage -= Cam1_OnImage;
-						cam2.OnImage -= Cam1_OnImage;
+						if(cam1!=null) cam1.OnImage -= Cam1_OnImage;
+						if(cam3!=null) cam3.OnImage -= Cam1_OnImage;
+						if(cam4!=null) cam4.OnImage -= Cam1_OnImage;
+						if(cam2!=null) cam2.OnImage -= Cam1_OnImage;
 						cam5.OnImage += Cam1_OnImage;
-						daHuaSDK = cam5;
+						daHuaSDK = cam5; if(daHuaSDK==null) return;
 						uiComboBox_axis.SelectedIndex = 1;
 						toolClass.SaveLog($"切换为相机五：tempTriggerPath: {tempTriggerPath}------------------------------------------------------------------------");
 						break;
@@ -619,13 +655,17 @@ namespace SetCamera
 		{
 			try
 			{
-				TriggerFlag = true;
-
-				if (!modbusClass.modbusState)
+				int camIdx = uiComboBox_cam.SelectedIndex;
+				if (camIdx >= 0 && camIdx < 5 && !_cameraEnabled[camIdx])
 				{
-					MessageBox.Show($"modbusClass.modbusState: {modbusClass.modbusState}");
+					MessageBox.Show($"相机{camIdx + 1}工位未启用，无法触发取像！", "工位已禁用", MessageBoxButtons.OK, MessageBoxIcon.Warning);
 					return;
 				}
+
+				TriggerFlag = true;
+
+				if (_modbusType == 1 && !_modbusHc.modbusState) { MessageBox.Show("HCM连接已断开"); return; }
+				if (_modbusType == 2 && !_modbusS7.modbusState) { MessageBox.Show("S7-1200连接已断开"); return; }
 
 				Task.Run(() =>
 				{
@@ -636,16 +676,19 @@ namespace SetCamera
 						//myZmcaux.SetOut(g_handle, tempTriggerPath, 0);
 
 						//toolClass.SaveLog(tempTriggerPath+"");
-						modbusClass.modbusTcp.Write(tempTriggerPath, true);
+						if (_modbusType == 1) _modbusHc.modbusTcp.Write(tempTriggerPath, true);
+					else if (_modbusType == 2) _modbusS7.WriteRegister(tempTriggerPath, (short)1);
 						Thread.Sleep(100);
 						if (type)
 						{
 							TriggerFlag = false;
-							modbusClass.modbusTcp.Write(tempTriggerPath, false);
+							if (_modbusType == 1) _modbusHc.modbusTcp.Write(tempTriggerPath, false);
+					else if (_modbusType == 2) _modbusS7.WriteRegister(tempTriggerPath, (short)0);
 							return;
 						}
 					}
-					modbusClass.modbusTcp.Write(tempTriggerPath, false);
+					if (_modbusType == 1) _modbusHc.modbusTcp.Write(tempTriggerPath, false);
+					else if (_modbusType == 2) _modbusS7.WriteRegister(tempTriggerPath, (short)0);
 				});
 			}
 			catch (Exception ex)

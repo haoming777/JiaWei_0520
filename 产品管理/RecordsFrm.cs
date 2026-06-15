@@ -28,6 +28,7 @@ namespace SetProduct
         private UIPanel pnlStats;
         private UIPanel pnlBottom;
         private UITextBox txtSearch;
+        private UITextBox txtLimit;
         private UIComboBox cboTableType;
         private UIComboBox cboShift;
         private UIComboBox cboResult;
@@ -46,6 +47,7 @@ namespace SetProduct
         private UIButton btnPrev;
         private UIButton btnNext;
         private int _pageSize = 50;
+        private int _detailLimit = 3000;  // 副表查询最大条数，可自行调整
         private int _currentPage = 1;
         private int _totalPages = 1;
         private CancellationTokenSource _loadCts;
@@ -95,10 +97,11 @@ namespace SetProduct
             {
                 Text = "查看类型：",
                 Location = new Point(x, y),
-                Size = new Size(80, 30),
+                Size = new Size(80, 35),
                 ForeColor = Color.FromArgb(51, 51, 51),
                 Font = new Font("微软雅黑", 10F),
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+				TextAlign = ContentAlignment.MiddleLeft,
             };
             pnlTop.Controls.Add(lblType);
             x += 85;
@@ -121,10 +124,11 @@ namespace SetProduct
             {
                 Text = "开始日期：",
                 Location = new Point(x, y),
-                Size = new Size(80, 30),
+                Size = new Size(80, 35),
                 ForeColor = Color.FromArgb(51, 51, 51),
                 Font = new Font("微软雅黑", 10F),
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+				TextAlign = ContentAlignment.MiddleLeft,
             };
             pnlTop.Controls.Add(lblStart);
             x += 85;
@@ -144,10 +148,11 @@ namespace SetProduct
             {
                 Text = "结束日期：",
                 Location = new Point(x, y),
-                Size = new Size(80, 30),
+                Size = new Size(80, 35),
                 ForeColor = Color.FromArgb(51, 51, 51),
                 Font = new Font("微软雅黑", 10F),
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+				TextAlign = ContentAlignment.MiddleLeft,
             };
             pnlTop.Controls.Add(lblEnd);
             x += 85;
@@ -169,10 +174,11 @@ namespace SetProduct
             {
                 Text = "班次选择：",
                 Location = new Point(x, y),
-                Size = new Size(80, 30),
+                Size = new Size(80, 35),
                 ForeColor = Color.FromArgb(51, 51, 51),
                 Font = new Font("微软雅黑", 10F),
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+				TextAlign = ContentAlignment.MiddleLeft,
             };
             pnlTop.Controls.Add(lblShift);
             x += 85;
@@ -194,10 +200,11 @@ namespace SetProduct
             {
                 Text = "检测结果：",
                 Location = new Point(x, y),
-                Size = new Size(80, 30),
+                Size = new Size(80, 35),
                 ForeColor = Color.FromArgb(51, 51, 51),
                 Font = new Font("微软雅黑", 10F),
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+				TextAlign = ContentAlignment.MiddleLeft,
             };
             pnlTop.Controls.Add(lblResult);
             x += 85;
@@ -215,14 +222,39 @@ namespace SetProduct
             pnlTop.Controls.Add(cboResult);
             x += 140;
 
+            var lblLimit = new UILabel
+            {
+                Text = "限制数量：",
+                Location = new Point(x, y),
+                Size = new Size(100, 35),
+                ForeColor = Color.FromArgb(51, 51, 51),
+                Font = new Font("微软雅黑", 10F),
+                BackColor = Color.Transparent,
+				TextAlign = ContentAlignment.MiddleLeft,
+            };
+            pnlTop.Controls.Add(lblLimit);
+            x += 105;
+
+            txtLimit = new UITextBox
+            {
+                Location = new Point(x, y),
+                Size = new Size(65, 35),
+                FillColor = Color.White,
+                Text = "3000",
+                Font = new Font("微软雅黑", 10F)
+            };
+            pnlTop.Controls.Add(txtLimit);
+            x += 85;
+
             var lblSearch = new UILabel
             {
                 Text = "关键词：",
                 Location = new Point(x, y),
-                Size = new Size(80, 30),
+                Size = new Size(80, 35),
                 ForeColor = Color.FromArgb(51, 51, 51),
                 Font = new Font("微软雅黑", 10F),
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+				TextAlign = ContentAlignment.MiddleLeft,
             };
             pnlTop.Controls.Add(lblSearch);
             x += 85;
@@ -252,7 +284,7 @@ namespace SetProduct
             pnlTop.Controls.Add(formulaLabel);
 
             y = 102;
-            x = this.Width - 380;
+            x = this.Width - 600;
 
             btnSearch = new UIButton
             {
@@ -312,21 +344,7 @@ namespace SetProduct
 			};
 			btnRefresh.Click += BtnRefresh_Click;
 			pnlTop.Controls.Add(btnRefresh);
-			x += 120;
 
-			btnSummary = new UIButton
-			{
-				Text = "📊 汇总",
-				Location = new Point(x, y),
-				Size = new Size(110, 38),
-				FillColor = Color.FromArgb(0, 122, 255),
-				RectColor = Color.FromArgb(0, 122, 255),
-				ForeColor = Color.White,
-				Font = new Font("微软雅黑", 10F, FontStyle.Bold),
-				Radius = 6
-			};
-			btnSummary.Click += BtnSummary_Click;
-			pnlTop.Controls.Add(btnSummary);
         }
 
         private void CreateStatsPanel()
@@ -376,7 +394,8 @@ namespace SetProduct
                 Size = new Size(width - 30, 20),
                 ForeColor = Color.FromArgb(144, 147, 153),
                 Font = new Font("微软雅黑", 9F),
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+				TextAlign = ContentAlignment.MiddleLeft,
             };
             card.Controls.Add(lblTitle);
 
@@ -387,7 +406,8 @@ namespace SetProduct
                 Size = new Size(width - 30, 26),
                 ForeColor = color,
                 Font = new Font("微软雅黑", 16F, FontStyle.Bold),
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+				TextAlign = ContentAlignment.MiddleLeft,
             };
             card.Controls.Add(valueLabel);
         }
@@ -428,7 +448,7 @@ namespace SetProduct
                 TextAlign = ContentAlignment.MiddleCenter,
                 Font = new Font("微软雅黑", 11F),
                 ForeColor = Color.FromArgb(51, 51, 51),
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
             };
             pnlBottom.Controls.Add(lblPageInfo);
 
@@ -498,7 +518,7 @@ namespace SetProduct
 				System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
 				?.SetValue(dgvRecords, true);
 			// 固定行高避免每次绑定重新测量
-			dgvRecords.ScrollBars = ScrollBars.Vertical;
+			dgvRecords.ScrollBars = ScrollBars.Both;
 			this.Controls.Add(dgvRecords);
 			dgvRecords.BringToFront();
             dgvRecords.BringToFront();
@@ -705,7 +725,10 @@ namespace SetProduct
                     sql = "SELECT p_date, p_shift, sku, total_count, ok_count, ng_count, " +
                           "ng_异物, ng_管盖有无, ng_管口圆度, ng_正面工号缺失, ng_背面工号缺失, " +
                           "ng_PCode, ng_色标对中, ng_爆管, ng_斜口, ng_未剪断, ng_混合多种缺陷, " +
-                          "continuous_exclude_count, yield_rate FROM production_records_summary WHERE 1=1";
+                          "continuous_exclude_count, yield_rate, " +
+                          "cfg_正面字符标准, cfg_反面字符标准, cfg_异物面积上限, " +
+                          "cfg_爆管检测, cfg_斜口检测, cfg_未剪断检测, cfg_色标检测, cfg_反面字符检测 " +
+                          "FROM production_records_summary WHERE 1=1";
 
                     DateTime startDate = dtStart.Value.Date;
                     DateTime endDate = dtEnd.Value.Date;
@@ -727,7 +750,7 @@ namespace SetProduct
                         parameters.Add(new SQLiteParameter("@search", $"%{txtSearch.Text}%"));
                     }
 
-                    sql += " ORDER BY p_date DESC, p_shift, sku LIMIT 5000";
+                    sql += " ORDER BY summary_date DESC, p_date DESC, sku LIMIT 5000";
                 }
                 else
                 {
@@ -761,7 +784,8 @@ namespace SetProduct
                         parameters.Add(new SQLiteParameter("@result", cboResult.SelectedItem.ToString()));
                     }
 
-						sql += " ORDER BY p_time DESC LIMIT 3000";
+						int limitVal = int.TryParse(txtLimit?.Text, out int v) && v > 0 ? v : 3000;
+				sql += $" ORDER BY p_time DESC LIMIT {limitVal}";
 					}
 
 					_currentData = await Task.Run(() => ExecuteProdQuery(sql, parameters.ToArray()), token);
@@ -893,7 +917,15 @@ namespace SetProduct
                 Tuple.Create("ng_未剪断", "未剪断", 80),
                 Tuple.Create("ng_混合多种缺陷", "混合缺陷", 90),
                 Tuple.Create("continuous_exclude_count", "连续爆管剔除", 100),
-                Tuple.Create("yield_rate", "良率%", 80)
+                Tuple.Create("yield_rate", "良率%", 80),
+                Tuple.Create("cfg_正面字符标准", "正面字数标准", 100),
+                Tuple.Create("cfg_反面字符标准", "反面字数标准", 100),
+                Tuple.Create("cfg_异物面积上限", "异物面积上限", 100),
+                Tuple.Create("cfg_爆管检测", "爆管检测", 80),
+                Tuple.Create("cfg_斜口检测", "斜口检测", 80),
+                Tuple.Create("cfg_未剪断检测", "未剪断检测", 90),
+                Tuple.Create("cfg_色标检测", "色标检测", 80),
+                Tuple.Create("cfg_反面字符检测", "反面字符检测", 100)
             };
 
             foreach (var col in columns)
@@ -1127,7 +1159,92 @@ namespace SetProduct
 
         private void BtnRefresh_Click(object sender, EventArgs e)
         {
-            _ = LoadData();
+            // 先取 UI 控件的值
+            string startDate = dtStart.Value.ToString("yyyy-MM-dd");
+            string endDate = dtEnd.Value.ToString("yyyy-MM-dd");
+            string shiftFilter = cboShift.SelectedIndex > 0 ? cboShift.SelectedItem.ToString().Replace("班次", "") : "";
+            this.Cursor = Cursors.WaitCursor;
+
+            Task.Run(() =>
+            {
+                try { RunSummaryInBackground(startDate, endDate, shiftFilter); } catch { }
+                this.BeginInvoke(new Action(() =>
+                {
+                    _ = LoadData();
+                    this.Cursor = Cursors.Default;
+                }));
+            });
+        }
+
+        /// <summary>后台执行汇总（不操作 UI 控件）</summary>
+        private void RunSummaryInBackground(string startDate, string endDate, string shiftFilter)
+        {
+            try
+            {
+                string upsertSql = @"
+                    INSERT OR REPLACE INTO production_records_summary (
+                        p_date, p_shift, sku, total_count, ok_count, ng_count,
+                        ng_异物, ng_管盖有无, ng_管口圆度, ng_正面工号缺失, ng_背面工号缺失,
+                        ng_爆管, ng_斜口, ng_未剪断, ng_混合多种缺陷, ng_PCode, ng_色标对中,
+                        continuous_exclude_count, yield_rate, summary_date,
+                        cfg_正面字符标准, cfg_反面字符标准, cfg_异物面积上限,
+                        cfg_爆管检测, cfg_斜口检测, cfg_未剪断检测, cfg_色标检测, cfg_反面字符检测
+                    )
+                    SELECT
+                        p_shift_date AS p_date, p_shift, sku,
+                        COUNT(*) AS total_count,
+                        SUM(CASE WHEN final_result = 'OK' THEN 1 ELSE 0 END) AS ok_count,
+                        SUM(CASE WHEN final_result = 'NG' THEN 1 ELSE 0 END) AS ng_count,
+                        SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_异物 = 1 THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_管盖有无 = 1 THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_管口圆度 = 1 THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_正面工号缺失 = 1 THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_背面工号缺失 = 1 THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_爆管 = 1 THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_斜口 = 1 THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_未剪断 = 1 THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN defect_count >= 2 AND final_result = 'NG' AND is_excluded = 0 THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_PCode = 1 THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_色标对中 = 1 THEN 1 ELSE 0 END),
+                        (SELECT COUNT(*) FROM production_records_detail d2
+                         WHERE d2.p_shift_date = production_records_detail.p_shift_date
+                         AND d2.p_shift = production_records_detail.p_shift
+                         AND d2.sku = production_records_detail.sku
+                         AND d2.excluded_reason = '连续爆管剔除'),
+                        CASE WHEN (COUNT(*) - (SELECT COUNT(*) FROM production_records_detail d2 WHERE d2.p_shift_date = production_records_detail.p_shift_date AND d2.p_shift = production_records_detail.p_shift AND d2.sku = production_records_detail.sku AND d2.excluded_reason = '连续爆管剔除')) > 0
+                            THEN MIN(100.0, MAX(0.0, SUM(CASE WHEN final_result = 'OK' THEN 1 ELSE 0 END) * 100.0 / (COUNT(*) - (SELECT COUNT(*) FROM production_records_detail d2 WHERE d2.p_shift_date = production_records_detail.p_shift_date AND d2.p_shift = production_records_detail.p_shift AND d2.sku = production_records_detail.sku AND d2.excluded_reason = '连续爆管剔除'))))
+                            ELSE 0 END,
+                        @summaryDate,
+                        @cfg1, @cfg2, @cfg3, @cfg4, @cfg5, @cfg6, @cfg7, @cfg8
+                    FROM production_records_detail
+                    WHERE p_shift_date BETWEEN @startDate AND @endDate";
+                var parameters = new List<SQLiteParameter>
+                {
+                    new SQLiteParameter("@summaryDate", DateTime.Now.ToString("yyyy-MM-dd")),
+                    new SQLiteParameter("@cfg1", CommonLib.Class_Config._Config.Camera1StandChar),
+                    new SQLiteParameter("@cfg2", CommonLib.Class_Config._Config.Camera2StandChar),
+                    new SQLiteParameter("@cfg3", CommonLib.Class_Config._Config.totalArea_Camera1),
+                    new SQLiteParameter("@cfg4", CommonLib.Class_Config._Config.Camera5IFBaoGuan ? "开启" : "关闭"),
+                    new SQLiteParameter("@cfg5", CommonLib.Class_Config._Config.Camera5IFXieKou ? "开启" : "关闭"),
+                    new SQLiteParameter("@cfg6", CommonLib.Class_Config._Config.Camera5IFWeiJianDuan ? "开启" : "关闭"),
+                    new SQLiteParameter("@cfg7", CommonLib.Class_Config._Config.Camera5IFSeBiao ? "开启" : "关闭"),
+                    new SQLiteParameter("@cfg8", CommonLib.Class_Config._Config.Camera5IFOcr ? "开启" : "关闭"),
+                    new SQLiteParameter("@startDate", startDate),
+                    new SQLiteParameter("@endDate", endDate)
+                };
+                if (!string.IsNullOrEmpty(shiftFilter))
+                {
+                    upsertSql += " AND p_shift = @shift";
+                    parameters.Add(new SQLiteParameter("@shift", shiftFilter));
+                }
+                upsertSql += " GROUP BY p_shift_date, p_shift, sku";
+                ExecuteProdQuery(upsertSql, parameters.ToArray());
+                _log.SaveLog($"后台汇总完成: {startDate} ~ {endDate}");
+            }
+            catch (Exception ex)
+            {
+                _log.SaveLog($"后台汇总异常: {ex.Message}");
+            }
         }
 
         /// <summary>

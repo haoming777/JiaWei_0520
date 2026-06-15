@@ -15,7 +15,7 @@ using HslCommunication.Profinet.Siemens.S7PlusHelper;
 
 namespace PLC调试.Class
 {
-	public class S7_1200Class
+	public class S7_1500Class
 	{
 		Thread doKeepAlive;        // 心跳
 
@@ -25,7 +25,7 @@ namespace PLC调试.Class
 
 		Stopwatch timeOut;
 
-		public S7_1200Class()
+		public S7_1500Class()
 		{
 			timeOut = new Stopwatch();
 
@@ -50,7 +50,7 @@ namespace PLC调试.Class
 		public delegate void DelegateTriggerGet();
 		public event DelegateTriggerGet EventTriggerGet;
 
-		SiemensS7Net plc = new SiemensS7Net(SiemensPLCS.S1200);
+		SiemensS7Net plc = new SiemensS7Net(SiemensPLCS.S1500);
 
 		XLToolClass toolClass = new XLToolClass();
 		bool plcState = false;

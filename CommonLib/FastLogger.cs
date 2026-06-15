@@ -49,6 +49,9 @@ namespace CommonLib
         }
         #endregion
 
+        /// <summary>调试日志开关。True=输出详细调试信息，False=仅输出关键事件</summary>
+        public static bool DebugEnabled { get; set; } = true;
+
         private readonly BlockingCollection<LogEntry> _queue;
         private readonly Thread _worker;
         private readonly string _logDir;
@@ -75,6 +78,12 @@ namespace CommonLib
         public void Info(string message) => Enqueue(LogLevel.INFO, message);
         public void Warn(string message) => Enqueue(LogLevel.WARN, message);
         public void Error(string message) => Enqueue(LogLevel.ERROR, message);
+
+        /// <summary>调试日志（受 DebugEnabled 控制，关闭后不记录）</summary>
+        public void Debug(string message)
+        {
+            if (DebugEnabled) Enqueue(LogLevel.INFO, "[DBG] " + message);
+        }
 
         public void Error(string message, Exception ex)
         {

@@ -569,7 +569,6 @@ namespace VisionMeasure
 			this.camera5CountTxt.Size = new System.Drawing.Size(67, 17);
 			this.camera5CountTxt.TabIndex = 33;
 			this.camera5CountTxt.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
-			this.camera5CountTxt.Visible = false;
 			// 
 			// camera4CountTxt
 			// 
@@ -581,7 +580,6 @@ namespace VisionMeasure
 			this.camera4CountTxt.Size = new System.Drawing.Size(67, 17);
 			this.camera4CountTxt.TabIndex = 32;
 			this.camera4CountTxt.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
-			this.camera4CountTxt.Visible = false;
 			// 
 			// camera3CountTxt
 			// 
@@ -593,7 +591,6 @@ namespace VisionMeasure
 			this.camera3CountTxt.Size = new System.Drawing.Size(67, 17);
 			this.camera3CountTxt.TabIndex = 31;
 			this.camera3CountTxt.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
-			this.camera3CountTxt.Visible = false;
 			// 
 			// camera2CountTxt
 			// 
@@ -605,7 +602,6 @@ namespace VisionMeasure
 			this.camera2CountTxt.Size = new System.Drawing.Size(67, 17);
 			this.camera2CountTxt.TabIndex = 30;
 			this.camera2CountTxt.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
-			this.camera2CountTxt.Visible = false;
 			// 
 			// camera1CountTxt
 			// 
@@ -617,7 +613,6 @@ namespace VisionMeasure
 			this.camera1CountTxt.Size = new System.Drawing.Size(67, 17);
 			this.camera1CountTxt.TabIndex = 29;
 			this.camera1CountTxt.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
-			this.camera1CountTxt.Visible = false;
 			// 
 			// uiButton5
 			// 
@@ -643,7 +638,6 @@ namespace VisionMeasure
 			this.plcInput5Txt.Size = new System.Drawing.Size(67, 17);
 			this.plcInput5Txt.TabIndex = 27;
 			this.plcInput5Txt.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
-			this.plcInput5Txt.Visible = false;
 			// 
 			// plcInput4Txt
 			// 
@@ -655,7 +649,6 @@ namespace VisionMeasure
 			this.plcInput4Txt.Size = new System.Drawing.Size(67, 17);
 			this.plcInput4Txt.TabIndex = 26;
 			this.plcInput4Txt.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
-			this.plcInput4Txt.Visible = false;
 			// 
 			// plcInput3Txt
 			// 
@@ -667,7 +660,6 @@ namespace VisionMeasure
 			this.plcInput3Txt.Size = new System.Drawing.Size(67, 17);
 			this.plcInput3Txt.TabIndex = 25;
 			this.plcInput3Txt.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
-			this.plcInput3Txt.Visible = false;
 			// 
 			// plcInput2Txt
 			// 
@@ -679,7 +671,6 @@ namespace VisionMeasure
 			this.plcInput2Txt.Size = new System.Drawing.Size(67, 17);
 			this.plcInput2Txt.TabIndex = 24;
 			this.plcInput2Txt.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
-			this.plcInput2Txt.Visible = false;
 			// 
 			// plcInput1Txt
 			// 
@@ -691,7 +682,6 @@ namespace VisionMeasure
 			this.plcInput1Txt.Size = new System.Drawing.Size(67, 17);
 			this.plcInput1Txt.TabIndex = 23;
 			this.plcInput1Txt.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
-			this.plcInput1Txt.Visible = false;
 			// 
 			// output5Txt
 			// 
@@ -4985,10 +4975,9 @@ namespace VisionMeasure
 			this.clearBtn.Size = new System.Drawing.Size(190, 30);
 			this.clearBtn.Style = Sunny.UI.UIStyle.Custom;
 			this.clearBtn.TabIndex = 3;
-			this.clearBtn.Text = "清  空";
+			this.clearBtn.Text = "Test";
 			this.clearBtn.TipsFont = new System.Drawing.Font("宋体", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
 			this.clearBtn.UseWaitCursor = true;
-			this.clearBtn.Visible = false;
 			this.clearBtn.Click += new System.EventHandler(this.clearBtn_Click);
 			// 
 			// panel53

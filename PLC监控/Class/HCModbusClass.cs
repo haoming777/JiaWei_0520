@@ -96,11 +96,13 @@ namespace PLC调试.Class
 					timeOut.Restart();
 					errorCount = 0;
 					EventConnectState(true, "Modbus连接成功");
+				try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Debug("Modbus连接成功 IP=" + _Config.ModbusIP + ":" + _Config.ModbusPort + ""); } catch { }
 					return true;
 				}
 				else
 				{
 					EventConnectState(false, "Modbus连接失败");
+				try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Debug("Modbus连接失败 IP=" + _Config.ModbusIP + ":" + _Config.ModbusPort + ""); } catch { }
 					return false;
 				}
 
@@ -158,6 +160,7 @@ namespace PLC调试.Class
 							Console.WriteLine($"超出十秒状态没有更新了 时间：{timeOut.ElapsedMilliseconds}ms");
 							modbusState = false;
 							EventConnectState(false, $"心跳状态超十秒未更新，判定为通讯断开状态，最后一次为[{newVal}]");
+							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Debug("Modbus心跳超时, 最后值=" + newVal + ", 超时ms=" + timeOut.ElapsedMilliseconds + ""); } catch { }
 						}
 					}
 				}
@@ -323,6 +326,7 @@ namespace PLC调试.Class
 					}
 				}
 				toolClass.SaveLog($"写入结果完成，耗时：{sw.ElapsedMilliseconds}ms，结果：result1：{(result1 ? ok : ng)}、result2：{(result2 ? ok : ng)}、result3：{(result3 ? ok : ng)}");
+					if (sw.ElapsedMilliseconds > 50) { try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Debug("Modbus写入耗时偏高: " + sw.ElapsedMilliseconds + "ms"); } catch { } }
 				//});
 				return true;
 			}
@@ -356,6 +360,7 @@ namespace PLC调试.Class
 				}
 				bRunning = false;
 				toolClass.SaveLog($"在第 {ReconnectCount} 次时重连成功");
+				try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Debug("Modbus重连成功, 尝试" + ReconnectCount + "次"); } catch { }
 				ReconnectCount = 0;
 			});
 		}

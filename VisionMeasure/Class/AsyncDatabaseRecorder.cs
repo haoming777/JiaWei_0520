@@ -139,6 +139,9 @@ namespace VisionMeasure
 				_dbHelper.ExecuteNonQuery(createDetailTable);
 				_dbHelper.ExecuteNonQuery(createSummaryTable);
 
+				// 补建检测标准列（兼容旧数据库）
+				EnsureSummaryConfigColumns();
+
 				_toolClass.SaveLog("数据库表初始化完成");
 			}
 			catch (Exception ex)
@@ -158,8 +161,7 @@ namespace VisionMeasure
 			ComputeShiftAndDate(record);
 			// 计算缺陷分类
 			ComputeDefectCategories(record);
-			// 检查连续爆管剔除
-			CheckConsecutiveBurstExclusion(record);
+			// 连续爆管剔除已移至消费者线程 INSERT 后执行，确保查 DB 时前序记录已入库
 
 			// 【关键修复2：把 RetroactiveUpdateExcludedRecords 从这里删掉，绝不能在这里阻塞主线程】
 
@@ -267,12 +269,9 @@ namespace VisionMeasure
 		{
 			lock (_burstLock)
 			{
-				// 移除当前记录和前两条记录
-				for (int i = 0; i <= 2; i++)
-				{
-					long targetId = currentSequenceId - i;
-					_burstHistory = new Queue<long>(_burstHistory.Where(id => id != targetId));
-				}
+				// 精确移除 currentId, currentId-1, currentId-2（避免清错记录）
+				var arr = _burstHistory.ToArray();
+				_burstHistory = new Queue<long>(arr.Where(id => id != currentSequenceId && id != currentSequenceId - 1 && id != currentSequenceId - 2));
 			}
 		}
 
@@ -283,6 +282,10 @@ namespace VisionMeasure
 
 			// 记录提交回调：DB INSERT成功后触发，用于存图
 			public Action<long> OnRecordCommitted { get; set; }
+			// 连续爆管剔除回调：通知主界面更新计数
+			public Action OnBurstExcluded { get; set; }
+			// 汇总刷新回调：通知主界面同步良率数据
+			public Action<int, int, int> OnSummaryRefreshed { get; set; }
 
 			// 记录提交回调：DB INSERT成功后触发，用于存图
 
@@ -476,7 +479,7 @@ namespace VisionMeasure
 
 		// 连续爆管追踪 - 使用队列存储最近的爆管记录（只记录包含爆管的检测）
 		private Queue<long> _burstHistory = new Queue<long>();
-		private const int BURST_HISTORY_SIZE = 5;
+		private const int BURST_HISTORY_SIZE = 100;
 
 		/// <summary>
 		/// 更新连续爆管状态（需要在主线程中调用，传入相机 5 的结果）
@@ -490,10 +493,12 @@ namespace VisionMeasure
 				if (isBurstNg)
 				{
 					_burstHistory.Enqueue(sequenceId);
-					
+					try { FastLogger.Instance.Debug($"爆管入队: ID={sequenceId} 队列长度={_burstHistory.Count}"); } catch {}
+
 					if (_burstHistory.Count > BURST_HISTORY_SIZE)
 					{
-						_burstHistory.Dequeue();
+						long removed = _burstHistory.Dequeue();
+						try { FastLogger.Instance.Debug($"爆管出队(满): ID={removed} 队列长度={_burstHistory.Count}"); } catch {}
 					}
 				}
 			}
@@ -510,43 +515,27 @@ namespace VisionMeasure
 		/// 错误示例：
 		///   [爆管，斜口，爆管] -> 不算（中间有非爆管）
 		/// </summary>
-		public bool IsConsecutiveBurstExcluded(long sequenceId)
+						public bool IsConsecutiveBurstExcluded(long sequenceId)
 		{
-			lock (_burstLock)
+			// 查 DB：sequence_id-1 和 sequence_id-2 是否都 cam5_result=0（连续爆管）
+			// 当前记录已在 DB 中，所以查前两条即可凑齐3条连续
+			try
 			{
-				// 队列中只包含爆管记录，直接检查序列号是否连续
-				var historyList = _burstHistory.ToList();
-				
-				// 找到当前 sequenceId 在队列中的位置
-				int currentIndex = historyList.IndexOf(sequenceId);
-				if (currentIndex < 0)
-				{
-					return false; // 当前记录不在爆管队列中
-				}
-				
-				// 检查是否有连续 3 个爆管（当前记录 + 前两条）
-				if (currentIndex >= 2)
-				{
-					long prevId2 = historyList[currentIndex - 2];
-					long prevId1 = historyList[currentIndex - 1];
-					long currId = historyList[currentIndex];
-					
-					// 检查序列号是否连续（prevId2 = currId - 2, prevId1 = currId - 1）
-					// 因为队列中只包含爆管记录，所以只要序列号连续就是连续爆管
-					if (prevId2 == currId - 2 && prevId1 == currId - 1)
-					{
-						return true;
-					}
-				}
-				
-				return false;
+				string sql = "SELECT COUNT(*) FROM production_records_detail WHERE sequence_id = @id1 AND cam5_result = 0 AND is_excluded = 0";
+				var r1 = _dbHelper.ExecuteQuery(sql, new SQLiteParameter("@id1", sequenceId - 1));
+				int c1 = (r1 != null && r1.Rows.Count > 0) ? Convert.ToInt32(r1.Rows[0][0]) : 0;
+				if (c1 == 0) return false;
+
+				var r2 = _dbHelper.ExecuteQuery(sql, new SQLiteParameter("@id1", sequenceId - 2));
+				int c2 = (r2 != null && r2.Rows.Count > 0) ? Convert.ToInt32(r2.Rows[0][0]) : 0;
+				bool result = c2 >= 1;
+				if (result) try { FastLogger.Instance.Debug("连续爆管: ID=" + sequenceId); } catch {}
+				return result;
 			}
+			catch { return false; }
 		}
 
-		/// <summary>
-		/// 获取当前连续爆管数量
-		/// </summary>
-		public int GetCurrentConsecutiveBurstCount()
+	public int GetCurrentConsecutiveBurstCount()
 		{
 			lock (_burstLock)
 			{
@@ -654,17 +643,27 @@ namespace VisionMeasure
 				{
 					_toolClass.SaveLog($"[DB] 保存记录成功 - SequenceId:{record.SequenceId}");
 
+					// 【INSERT 后检查连续爆管】记录已入库，查 DB 前 2 条是否也是爆管
+					if (record.Cam5_BaoguanResult == 0)
+					{
+						bool burstExcluded = IsConsecutiveBurstExcluded(record.SequenceId);
+						try { FastLogger.Instance.Debug($"连续爆管检查: ID={record.SequenceId} Cam5Burst={record.Cam5_BaoguanResult} 结果={burstExcluded}"); } catch {}
+						if (burstExcluded)
+						{
+							// 更新当前记录
+							string updateSql = "UPDATE production_records_detail SET is_excluded=1, excluded_reason='连续爆管剔除', defect_detail='连续爆管剔除', defect_count=0, ng_爆管=0, ng_斜口=0, ng_未剪断=0, ng_异物=0, ng_管盖有无=0, ng_管口圆度=0, ng_正面工号缺失=0, ng_背面工号缺失=0, ng_PCode=0, ng_色标对中=0 WHERE sequence_id=@id AND sku=@sku";
+							_dbHelper.ExecuteNonQuery(updateSql, new SQLiteParameter("@id", record.SequenceId), new SQLiteParameter("@sku", record.Sku));
+							// 回溯前 2 条
+							RetroactiveUpdateExcludedRecords(record.SequenceId, record.Sku);
+							// 通知主界面更新计数
+							try { OnBurstExcluded?.Invoke(); } catch { }
+						}
+					}
+
 					// 记录已入库，触发存图回调
 					if (record.UnifiedId > 0)
 					{
 						OnRecordCommitted?.Invoke(record.UnifiedId);
-					}
-
-					// 【关键修复3：将回溯更新移到这里（真正的后台线程）执行】
-					// 传入 record.Sku 避免跨线程调用 GetCurrentSku
-					if (record.IsExcluded && record.ExcludedReason == "连续爆管剔除")
-					{
-						RetroactiveUpdateExcludedRecords(record.SequenceId, record.Sku);
 					}
 
 					// 新SKU首条记录：立刻创建汇总行，避免30秒窗口期内报表查不到
@@ -884,46 +883,39 @@ namespace VisionMeasure
 		/// <summary>
 		/// 检查并自动补建汇总表中的检测标准列（向前兼容旧数据库）
 		/// </summary>
-		private void EnsureSummaryConfigColumns()
+				private void EnsureSummaryConfigColumns()
 		{
-			try
+			// 需要新增的列定义（列名, 类型, 默认值）
+			var columns = new (string Name, string Type, string Default)[]
 			{
-				// 需要新增的列定义（列名, 类型, 默认值）
-				var columns = new (string Name, string Type, string Default)[]
-				{
-					("cfg_正面字符标准", "INTEGER", "0"),
-					("cfg_反面字符标准", "INTEGER", "0"),
-					("cfg_异物面积上限", "INTEGER", "0"),
-					("cfg_爆管检测", "TEXT", "''"),
-					("cfg_斜口检测", "TEXT", "''"),
-					("cfg_未剪断检测", "TEXT", "''"),
-					("cfg_色标检测", "TEXT", "''"),
-					("cfg_反面字符检测", "TEXT", "''"),
-				};
+				("cfg_正面字符标准", "INTEGER", "0"),
+				("cfg_反面字符标准", "INTEGER", "0"),
+				("cfg_异物面积上限", "INTEGER", "0"),
+				("cfg_爆管检测", "TEXT", "''"),
+				("cfg_斜口检测", "TEXT", "''"),
+				("cfg_未剪断检测", "TEXT", "''"),
+				("cfg_色标检测", "TEXT", "''"),
+				("cfg_反面字符检测", "TEXT", "''"),
+			};
 
-				foreach (var col in columns)
+			foreach (var col in columns)
+			{
+				try
 				{
-					// 检查列是否存在
-					string checkSql = "SELECT COUNT(*) FROM pragma_table_info('production_records_summary') WHERE name = '" + col.Name + "'";
-					var result = _dbHelper.ExecuteQuery(checkSql);
-					int count = (result != null && result.Rows.Count > 0) ? Convert.ToInt32(result.Rows[0][0]) : 0;
-
-					if (count == 0)
-					{
-						string alterSql = "ALTER TABLE production_records_summary ADD COLUMN " + col.Name + " " + col.Type + " DEFAULT " + col.Default;
-						_dbHelper.ExecuteNonQuery(alterSql);
-						_toolClass.SaveLog("[DB迁移] 已添加列: " + col.Name);
-					}
+					string alterSql = "ALTER TABLE production_records_summary ADD COLUMN " + col.Name + " " + col.Type + " DEFAULT " + col.Default;
+					_dbHelper.ExecuteNonQuery(alterSql);
+					_toolClass.SaveLog("[DB迁移] 已添加列: " + col.Name);
+					try { FastLogger.Instance.Info("DB迁移: 已添加列 " + col.Name); } catch { }
 				}
-			}
-			catch (Exception ex)
-			{
-				_toolClass.SaveLog("[DB迁移] 列检查失败: " + ex.Message);
+				catch
+				{
+					// 列已存在，正常跳过
+					try { FastLogger.Instance.Debug("DB迁移: 列已存在 " + col.Name); } catch { }
+				}
 			}
 		}
 
-
-		private void GenerateShiftSummaryInternal(string date, string shift)
+private void GenerateShiftSummaryInternal(string date, string shift)
 		{
 			// 获取该班次所有SKU
 			string getSkusSql = @"
@@ -1051,6 +1043,8 @@ namespace VisionMeasure
 				};
 
 				_dbHelper.ExecuteNonQuery(upsertSql, upsertParams);
+					try { FastLogger.Instance.Debug("汇总写入: SKU=" + sku + " Date=" + date + " Total=" + totalCount + " OK=" + okCount + " NG=" + ngCount + " Yield=" + yieldRate.ToString("F2")); } catch {}
+				try { OnSummaryRefreshed?.Invoke(totalCount, okCount, excludeCount); } catch {}
 
 				// 移除：不再每一条记录都导出Excel文件，避免耗时
 				// ExportSummaryToExcel(date, shift, sku);
@@ -1196,12 +1190,17 @@ namespace VisionMeasure
 				{
 					// 新SKU/新班次：立刻跑一次完整汇总，确保报表能立刻查到
 					UpdateOrCreateSummary(record.ShiftDateStr, record.Shift, record.Sku);
+					try { FastLogger.Instance.Debug($"首条汇总: SKU={record.Sku} Date={record.ShiftDateStr} Shift={record.Shift}"); } catch { }
 				}
-				// 已有汇总行则跳过（30秒定时器会更新）
+				else
+				{
+					try { FastLogger.Instance.Debug($"汇总行已存在: SKU={record.Sku} Date={record.ShiftDateStr}"); } catch { }
+				}
 			}
 			catch (Exception ex)
 			{
-				_toolClass.SaveLog($"首条汇总创建异常: {ex.Message}");
+				_toolClass.SaveLog($"首条汇总创建异常: {ex.Message}\n{ex.StackTrace}");
+				try { CommonLib.FastLogger.Instance.Error($"汇总行创建失败 SKU={record.Sku} Date={record.ShiftDateStr} Shift={record.Shift}", ex); } catch { }
 			}
 		}
 
