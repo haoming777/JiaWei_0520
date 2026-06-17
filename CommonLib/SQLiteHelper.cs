@@ -51,11 +51,13 @@ namespace CommonLib
 		private string userChartName = "user_info";
 		public DataTable GetAllList(string ChartName)
 		{
-			var SQLiteConnectionTest = new SQLiteConnection(@"Data Source = " + dataSource);
-			var DataTable = new DataTable();
-			var adp = new SQLiteDataAdapter("select * from " + ChartName, SQLiteConnectionTest);
-			adp.Fill(DataTable);
-			return DataTable;
+			using (var conn = new SQLiteConnection(@"Data Source = " + dataSource))
+			{
+				var DataTable = new DataTable();
+				var adp = new SQLiteDataAdapter("select * from " + ChartName, conn);
+				adp.Fill(DataTable);
+				return DataTable;
+			}
 		}
 
 		/// <summary>
@@ -65,22 +67,25 @@ namespace CommonLib
 		/// <returns></returns>
 		public DataTable GetAllListTest(string SearchContent)
 		{
-			var SQLiteConnection = new SQLiteConnection(@"Data Source = " + dataSource);
-			var DataTable = new DataTable();
-			var adp = new SQLiteDataAdapter($"select* from {userChartName} where username = 123 or password = 123 or id=2",
-						SQLiteConnection);
-			adp.Fill(DataTable);
-			return DataTable;
+			using (var conn = new SQLiteConnection(@"Data Source = " + dataSource))
+			{
+				var DataTable = new DataTable();
+				var adp = new SQLiteDataAdapter($"select* from {userChartName} where username = 123 or password = 123 or id=2",
+							conn);
+				adp.Fill(DataTable);
+				return DataTable;
+			}
 		}
 
 		public bool FindPassWord(string name, string psw)
 		{
-			var SQLiteConnection = new SQLiteConnection(@"Data Source = " + dataSource);
-			var DataTable = new DataTable();
-			var adp = new SQLiteDataAdapter($"select * from user_info where UserName = \"{name}\" and PassWord = \"{MD5Decode16(psw)}\"", SQLiteConnection);
-			adp.Fill(DataTable);
-
-			return DataTable.Rows.Count > 0;
+			using (var conn = new SQLiteConnection(@"Data Source = " + dataSource))
+			{
+				var DataTable = new DataTable();
+				var adp = new SQLiteDataAdapter($"select * from user_info where UserName = \"{name}\" and PassWord = \"{MD5Decode16(psw)}\"", conn);
+				adp.Fill(DataTable);
+				return DataTable.Rows.Count > 0;
+			}
 		}
 
 		public UserClass FindUserName(string name)

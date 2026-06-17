@@ -726,7 +726,7 @@ namespace VisionMeasure
 		/// <param name="date">班次归属日期</param>
 		/// <param name="shift">班次名称</param>
 		/// <param name="openFolderAfterExport">导出完成后是否打开文件夹</param>
-		public void ExportFullShiftReport(string date, string shift, bool openFolderAfterExport = false)
+		public void ExportFullShiftReport(string date, string shift, bool openFolderAfterExport = false, bool skipDetailExport = false)
 		{
 			Task.Run(() =>
 			{
@@ -741,10 +741,11 @@ namespace VisionMeasure
 					// 首先生成所有SKU的汇总
 					GenerateShiftSummaryInternal(date, shift);
 
-					// 导出完整报表
-					string reportPath = ExportFullShiftReportToCSV(date, shift);
+					// 导出报表
+					string reportPath = ExportFullShiftReportToCSV(date, shift, skipDetailExport);
 
-					_toolClass.SaveLog($"完整班次报表已导出: {date} {shift}");
+					string desc = skipDetailExport ? "汇总" : "完整";
+					_toolClass.SaveLog($"{desc}班次报表已导出: {date} {shift}");
 
 					// 如果需要，打开保存报表的文件夹
 					if (openFolderAfterExport && !string.IsNullOrEmpty(reportPath) && Directory.Exists(reportPath))
@@ -763,7 +764,7 @@ namespace VisionMeasure
 		/// 完整导出班次报表到CSV
 		/// </summary>
 		/// <returns>报表保存的文件夹路径</returns>
-		private string ExportFullShiftReportToCSV(string date, string shift)
+		private string ExportFullShiftReportToCSV(string date, string shift, bool skipDetailExport = false)
 		{
 			try
 			{
@@ -831,40 +832,43 @@ namespace VisionMeasure
 					}
 
 					// ══════════════════════════════════
-					// 明细记录（仅当前班次，倒序）
+					// 明细记录（仅当前班次，倒序）—— 仅完整导出时包含
 					// ══════════════════════════════════
-					writer.WriteLine("");
-					writer.WriteLine($"# ==== 检测明细记录（{date} {shift}，按时间倒序） ====");
-					writer.WriteLine("检测时间,日期,班次,SKU,流水号,结果,缺陷详情,缺陷数,是否被剔除,剔除原因");
-
-					string detailSql = @"
-						SELECT p_time, p_date, p_shift, sku, sequence_id,
-						       final_result, defect_detail, defect_count,
-						       is_excluded, excluded_reason
-						FROM production_records_detail
-						WHERE p_shift_date = @date AND p_shift = @shift
-						ORDER BY p_time DESC";
-
-					var detailData = _dbHelper.ExecuteQuery(detailSql,
-						new SQLiteParameter("@date", date),
-						new SQLiteParameter("@shift", shift));
-
-					if (detailData.Rows.Count > 0)
+					if (!skipDetailExport)
 					{
-						foreach (DataRow row in detailData.Rows)
+						writer.WriteLine("");
+						writer.WriteLine($"# ==== 检测明细记录（{date} {shift}，按时间倒序） ====");
+						writer.WriteLine("检测时间,日期,班次,SKU,流水号,结果,缺陷详情,缺陷数,连续爆管剔除,剔除原因");
+
+						string detailSql = @"
+							SELECT p_time, p_date, p_shift, sku, sequence_id,
+							       final_result, defect_detail, defect_count,
+							       is_excluded, excluded_reason
+							FROM production_records_detail
+							WHERE p_shift_date = @date AND p_shift = @shift
+							ORDER BY p_time DESC";
+
+						var detailData = _dbHelper.ExecuteQuery(detailSql,
+							new SQLiteParameter("@date", date),
+							new SQLiteParameter("@shift", shift));
+
+						if (detailData.Rows.Count > 0)
 						{
-							string pTime = row["p_time"]?.ToString() ?? "";
-							string finalResult = row["final_result"]?.ToString() ?? "";
-							string defectDetail = (row["defect_detail"]?.ToString() ?? "").Replace(",", "；");
-							string excludedReason = (row["excluded_reason"]?.ToString() ?? "").Replace(",", "；");
+							foreach (DataRow row in detailData.Rows)
+							{
+								string pTime = row["p_time"]?.ToString() ?? "";
+								string finalResult = row["final_result"]?.ToString() ?? "";
+								string defectDetail = (row["defect_detail"]?.ToString() ?? "").Replace(",", "；");
+								string excludedReason = (row["excluded_reason"]?.ToString() ?? "").Replace(",", "；");
 
-							writer.WriteLine($"{pTime},{row["p_date"]},{row["p_shift"]},{row["sku"]},{row["sequence_id"]}," +
-								$"{finalResult},{defectDetail},{row["defect_count"]},{row["is_excluded"]},{excludedReason}");
+								writer.WriteLine($"{pTime},{row["p_date"]},{row["p_shift"]},{row["sku"]},{row["sequence_id"]}," +
+									$"{finalResult},{defectDetail},{row["defect_count"]},{row["is_excluded"]},{excludedReason}");
+							}
 						}
-					}
-					else
-					{
-						writer.WriteLine("(无明细记录)");
+						else
+						{
+							writer.WriteLine("(无明细记录)");
+						}
 					}
 				}
 

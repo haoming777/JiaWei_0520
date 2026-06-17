@@ -289,8 +289,12 @@ namespace VisionMeasure
 			try { FastLogger.Instance.Info("工位启用状态: " + string.Join(" ", _cameraEnabled.Select((b,i) => "Cam"+(i+1)+"="+b)) + " (" + _cameraEnabled.Count(e=>e) + "/5 启用)"); } catch { }
 			if (IFSaveLog) toolClass.SaveLog("[CamCfg] 工位启用状态: Cam1=" + _cameraEnabled[0] + " Cam2=" + _cameraEnabled[1] + " Cam3=" + _cameraEnabled[2] + " Cam4=" + _cameraEnabled[3] + " Cam5=" + _cameraEnabled[4] + " (启用" + _cameraEnabled.Count(e=>e) + "路)");
 
-			// 【新增优化】开启平滑低延迟垃圾回收模式，防止高并发高密集型计算时GC引起程序突发卡顿
-			System.Runtime.GCSettings.LatencyMode = System.Runtime.GCLatencyMode.Batch;
+			// 【内存优化】Interactive模式允许后台并发GC，避免Batch模式下LOH碎片化导致OOM
+			// Batch模式禁用后台GC → Gen2/LOH只在分配失败时回收 → 碎片化后即使总空闲足够也无法分配大块
+			System.Runtime.GCSettings.LatencyMode = System.Runtime.GCLatencyMode.Interactive;
+			// 提示GC当前是大内存场景，避免频繁触发Gen0/Gen1
+			System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+			try { FastLogger.Instance.Info("[内存] GC模式=Interactive, LOH压缩=CompactOnce"); } catch { }
 			// 【新增优化】提升当前进程在操作系统中的优先级，确保多线程调度更稳定
 			Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.High;
 			System.Threading.ThreadPool.SetMinThreads(30, 30);
@@ -494,11 +498,11 @@ namespace VisionMeasure
 							return;
 						}
 
-						// SKU切换：先自动保存上一个SKU的班次报表
+						// SKU切换：先自动保存上一个SKU的班次报表（仅汇总表）
 						if (!string.IsNullOrEmpty(_savedSku) && _dbRecorder != null)
 						{
-							_dbRecorder.ExportFullShiftReport(_currentShiftDate, _currentShift);
-							toolClass.SaveLog($"SKU切换: {_savedSku} -> {currentSku}，已自动保存{_currentShift}班次报表");
+							_dbRecorder.ExportFullShiftReport(_currentShiftDate, _currentShift, skipDetailExport: true);
+							toolClass.SaveLog($"SKU切换: {_savedSku} -> {currentSku}，已自动保存{_currentShift}班次汇总报表");
 						}
 
 						// SKU发生变化，清空统计数据
@@ -594,6 +598,11 @@ namespace VisionMeasure
 			}
 		}
 
+		private const int MAX_IMAGE_CACHE_SIZE = 50; // 最多同时缓存50组图像（约600MB），超限时强制清理旧条目
+		private const long MEMORY_WARN_THRESHOLD = 1500; // 内存超过1500MB时强制GC
+		private const long MEMORY_CRITICAL_THRESHOLD = 2000; // 内存超过2000MB时丢弃缓存腾空间
+		private long _cacheEvictCount = 0;
+
 		private void InitializePerformanceMonitoring()
 		{
 			_performanceHistory = new Dictionary<string, PerformanceStats>();
@@ -612,11 +621,106 @@ namespace VisionMeasure
 				{
 					ResetPerformanceStats();
 				}
+
+				// 每30秒检查内存压力
+				if (DateTime.Now.Second % 30 == 0)
+				{
+					CheckMemoryPressure();
+				}
 			}
 			catch (Exception ex)
 			{
 				toolClass.SaveLog($"性能监控异常: {ex.Message}");
 			}
+		}
+
+		/// <summary>
+		/// 内存压力检查：当缓存过大或总内存超过阈值时强制清理
+		/// </summary>
+		private void CheckMemoryPressure()
+		{
+			try
+			{
+				int cacheCount = _imageCache.Count;
+				if (cacheCount > 0 || _resultImageCache.Count > 0)
+				{
+					try { FastLogger.Instance.Debug($"[内存] ImageCache={_imageCache.Count} ResultCache={_resultImageCache.Count} PendingSaves={_pendingImageSaves.Count} 已驱逐={_cacheEvictCount}"); } catch {}
+				}
+
+				// 缓存超过上限 → 清理最旧的50%
+				if (_imageCache.Count > MAX_IMAGE_CACHE_SIZE)
+				{
+					int toRemove = _imageCache.Count - MAX_IMAGE_CACHE_SIZE / 2;
+					EvictOldestCacheEntries(toRemove);
+				}
+
+				// 检查进程内存
+				using (var proc = Process.GetCurrentProcess())
+				{
+					long memMB = proc.WorkingSet64 / 1024 / 1024;
+					if (memMB > MEMORY_WARN_THRESHOLD)
+					{
+						try { FastLogger.Instance.Warn($"[内存] 内存偏高: {memMB}MB, 触发GC"); } catch {}
+						GC.Collect();
+						GC.WaitForPendingFinalizers();
+						// 强制压缩LOH（LargeObjectHeapCompactionMode=CompactOnce每次GC前需重置）
+						System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+						GC.Collect(); // 两次确保LOH也被回收
+						GC.WaitForPendingFinalizers();
+						System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+						GC.Collect();
+					}
+					if (memMB > MEMORY_CRITICAL_THRESHOLD)
+					{
+						try { FastLogger.Instance.Error($"[内存] 内存严重不足: {memMB}MB, 紧急清理缓存"); } catch {}
+						// 清空所有图像缓存
+						ForceClearAllImageCache();
+					}
+				}
+			}
+			catch { }
+		}
+
+		/// <summary>
+		/// 驱逐最旧的N个缓存条目（按key排序，删除最小的key=最旧的ID）
+		/// </summary>
+		private void EvictOldestCacheEntries(int count)
+		{
+			if (count <= 0) return;
+			try
+			{
+				var keys = _imageCache.Keys.OrderBy(k => k).Take(count).ToList();
+				foreach (var key in keys)
+				{
+					ClearImageCache(key);
+					Interlocked.Increment(ref _cacheEvictCount);
+				}
+				try { FastLogger.Instance.Warn($"[内存] 驱逐{keys.Count}个旧缓存条目, 剩余{_imageCache.Count}, 累计驱逐{_cacheEvictCount}"); } catch {}
+			}
+			catch { }
+		}
+
+		/// <summary>
+		/// 紧急清空所有图像缓存（内存严重不足时）
+		/// </summary>
+		private void ForceClearAllImageCache()
+		{
+			try
+			{
+				var keys = _imageCache.Keys.ToArray();
+				foreach (var key in keys)
+				{
+					ClearImageCache(key);
+					Interlocked.Increment(ref _cacheEvictCount);
+				}
+				GC.Collect();
+				GC.WaitForPendingFinalizers();
+				System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+				GC.Collect();
+				GC.WaitForPendingFinalizers();
+				try { FastLogger.Instance.Error($"[内存] 紧急清理完成，清除{keys.Length}组缓存"); } catch {}
+			}
+			catch { }
 		}
 
 		private void StartMethod(CameraSelect camera) { }
@@ -2790,6 +2894,12 @@ namespace VisionMeasure
 		/// </summary>
 		private void CacheImageForDefectSave(string cameraName, Mat original, Mat result, long sequenceId)
 		{
+			// 【内存保护】缓存超过上限时直接丢弃新帧（等已有缓存被消费后再恢复）
+			if (_imageCache.Count >= MAX_IMAGE_CACHE_SIZE * 2)
+			{
+				Interlocked.Increment(ref _cacheEvictCount);
+				return;
+			}
 			Mat originalCopy = null, resultCopy = null;
 			try
 			{
@@ -3988,10 +4098,10 @@ namespace VisionMeasure
 		/// </summary>
 		private void AutoSaveShiftReport(string date, string shift)
 		{
-			// 调用AsyncDatabaseRecorder的完整导出功能，异步执行，不影响主程序
+			// 班次切换时自动保存仅导出汇总表（主表），不导出明细记录（副表）
 			if (_dbRecorder != null)
 			{
-				_dbRecorder.ExportFullShiftReport(date, shift);
+				_dbRecorder.ExportFullShiftReport(date, shift, skipDetailExport: true);
 			}
 		}
 
@@ -4004,10 +4114,10 @@ namespace VisionMeasure
 			{
 				toolClass.SaveLog($"开始手动保存班次报表: {_currentShiftDate} {_currentShift}");
 
-				// 调用AsyncDatabaseRecorder的完整导出功能（异步执行，保存完成后自动打开文件夹）
+				// 异步导出汇总表，保存完成后自动打开文件夹
 				if (_dbRecorder != null)
 				{
-					_dbRecorder.ExportFullShiftReport(_currentShiftDate, _currentShift, true);
+					_dbRecorder.ExportFullShiftReport(_currentShiftDate, _currentShift, openFolderAfterExport: true, skipDetailExport: true);
 				}
 			}
 		}
