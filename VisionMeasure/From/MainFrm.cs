@@ -56,6 +56,8 @@ namespace VisionMeasure
 	{
 		// 线程安全关闭标志
 		private volatile bool _isClosing = false;
+		// 相机重连去抖：同一相机只允许一个重连 Task 在跑
+		private volatile bool _cam1Reconnecting, _cam2Reconnecting, _cam3Reconnecting, _cam4Reconnecting, _cam5Reconnecting;
 			private readonly ManualResetEventSlim _closeWaitHandle = new ManualResetEventSlim(false);
 		private readonly object _closeLock = new object();
 
@@ -602,6 +604,8 @@ namespace VisionMeasure
 		private const long MEMORY_WARN_THRESHOLD = 1500; // 内存超过1500MB时强制GC
 		private const long MEMORY_CRITICAL_THRESHOLD = 2000; // 内存超过2000MB时丢弃缓存腾空间
 		private long _cacheEvictCount = 0;
+		private int _memCheckCounter = 0;  // 内存检查计数器（替代 DateTime.Now.Second % 30 的不精确判断）
+		private int _perfCheckCounter = 0; // 性能重置计数器（替代 DateTime.Now.Minute % 5 的不精确判断）
 
 		private void InitializePerformanceMonitoring()
 		{
@@ -617,14 +621,17 @@ namespace VisionMeasure
 			if (_isClosing) return;
 			try
 			{
-				if (DateTime.Now.Minute % 5 == 0 && DateTime.Now.Second < 10)
+				// 每5分钟重置一次性能统计（Timer间隔5秒 → 60次）
+				if (++_perfCheckCounter >= 60)
 				{
+					_perfCheckCounter = 0;
 					ResetPerformanceStats();
 				}
 
-				// 每30秒检查内存压力
-				if (DateTime.Now.Second % 30 == 0)
+				// 每30秒检查内存压力（Timer间隔5秒 → 6次）
+				if (++_memCheckCounter >= 6)
 				{
+					_memCheckCounter = 0;
 					CheckMemoryPressure();
 				}
 			}
@@ -1443,96 +1450,126 @@ namespace VisionMeasure
 			if (camera1SDK != null && camera1SDK.curCameraKey.Equals(cameraKey))
 			{
 				camera1State.State = Sunny.UI.UILightState.Off;
+				if (_cam1Reconnecting) return;
+				_cam1Reconnecting = true;
 				Task.Factory.StartNew(() =>
 				{
-					camera1SDK.Close();
-					while (!camera1SDK.IsOpen() && !_isClosing)
+					try
 					{
-						try
+						camera1SDK.Close();
+						while (!camera1SDK.IsOpen() && !_isClosing)
 						{
-							toolClass.SaveLog(string.Format("相机{0}【{1}】重连", 1, cameraKey));
-							camera1SDK.SetCameraByKey(_Config.Camera1SN);
-							camera1SDK.Open();
+							try
+							{
+								toolClass.SaveLog(string.Format("相机{0}【{1}】重连", 1, cameraKey));
+								camera1SDK.SetCameraByKey(_Config.Camera1SN);
+								camera1SDK.Open();
+							}
+							catch { }
+							Thread.Sleep(1000);
 						}
-						catch { }
-						Thread.Sleep(1000);
 					}
+					finally { _cam1Reconnecting = false; }
 				});
 			}
 			else if (camera2SDK != null && camera2SDK.curCameraKey.Equals(cameraKey))
 			{
 				camera2State.State = Sunny.UI.UILightState.Off;
+				if (_cam2Reconnecting) return;
+				_cam2Reconnecting = true;
 				Task.Factory.StartNew(() =>
 				{
-					camera2SDK.Close();
-					while (!camera2SDK.IsOpen() && !_isClosing)
+					try
 					{
-						try
+						camera2SDK.Close();
+						while (!camera2SDK.IsOpen() && !_isClosing)
 						{
-							toolClass.SaveLog(string.Format("相机{0}【{1}】重连", 2, cameraKey));
-							camera2SDK.SetCameraByKey(_Config.Camera2SN);
-							camera2SDK.Open();
+							try
+							{
+								toolClass.SaveLog(string.Format("相机{0}【{1}】重连", 2, cameraKey));
+								camera2SDK.SetCameraByKey(_Config.Camera2SN);
+								camera2SDK.Open();
+							}
+							catch { }
+							Thread.Sleep(1000);
 						}
-						catch { }
-						Thread.Sleep(1000);
 					}
+					finally { _cam2Reconnecting = false; }
 				});
 			}
 			else if (camera3SDK != null && camera3SDK.curCameraKey.Equals(cameraKey))
 			{
 				camera3State.State = Sunny.UI.UILightState.Off;
+				if (_cam3Reconnecting) return;
+				_cam3Reconnecting = true;
 				Task.Factory.StartNew(() =>
 				{
-					camera3SDK.Close();
-					while (!camera3SDK.IsOpen() && !_isClosing)
+					try
 					{
-						try
+						camera3SDK.Close();
+						while (!camera3SDK.IsOpen() && !_isClosing)
 						{
-							toolClass.SaveLog(string.Format("相机{0}【{1}】重连", 3, cameraKey));
-							camera3SDK.SetCameraByKey(_Config.Camera3SN);
-							camera3SDK.Open();
+							try
+							{
+								toolClass.SaveLog(string.Format("相机{0}【{1}】重连", 3, cameraKey));
+								camera3SDK.SetCameraByKey(_Config.Camera3SN);
+								camera3SDK.Open();
+							}
+							catch { }
+							Thread.Sleep(1000);
 						}
-						catch { }
-						Thread.Sleep(1000);
 					}
+					finally { _cam3Reconnecting = false; }
 				});
 			}
 			else if (camera4SDK != null && camera4SDK.curCameraKey.Equals(cameraKey))
 			{
 				camera4State.State = Sunny.UI.UILightState.Off;
+				if (_cam4Reconnecting) return;
+				_cam4Reconnecting = true;
 				Task.Factory.StartNew(() =>
 				{
-					camera4SDK.Close();
-					while (!camera4SDK.IsOpen() && !_isClosing)
+					try
 					{
-						try
+						camera4SDK.Close();
+						while (!camera4SDK.IsOpen() && !_isClosing)
 						{
-							toolClass.SaveLog(string.Format("相机{0}【{1}】重连", 4, cameraKey));
-							camera4SDK.SetCameraByKey(_Config.Camera4SN);
-							camera4SDK.Open();
+							try
+							{
+								toolClass.SaveLog(string.Format("相机{0}【{1}】重连", 4, cameraKey));
+								camera4SDK.SetCameraByKey(_Config.Camera4SN);
+								camera4SDK.Open();
+							}
+							catch { }
+							Thread.Sleep(1000);
 						}
-						catch { }
-						Thread.Sleep(1000);
 					}
+					finally { _cam4Reconnecting = false; }
 				});
 			}
 			else if (camera5SDK != null && camera5SDK.curCameraKey.Equals(cameraKey))
 			{
 				camera5State.State = Sunny.UI.UILightState.Off;
+				if (_cam5Reconnecting) return;
+				_cam5Reconnecting = true;
 				Task.Factory.StartNew(() =>
 				{
-					camera5SDK.Close();
-					while (!camera5SDK.IsOpen() && !_isClosing)
+					try
 					{
-						try
+						camera5SDK.Close();
+						while (!camera5SDK.IsOpen() && !_isClosing)
 						{
-							toolClass.SaveLog(string.Format("相机{0}【{1}】重连", 5, cameraKey));
-							camera5SDK.SetCameraByKey(_Config.Camera5SN);
-							camera5SDK.Open();
+							try
+							{
+								toolClass.SaveLog(string.Format("相机{0}【{1}】重连", 5, cameraKey));
+								camera5SDK.SetCameraByKey(_Config.Camera5SN);
+								camera5SDK.Open();
+							}
+							catch { }
+							Thread.Sleep(1000);
 						}
-						catch { }
-						Thread.Sleep(1000);
 					}
+					finally { _cam5Reconnecting = false; }
 				});
 			}
 		}
@@ -3517,6 +3554,10 @@ namespace VisionMeasure
 				{
 					lock (SendResultList)
 					{
+						if (SendResultList.Count >= 200)
+						{
+							try { FastLogger.Instance.Error($"[严重] SendResultList异常:{SendResultList.Count}条 >200, 当前unifiedId={unifiedId}"); } catch {}
+						}
 						SendResultList.Add(new QueueResultItem
 						{
 							SequenceId = unifiedId,
@@ -4341,7 +4382,7 @@ namespace VisionMeasure
 
 				int consecutiveFailures = 0;
 				const int MAX_CONSECUTIVE_FAILURES = 50;
-				int startIndex = 1;
+				int startIndex = -1; // -1=尚未初始化，首次匹配时取列表中实际最小 SequenceId
 				bool result1 = false, result2 = false, result3 = false;
 				int _plcSendCount = 0; // PLC发送计数器
 
@@ -4370,6 +4411,13 @@ namespace VisionMeasure
 						QueueResultItem station1 = null, station2 = null, station3 = null;
 						lock (SendResultList)
 						{
+							// 首次初始化：用列表中实际最小 SequenceId 作为起点（兼容 offset>0 等非 1 起始场景）
+							if (startIndex < 0 && SendResultList.Count > 0)
+							{
+								startIndex = (int)SendResultList.Min(item => item.SequenceId);
+								toolClass.SaveLog($"[PLC] startIndex 初始化为 {startIndex}");
+							}
+
 							if (SendResultList.Count >= 3 + offset_send)
 							{
 								// 【保持原状】维持原有的单向线性检索，确保绝对按照你原本的一致性匹配

@@ -532,7 +532,10 @@ namespace VisionMeasure
 				if (result) try { FastLogger.Instance.Debug("连续爆管: ID=" + sequenceId); } catch {}
 				return result;
 			}
-			catch { return false; }
+			catch (Exception ex) {
+				try { FastLogger.Instance.Warn($"连续爆管检测DB查询异常: ID={sequenceId}, {ex.Message}"); } catch {}
+				return false;
+			}
 		}
 
 	public int GetCurrentConsecutiveBurstCount()

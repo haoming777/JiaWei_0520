@@ -152,8 +152,9 @@ namespace CommonLib
 					{
 						sQLiteDataAdapter.Fill(dataTable);
 					}
-					catch (Exception)
+					catch (Exception ex)
 					{
+						toolClass.SaveLog($"SQL查询异常: {ex.Message}\r\nSQL: {sql}");
 						throw;
 					}
 
