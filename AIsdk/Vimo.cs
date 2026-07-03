@@ -379,6 +379,27 @@ namespace AIsdk
 		}
 
 		/// <summary>
+		/// 释放AI模型资源（GPU显存等），防止程序关闭时资源未释放导致卡死
+		/// </summary>
+		public void Dispose()
+		{
+			try
+			{
+				if (pipelines1 is IDisposable d1) d1.Dispose();
+				if (module is IDisposable d2) d2.Dispose();
+				if (module_segmentation is IDisposable d3) d3.Dispose();
+				if (module_class is IDisposable d4) d4.Dispose();
+				if (solution is IDisposable d5) d5.Dispose();
+				pipelines1 = null;
+				module = null;
+				module_segmentation = null;
+				module_class = null;
+				solution = null;
+			}
+			catch { }
+		}
+
+		/// <summary>
 		/// Mat格式转为Bitmap
 		/// </summary>
 		/// <param name="mat"></param>

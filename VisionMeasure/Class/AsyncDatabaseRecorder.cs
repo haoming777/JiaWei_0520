@@ -175,47 +175,33 @@ namespace VisionMeasure
 		/// <summary>
 		/// 回溯更新前两条记录为连续爆管剔除
 		/// 当发现连续3个爆管时，前两条也需要标记为剔除
-		/// 连续爆管剔除优先级最高，需要清空详细缺陷记录
+		/// 保留原缺陷详情，仅将defect_detail改为"连续爆管剔除(原缺陷)"格式
+		/// 存图仍按实际缺陷类型
 		/// </summary>
 		private void RetroactiveUpdateExcludedRecords(long currentSequenceId, string sku)
 		{
 			try
 			{
-				// 获取当前SKU
-				//string currentSku = GetCurrentSku?.Invoke() ?? "";
-
-				// 直接使用传入的 sku
 				string currentSku = sku;
 
 				// 更新连续爆管组的三条记录（当前记录和前两条）
 				for (int i = 0; i <= 2; i++)
 				{
 					long targetId = currentSequenceId - i;
-					// 标记为剔除，清空详细缺陷记录，只保留"连续爆管剔除"标识
 					// 【防误伤】必须同时满足ng_爆管=1，防止程序重启后ID复用误伤OK品
+					// 仅标记剔除并修改defect_detail格式，保留defect_count和ng_*字段不变
 					string updateSql = @"
-						UPDATE production_records_detail 
-						SET is_excluded = 1, 
+						UPDATE production_records_detail
+						SET is_excluded = 1,
 							excluded_reason = '连续爆管剔除',
-							defect_detail = '连续爆管剔除',
-							defect_count = 0,
-							ng_异物 = 0,
-							ng_管盖有无 = 0,
-							ng_管口圆度 = 0,
-							ng_正面工号缺失 = 0,
-							ng_背面工号缺失 = 0,
-							ng_PCode = 0,
-							ng_色标对中 = 0,
-							ng_爆管 = 0,
-							ng_斜口 = 0,
-							ng_未剪断 = 0
-						WHERE sequence_id = @sequence_id AND sku = @sku AND ng_爆管 = 1";
-					
+							defect_detail = '连续爆管剔除(' || defect_detail || ')'
+						WHERE sequence_id = @sequence_id AND sku = @sku AND ng_爆管 = 1 AND is_excluded = 0";
+
 					_dbHelper.ExecuteNonQuery(updateSql,
 						new SQLiteParameter("@sequence_id", targetId),
 						new SQLiteParameter("@sku", currentSku));
 				}
-				
+
 				_toolClass.SaveLog($"回溯更新连续爆管剔除记录: {currentSequenceId-2}, {currentSequenceId-1}, {currentSequenceId}");
 			}
 			catch (Exception ex)
@@ -228,33 +214,21 @@ namespace VisionMeasure
 		/// 检查连续爆管剔除逻辑
 		/// 连续爆管剔除优先级最高：
 		/// - 连续三支爆管（不管是单独爆管还是混合缺陷包含爆管）标记为剔除
-		/// - 被剔除的记录清空详细缺陷，只保留"连续爆管剔除"标识
+		/// - defect_detail由SaveRecordToDatabase/RestroactiveUpdate统一拼接为"连续爆管剔除(原缺陷)"
+		/// - 存图仍按实际缺陷类型存（混合缺陷/爆管等）
 		/// </summary>
 		private void CheckConsecutiveBurstExclusion(ProductionRecord record)
 		{
-			// 只要有爆管NG（不管是否有其他缺陷，不管是否归为混合缺陷），且是连续爆管，则标记为剔除
-			// 直接检查原始的Cam5_BaoguanResult而不是Ng_爆管字段
+			// 只要有爆管（不管是否有其他缺陷），且是连续爆管，则标记为剔除
 			if (record.Cam5_BaoguanResult == 0)
 			{
 				if (IsConsecutiveBurstExcluded(record.SequenceId))
 				{
 					record.IsExcluded = true;
 					record.ExcludedReason = "连续爆管剔除";
-					
-					// 连续爆管剔除优先级最高，清空详细缺陷记录
-					record.DefectDetail = "连续爆管剔除";
-					record.DefectCount = 0;
-					record.Ng_异物 = 0;
-					record.Ng_管盖有无 = 0;
-					record.Ng_管口圆度 = 0;
-					record.Ng_正面工号缺失 = 0;
-					record.Ng_背面工号缺失 = 0;
-					record.Ng_PCode = 0;
-					record.Ng_色标对中 = 0;
-					record.Ng_爆管 = 0;
-					record.Ng_斜口 = 0;
-					record.Ng_未剪断 = 0;
-					
+					// defect_detail由UPDATE SQL统一拼接，不在此处修改
+					// defect_count 和 ng_* 字段保持不变，存图和统计均不受影响
+
 					// 移除已被标记为剔除的3个连续爆管记录，避免第四个爆管误判
 					RemoveExcludedBurstRecords(record.SequenceId);
 				}
@@ -347,44 +321,44 @@ namespace VisionMeasure
 
 			var defects = new List<string>();
 
-			// 相机1 - 管内异物NG
+			// 相机1 - 管内异物
 			if (record.Cam1Result == 0)
 			{
 				record.Ng_异物 = 1;
-				defects.Add("管内异物NG");
+				defects.Add("管内异物");
 			}
 			else
 			{
 				record.Ng_异物 = 0;
 			}
 
-			// 相机2 - 管盖有无NG
+			// 相机2 - 管盖有无
 			if (record.Cam2Result == 0)
 			{
 				record.Ng_管盖有无 = 1;
-				defects.Add("管盖有无NG");
+				defects.Add("管盖有无");
 			}
 			else
 			{
 				record.Ng_管盖有无 = 0;
 			}
 
-			// 相机3 - 管口圆度NG
+			// 相机3 - 管口圆度
 			if (record.Cam3Result == 0)
 			{
 				record.Ng_管口圆度 = 1;
-				defects.Add("管口圆度NG");
+				defects.Add("管口圆度");
 			}
 			else
 			{
 				record.Ng_管口圆度 = 0;
 			}
 
-			// 相机4 - 正面工号缺失NG
+			// 相机4 - 正面工号缺失
 			if (record.Cam4Result == 0)
 			{
 				record.Ng_正面工号缺失 = 1;
-				defects.Add("正面工号缺失NG");
+				defects.Add("正面工号缺失");
 			}
 			else
 			{
@@ -396,62 +370,62 @@ namespace VisionMeasure
 			if (record.Cam5_CharResult == 0)
 			{
 				record.Ng_背面工号缺失 = 1;
-				defects.Add("背面工号缺失NG");
+				defects.Add("背面工号缺失");
 			}
 			else
 			{
 				record.Ng_背面工号缺失 = 0;
 			}
 
-			// P-Code NG
+			// P-Code
 			if (record.Cam5_PCodeResult == 0)
 			{
 				record.Ng_PCode = 1;
-				defects.Add("P-CodeNG");
+				defects.Add("P-Code");
 			}
 			else
 			{
 				record.Ng_PCode = 0;
 			}
 
-			// 色标对中NG
+			// 色标对中
 			if (record.Cam5_SebiaoResult == 0)
 			{
 				record.Ng_色标对中 = 1;
-				defects.Add("色标对中NG");
+				defects.Add("色标对中");
 			}
 			else
 			{
 				record.Ng_色标对中 = 0;
 			}
 
-			// 爆管NG
+			// 爆管
 			if (record.Cam5_BaoguanResult == 0)
 			{
 				record.Ng_爆管 = 1;
-				defects.Add("爆管NG");
+				defects.Add("爆管");
 			}
 			else
 			{
 				record.Ng_爆管 = 0;
 			}
 
-			// 斜口NG
+			// 斜口
 			if (record.Cam5_XiekouResult == 0)
 			{
 				record.Ng_斜口 = 1;
-				defects.Add("斜口NG");
+				defects.Add("斜口");
 			}
 			else
 			{
 				record.Ng_斜口 = 0;
 			}
 
-			// 未剪断NG
+			// 未剪断
 			if (record.Cam5_WeijianduanResult == 0)
 			{
 				record.Ng_未剪断 = 1;
-				defects.Add("未剪断NG");
+				defects.Add("未剪断");
 			}
 			else
 			{
@@ -464,7 +438,7 @@ namespace VisionMeasure
 			if (defects.Count >= 2)
 			{
 				// 2种或以上缺陷：归为"混合缺陷"，同时记录所有缺陷详情
-				record.DefectDetail = "混合缺陷[" + string.Join(",", defects) + "]";
+				record.DefectDetail = "混合缺陷(" + string.Join(", ", defects) + ")";
 			}
 			else if (defects.Count == 1)
 			{
@@ -653,9 +627,11 @@ namespace VisionMeasure
 						try { FastLogger.Instance.Debug($"连续爆管检查: ID={record.SequenceId} Cam5Burst={record.Cam5_BaoguanResult} 结果={burstExcluded}"); } catch {}
 						if (burstExcluded)
 						{
-							// 更新当前记录
-							string updateSql = "UPDATE production_records_detail SET is_excluded=1, excluded_reason='连续爆管剔除', defect_detail='连续爆管剔除', defect_count=0, ng_爆管=0, ng_斜口=0, ng_未剪断=0, ng_异物=0, ng_管盖有无=0, ng_管口圆度=0, ng_正面工号缺失=0, ng_背面工号缺失=0, ng_PCode=0, ng_色标对中=0 WHERE sequence_id=@id AND sku=@sku";
-							_dbHelper.ExecuteNonQuery(updateSql, new SQLiteParameter("@id", record.SequenceId), new SQLiteParameter("@sku", record.Sku));
+							// 更新当前记录：标记剔除，defect_detail拼接为"连续爆管剔除(原缺陷)"格式，保留ng_*字段不变
+							string updateSql = "UPDATE production_records_detail SET is_excluded=1, excluded_reason='连续爆管剔除', defect_detail='连续爆管剔除(' || defect_detail || ')' WHERE sequence_id=@id AND sku=@sku";
+							_dbHelper.ExecuteNonQuery(updateSql,
+								new SQLiteParameter("@id", record.SequenceId),
+								new SQLiteParameter("@sku", record.Sku));
 							// 回溯前 2 条
 							RetroactiveUpdateExcludedRecords(record.SequenceId, record.Sku);
 							// 通知主界面更新计数
@@ -960,17 +936,17 @@ private void GenerateShiftSummaryInternal(string date, string shift)
                          AND d2.excluded_reason = '连续爆管剔除'
                                         ) as exclude_count,
                     
-                    -- 单一缺陷统计（仅统计未被剔除且缺陷数=1的记录）
-                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_异物 = 1 THEN 1 ELSE 0 END) as ng_异物,
-                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_管盖有无 = 1 THEN 1 ELSE 0 END) as ng_管盖有无,
-                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_管口圆度 = 1 THEN 1 ELSE 0 END) as ng_管口圆度,
-                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_正面工号缺失 = 1 THEN 1 ELSE 0 END) as ng_正面工号缺失,
-                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_背面工号缺失 = 1 THEN 1 ELSE 0 END) as ng_背面工号缺失,
-                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_爆管 = 1 THEN 1 ELSE 0 END) as ng_爆管,
-                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_斜口 = 1 THEN 1 ELSE 0 END) as ng_斜口,
-                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_未剪断 = 1 THEN 1 ELSE 0 END) as ng_未剪断,
-                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_PCode = 1 THEN 1 ELSE 0 END) as ng_PCode,
-                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_色标对中 = 1 THEN 1 ELSE 0 END) as ng_色标对中,
+                    -- 各缺陷类型独立统计（不限制defect_count，确保混合缺陷中的各子缺陷也被记录）
+                    SUM(CASE WHEN is_excluded = 0 AND ng_异物 = 1 THEN 1 ELSE 0 END) as ng_异物,
+                    SUM(CASE WHEN is_excluded = 0 AND ng_管盖有无 = 1 THEN 1 ELSE 0 END) as ng_管盖有无,
+                    SUM(CASE WHEN is_excluded = 0 AND ng_管口圆度 = 1 THEN 1 ELSE 0 END) as ng_管口圆度,
+                    SUM(CASE WHEN is_excluded = 0 AND ng_正面工号缺失 = 1 THEN 1 ELSE 0 END) as ng_正面工号缺失,
+                    SUM(CASE WHEN is_excluded = 0 AND ng_背面工号缺失 = 1 THEN 1 ELSE 0 END) as ng_背面工号缺失,
+                    SUM(CASE WHEN is_excluded = 0 AND ng_爆管 = 1 THEN 1 ELSE 0 END) as ng_爆管,
+                    SUM(CASE WHEN is_excluded = 0 AND ng_斜口 = 1 THEN 1 ELSE 0 END) as ng_斜口,
+                    SUM(CASE WHEN is_excluded = 0 AND ng_未剪断 = 1 THEN 1 ELSE 0 END) as ng_未剪断,
+                    SUM(CASE WHEN is_excluded = 0 AND ng_PCode = 1 THEN 1 ELSE 0 END) as ng_PCode,
+                    SUM(CASE WHEN is_excluded = 0 AND ng_色标对中 = 1 THEN 1 ELSE 0 END) as ng_色标对中,
                     
                     -- 混合多种缺陷：缺陷数>=2的NG记录，但被连续爆管剔除的不计入
                     SUM(CASE WHEN defect_count >= 2 AND final_result = 'NG' AND is_excluded = 0 THEN 1 ELSE 0 END) as ng_混合多种缺陷

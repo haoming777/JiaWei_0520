@@ -15,7 +15,7 @@ using HslCommunication.Profinet.Siemens.S7PlusHelper;
 
 namespace PLC调试.Class
 {
-	public class S7_1200Class
+	public class S7_1200Class : IDisposable
 	{
 		Thread doKeepAlive;        // 心跳
 
@@ -25,6 +25,8 @@ namespace PLC调试.Class
 
 		Stopwatch timeOut;
 		Stopwatch triggerWatch = new Stopwatch();   // 触发间隔统计
+
+		private volatile bool _disposed = false;
 
 		public S7_1200Class()
 		{
@@ -52,6 +54,32 @@ namespace PLC调试.Class
 			toolClass.SaveLog("PLC初始化完成");
 
 			_plcSendStatistics.Start();
+		}
+
+		/// <summary>
+		/// 释放资源，安全停止所有后台线程，防止程序关闭时卡死
+		/// </summary>
+		public void Dispose()
+		{
+			if (_disposed) return;
+			_disposed = true;
+
+			// 先断开PLC连接，让所有while循环的plcState检查失效
+			try { plc.ConnectClose(); } catch { }
+			plcState = false;
+
+			// 等待所有线程退出（最多等3秒）
+			var threads = new Thread[] { doReadT1, doKeepAlive, doState, doReadCount };
+			foreach (var t in threads)
+			{
+				if (t != null && t.IsAlive)
+				{
+					try { t.Join(3000); } catch { }
+				}
+			}
+
+			_plcSendStatistics.Stop();
+			toolClass.SaveLog("PLC资源已释放");
 		}
 
 		public delegate void DelegateConnectState(bool state, string error);
@@ -122,17 +150,7 @@ namespace PLC调试.Class
 
 		public void CloseModbus()
 		{
-			try
-			{
-				_plcSendStatistics.Stop();
-				plc.ConnectClose();
-				plcState = false;
-				toolClass.SaveLog($"关闭PLC连接...");
-			}
-			catch (Exception ex)
-			{
-				toolClass.SaveLog($"关闭PLC时错误...\r\n {ex.Message} \r\n {ex.StackTrace}");
-			}
+			Dispose();
 		}
 
 		private void ReadGetTrigger()
@@ -144,7 +162,7 @@ namespace PLC调试.Class
 				short val = 0;
 				//string path = _Config.gt_DataValid.ToString();
 				//toolClass.SaveLog($"触发地址：{path}");
-				while (true)
+				while (!_disposed)
 				{
 
 					Thread.Sleep(50);
@@ -176,7 +194,7 @@ namespace PLC调试.Class
 			try
 			{
 				short val = 1;
-				while (true)
+				while (!_disposed)
 				{
 					Thread.Sleep(500);
 
@@ -200,7 +218,7 @@ namespace PLC调试.Class
 			short oldVal = 0;
 			try
 			{
-				while (true)
+				while (!_disposed)
 				{
 					Thread.Sleep(50);
 					if (plcState)
@@ -315,7 +333,7 @@ namespace PLC调试.Class
 				uint count1 = 0, count2 = 0, count3 = 0, count4 = 0, count5 = 0;
 				toolClass.SaveLog("读PLC计数开始");
 
-				while (true)
+				while (!_disposed)
 				{
 					Thread.Sleep(10);
 					if (plcState)
@@ -352,7 +370,7 @@ namespace PLC调试.Class
 			Task.Run(() =>
 			{
 				bRunning = true;
-				while (!plcState)
+				while (!plcState && !_disposed)
 				{
 					ReconnectCount++;
 					toolClass.SaveLog($"正在尝试第 {ReconnectCount} 次重连");
