@@ -66,11 +66,9 @@ namespace PLC调试.Class
 		//OperateResult connectState;
 		public bool modbusState = false;
 
-		public delegate void DelegateConnectState(bool state, string error);
-		public event DelegateConnectState EventConnectState;
+		public event PlcConnectStateHandler EventConnectState;
 
-		public delegate void DelegateCount(uint count1, uint count2, uint count3, uint count4, uint count5);
-		public event DelegateCount EventCount;
+		public event PlcCountHandler EventCount;
 
 		/// <summary>
 		/// 相机一触发信号

@@ -1810,6 +1810,19 @@ namespace CommonLib
 			}
 		}
 
+		/// <summary>PLC通讯类型: S7-1200(默认) / HCModbus</summary>
+		public string PlcType
+		{
+			get
+			{
+				return GetCachedValue("plc", "type", "S7-1200");
+			}
+			set
+			{
+				SetCachedValue("plc", "type", value?.ToString() ?? "S7-1200");
+			}
+		}
+
 		/// <summary>
 		/// 心跳地址
 		/// </summary>

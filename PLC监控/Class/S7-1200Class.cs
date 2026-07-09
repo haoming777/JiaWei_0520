@@ -15,7 +15,7 @@ using HslCommunication.Profinet.Siemens.S7PlusHelper;
 
 namespace PLC调试.Class
 {
-	public class S7_1200Class : IDisposable
+	public class S7_1200Class : IPlcCommunication
 	{
 		Thread doKeepAlive;        // 心跳
 
@@ -82,14 +82,12 @@ namespace PLC调试.Class
 			toolClass.SaveLog("PLC资源已释放");
 		}
 
-		public delegate void DelegateConnectState(bool state, string error);
-		public event DelegateConnectState EventConnectState;
+		public event PlcConnectStateHandler EventConnectState;
 
 		public delegate void DelegateTriggerGet();
 		public event DelegateTriggerGet EventTriggerGet;
 
-		public delegate void DelegateCount(uint count1, uint count2, uint count3, uint count4, uint count5);
-		public event DelegateCount EventCount;
+		public event PlcCountHandler EventCount;
 
 		SiemensS7Net plc = new SiemensS7Net(SiemensPLCS.S1200);
 

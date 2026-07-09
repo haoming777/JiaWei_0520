@@ -39,6 +39,27 @@ namespace SetCamera
 			_modbusS7 = s7Class;
 			_modbusType = 2;
 		}
+		/// <summary>统一接口构造函数（兼容 IPlcCommunication）</summary>
+		public MainFrm(IntPtr handle, IPlcCommunication plc)
+		{
+			InitializeComponent();
+			g_handle = handle;
+			if (plc is S7_1200Class s7)
+			{
+				_modbusS7 = s7;
+				_modbusType = 2;
+			}
+			else if (plc is HCModbusAdapter adapter)
+			{
+				_modbusHc = adapter.Inner;
+				_modbusType = 1;
+			}
+			else
+			{
+				// 兜底：默认 HCModbus
+				_modbusType = 1;
+			}
+		}
 		static IntPtr g_handle;
 		takephotoVm myZmcaux = new takephotoVm();
 		private int axis = 0;           // 轴号

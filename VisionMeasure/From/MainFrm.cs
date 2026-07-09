@@ -65,7 +65,7 @@ namespace VisionMeasure
 		private bool[] _cameraEnabled; // [0]=Cam1, [1]=Cam2, ...
 
 		public Vision vision = new Vision();
-		public S7_1200Class modbusClass = new S7_1200Class();
+		public IPlcCommunication modbusClass; // 运行时根据配置选择 S7-1200 或 HCModbus
 		XLToolClass toolClass = new XLToolClass();
 		XLUsbDogClass UsbDogClass = new XLUsbDogClass();
 
@@ -273,6 +273,11 @@ namespace VisionMeasure
 		long _cam4CallbackCount = 0, _cam5CallbackCount = 0;
 		int _consecutiveC5NG = 0; // 同步爆管计数器
 	int _localTotal = 0; // 本地计数器
+
+	// 调试日志周期计数器（避免热路径每帧写日志）
+	private long _debugMatchCount = 0;     // 结果匹配周期计数
+	private long _debugPlcSendCount = 0;   // PLC发送周期计数
+	private const int DEBUG_LOG_INTERVAL = 100; // 每N次输出一次调试日志
 
 		#region 构造函数和初始化
 		public MainFrm()
@@ -860,6 +865,36 @@ namespace VisionMeasure
 				LoadConfiguration();
 				InitData();
 				InitializeAIModels();
+
+				// 【PLC类型选择】根据配置或默认选择通讯协议（防呆：初始化失败回退 S7-1200）
+				try
+				{
+					string plcTypeCfg = (_Config.PlcType ?? "").Trim().ToUpperInvariant();
+					if (plcTypeCfg == "HCMODBUS" || plcTypeCfg == "HC")
+					{
+						modbusClass = new HCModbusAdapter();
+						toolClass.SaveLog("[PLC] 使用 HCModbus 通讯协议");
+						try { FastLogger.Instance.Info("PLC类型: HCModbus"); } catch { }
+					}
+					else
+					{
+						modbusClass = new S7_1200Class();
+						toolClass.SaveLog("[PLC] 使用 S7-1200 通讯协议（配置值:" + (string.IsNullOrEmpty(plcTypeCfg) ? "默认" : plcTypeCfg) + "）");
+						try { FastLogger.Instance.Info("PLC类型: S7-1200"); } catch { }
+					}
+				}
+				catch (Exception plcInitEx)
+				{
+					// 兜底：任何异常都回退 S7-1200
+					modbusClass = new S7_1200Class();
+					toolClass.SaveLog($"[PLC] 类型选择异常，回退S7-1200: {plcInitEx.Message}");
+				}
+
+				if (modbusClass == null)
+				{
+					modbusClass = new S7_1200Class();
+					toolClass.SaveLog("[PLC] modbusClass为null，强制使用S7-1200");
+				}
 
 				modbusClass.EventConnectState += ModbusConnectState;
 				modbusClass.EventCount += PLCCountMethod;
@@ -1816,6 +1851,13 @@ namespace VisionMeasure
 				#endregion
 
 				result = result_Segmentation;
+				context.Result = new QueueResultItem
+				{
+					SequenceId = context.SequenceId,
+					Offset = context.Offset,
+					Result = result,
+					Timestamp = DateTime.Now
+				};
 
 				if (!_isClosing)
 				{
@@ -1841,7 +1883,7 @@ namespace VisionMeasure
 			catch (Exception ex)
 			{
 				toolClass.SaveLog($"[Camera1] ID:{id} 处理异常: {ex.Message}\n{ex.StackTrace}");
-				// ProcessResult已在上方设置，异常时保留原值
+				// context.Result 已在上方赋值，异常时保留该结果
 				_resultMatcher?.SignalNewResult();
 			}
 			finally
@@ -1973,6 +2015,13 @@ namespace VisionMeasure
 				#endregion
 
 				result = result_flaw;
+				context.Result = new QueueResultItem
+				{
+					SequenceId = context.SequenceId,
+					Offset = context.Offset,
+					Result = result,
+					Timestamp = DateTime.Now
+				};
 
 				if (!_isClosing)
 				{
@@ -2343,6 +2392,13 @@ namespace VisionMeasure
 					result_char = true;
 				}
 				result = result_char;
+				context.Result = new QueueResultItem
+				{
+					SequenceId = context.SequenceId,
+					Offset = context.Offset,
+					Result = result,
+					Timestamp = DateTime.Now
+				};
 				#endregion
 
 				stageTimer.Stop();
@@ -2383,7 +2439,7 @@ namespace VisionMeasure
 			catch (Exception ex)
 			{
 				toolClass.SaveLog($"[Camera4] ID:{id} 处理异常: {ex.Message}\n{ex.StackTrace}");
-				// ProcessResult已在上方设置，异常时保留原值
+				// context.Result 已在上方赋值，异常时保留该结果
 				_resultMatcher?.SignalNewResult();
 			}
 			finally
@@ -2769,7 +2825,7 @@ namespace VisionMeasure
 			catch (Exception ex)
 			{
 				toolClass.SaveLog($"[Camera5] ID:{context.SequenceId} 处理异常: {ex.Message}\n{ex.StackTrace}");
-				// ProcessResult已在上方设置，异常时保留原值
+				// context.Result / context.ProcessResult 已在上方赋值，异常时保留原值
 				_resultMatcher?.SignalNewResult();
 			}
 			finally
@@ -3049,6 +3105,16 @@ namespace VisionMeasure
 					catch (Exception ex)
 					{
 						toolClass.SaveLog($"[存图] UnifiedId:{captureId} 存图异常: {ex.Message}");
+					}
+					finally
+					{
+						if (captureResults != null)
+						{
+							foreach (var item in captureResults)
+							{
+								try { QueueResultItem.Return(item); } catch { }
+							}
+						}
 					}
 				});
 			}
@@ -3572,7 +3638,15 @@ namespace VisionMeasure
 					}
 				}
 
-				if (RunLogEnabled) toolClass.SaveLog($"[ResultMatch] ID:{unifiedId} 汇总 - Cam1:{results[0].Result}, Cam2:{results[1].Result}, Cam3:{results[2].Result}, Cam4:{results[3].Result}, Cam5:{results[4].Result}, FinalResult:{finalResult}");
+				// 调试日志：周期输出结果匹配汇总（每N帧一次，避免热路径IO）
+				if (RunLogEnabled)
+				{
+					long debugCount = Interlocked.Increment(ref _debugMatchCount);
+					if (debugCount <= 1 || debugCount % DEBUG_LOG_INTERVAL == 0)
+					{
+						toolClass.SaveLog($"[ResultMatch-Debug] 匹配#{debugCount} ID:{unifiedId} Cam1:{results[0].Result} Cam2:{results[1].Result} Cam3:{results[2].Result} Cam4:{results[3].Result} Cam5:{results[4].Result} Final:{finalResult} Total:{_Config.total} OK:{_Config.ok} SendQueue:{SendResultList.Count}");
+					}
+				}
 			if (unifiedId % 100 == 0) { try { if (FastLogger.IsInitialized) FastLogger.Instance.Debug("里程碑: ID=" + unifiedId + " FinalResult=" + (finalResult?"OK":"NG") + " Total=" + _Config.total + " OK=" + _Config.ok); } catch { } }
 
 				// 空杯产品：不计入数据库记录，不保存图像
@@ -4544,6 +4618,13 @@ namespace VisionMeasure
 								{
 									writeSuccess = modbusClass.WriteResult(result1, result2, result3);
 								_plcSendCount++;	if (_plcSendCount <= 1 || _plcSendCount % 50 == 0) try { FastLogger.Instance.Info("PLC发送[" + _plcSendCount + "]: ID=" + startIndex + "-" + (startIndex+2) + " R1=" + result1 + " R2=" + result2 + " R3=" + result3 + " 成功=" + writeSuccess); } catch {}
+								// 调试日志：周期输出PLC发送统计
+								if (RunLogEnabled)
+								{
+									long debugCount = Interlocked.Increment(ref _debugPlcSendCount);
+									if (debugCount <= 1 || debugCount % DEBUG_LOG_INTERVAL == 0)
+										toolClass.SaveLog($"[PLC-Debug] 发送#{debugCount} ID:{startIndex}-{startIndex+2} R1:{result1} R2:{result2} R3:{result3} 成功:{writeSuccess} 队列:{SendResultList.Count}");
+								}
 									if (writeSuccess)
 									{
 										long interval = _sendIntervalTimer.ElapsedMilliseconds;
@@ -4951,6 +5032,47 @@ namespace VisionMeasure
 	#region 原有辅助类（保持兼容）
 	public class QueueResultItem : IDisposable
 	{
+		// 对象池（避免热路径每帧 new，减少 GC 压力），上限 300 个
+		private static readonly ConcurrentBag<QueueResultItem> _pool = new ConcurrentBag<QueueResultItem>();
+		private const int MAX_POOL_SIZE = 300;
+
+		/// <summary>从对象池租用一个已重置的实例（池空时 new 兜底）</summary>
+		public static QueueResultItem Rent()
+		{
+			if (_pool.TryTake(out var item)) { item.Reset(); return item; }
+			return new QueueResultItem();
+		}
+
+		/// <summary>归还实例到对象池（自动重置所有字段）</summary>
+		public static void Return(QueueResultItem item)
+		{
+			if (item == null) return;
+			item.Reset();
+			if (_pool.Count < MAX_POOL_SIZE) _pool.Add(item);
+		}
+
+		/// <summary>重置所有字段为默认值</summary>
+		public void Reset()
+		{
+			SequenceId = 0;
+			Offset = 0;
+			ImageData_Y = null;
+			ImageData_R = null;
+			Result = false;
+			Timestamp = DateTime.Now;
+			ProcessStartTime = default;
+			ProcessEndTime = default;
+			Cam5_CharResult = 1;
+			Cam5_PCodeResult = 1;
+			Cam5_SebiaoResult = 1;
+			Cam5_BaoguanResult = 1;
+			Cam5_XiekouResult = 1;
+			Cam5_WeijianduanResult = 1;
+			IsEmptyCup = false;
+			IsPureBurst = false;
+			StageTimes?.Clear();
+		}
+
 		public long SequenceId { get; set; }
 		public int Offset { get; set; }
 		public byte[] ImageData_Y { get; set; }
@@ -4976,9 +5098,8 @@ namespace VisionMeasure
 
 		public void Dispose()
 		{
-			ImageData_Y = null;
-			ImageData_R = null;
-			StageTimes?.Clear();
+			// 归还到对象池（Reset 由 Return 内部调用）
+			Return(this);
 		}
 	}
 
@@ -5238,26 +5359,22 @@ namespace VisionMeasure
 						_resultQueue.Enqueue(context.SequenceId, context.Result);
 					else
 					{
-						var queueResult = new QueueResultItem
-						{
-							SequenceId = context.SequenceId,
-							Offset = context.Offset,
-							Result = context.ProcessResult,
-							Timestamp = DateTime.Now
-						};
+						var queueResult = QueueResultItem.Rent();
+						queueResult.SequenceId = context.SequenceId;
+						queueResult.Offset = context.Offset;
+						queueResult.Result = context.ProcessResult;
+						queueResult.Timestamp = DateTime.Now;
 						_resultQueue.Enqueue(context.SequenceId, queueResult);
 					}
 				}
 				catch (Exception ex)
 				{
 					toolClass.SaveLog($"{_cameraName} 处理异常: {ex.Message}");
-					var errorResult = new QueueResultItem
-					{
-						SequenceId = context.SequenceId,
-						Offset = context.Offset,
-						Result = context.ProcessResult,
-						Timestamp = DateTime.Now
-					};
+					var errorResult = QueueResultItem.Rent();
+					errorResult.SequenceId = context.SequenceId;
+					errorResult.Offset = context.Offset;
+					errorResult.Result = context.ProcessResult;
+					errorResult.Timestamp = DateTime.Now;
 					_resultQueue.Enqueue(context.SequenceId, errorResult);
 				}
 				finally
@@ -5411,19 +5528,13 @@ namespace VisionMeasure
 		/// <summary>给禁用槽位填虚拟 OK 结果（防呆：下游按全 5 元素数组访问）</summary>
 		private static QueueResultItem CreateVirtualOkResult(long sequenceId)
 		{
-			return new QueueResultItem
-			{
-				SequenceId = sequenceId,
-				Offset = 0,
-				Result = true,
-				Timestamp = DateTime.Now,
-				Cam5_BaoguanResult = 1,
-				Cam5_XiekouResult = 1,
-				Cam5_WeijianduanResult = 1,
-				Cam5_CharResult = 1,
-				Cam5_PCodeResult = 1,
-				Cam5_SebiaoResult = 1
-			};
+			var item = QueueResultItem.Rent();
+			item.SequenceId = sequenceId;
+			item.Offset = 0;
+			item.Result = true;
+			item.Timestamp = DateTime.Now;
+			// Cam5_* 字段 Rent() 已重置为 1，无需重复赋值
+			return item;
 		}
 
 		private void MatchingWorker()

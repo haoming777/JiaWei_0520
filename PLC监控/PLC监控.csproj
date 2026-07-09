@@ -69,6 +69,8 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Class\HCModbusClass.cs" />
+    <Compile Include="Class\HCModbusAdapter.cs" />
+    <Compile Include="Class\IPlcCommunication.cs" />
     <Compile Include="Class\S7-1200Class.cs" />
     <Compile Include="Class\S7-1500Class.cs" />
     <Compile Include="ControlFrm.cs">

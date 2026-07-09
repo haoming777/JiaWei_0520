@@ -58,6 +58,13 @@ namespace CommonLib
         private volatile bool _disposed;
         private int _droppedCount;
 
+        // 【性能优化】持久 StreamWriter，避免每次 File.AppendAllText 的开销（打开/关闭文件）
+        private StreamWriter _writer;
+        private string _currentLogDate;
+        private readonly object _writeLock = new object();
+        private int _entriesSinceFlush;
+        private const int FLUSH_INTERVAL = 50; // 每50条 flush 一次
+
         private FastLogger(string logDir)
         {
             _logDir = logDir ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Logs");
@@ -198,10 +205,36 @@ namespace CommonLib
 
         private void WriteEntry(LogEntry entry)
         {
-            string fileName = "app_" + entry.Timestamp.ToString("yyyyMMdd") + ".log";
-            string filePath = Path.Combine(_logDir, fileName);
-            string line = "[" + entry.Timestamp.ToString("yyyy-MM-dd HH:mm:ss.fff") + "] [" + entry.Level + "] [T" + entry.ThreadId.ToString("D2") + "] " + entry.Message;
-            File.AppendAllText(filePath, line + Environment.NewLine);
+            try
+            {
+                string date = entry.Timestamp.ToString("yyyyMMdd");
+                string line = "[" + entry.Timestamp.ToString("yyyy-MM-dd HH:mm:ss.fff") + "] [" + entry.Level + "] [T" + entry.ThreadId.ToString("D2") + "] " + entry.Message;
+
+                lock (_writeLock)
+                {
+                    // 日期变更 → 关闭旧 writer，开新文件
+                    if (_writer == null || _currentLogDate != date)
+                    {
+                        try { _writer?.Flush(); } catch { }
+                        try { _writer?.Dispose(); } catch { }
+                        string filePath = Path.Combine(_logDir, "app_" + date + ".log");
+                        _writer = new StreamWriter(filePath, true, System.Text.Encoding.UTF8, 4096);
+                        _currentLogDate = date;
+                        _entriesSinceFlush = 0;
+                    }
+
+                    _writer.WriteLine(line);
+                    _entriesSinceFlush++;
+
+                    // 定期 flush，平衡性能与数据安全
+                    if (_entriesSinceFlush >= FLUSH_INTERVAL)
+                    {
+                        try { _writer.Flush(); } catch { }
+                        _entriesSinceFlush = 0;
+                    }
+                }
+            }
+            catch { }
         }
 
         public void Dispose()
@@ -217,6 +250,16 @@ namespace CommonLib
                 _queue.Dispose();
             }
             catch { }
+            finally
+            {
+                // 关闭 StreamWriter
+                lock (_writeLock)
+                {
+                    try { _writer?.Flush(); } catch { }
+                    try { _writer?.Dispose(); } catch { }
+                    _writer = null;
+                }
+            }
         }
 
         private enum LogLevel { INFO, WARN, ERROR }

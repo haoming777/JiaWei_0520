@@ -13,6 +13,7 @@ using static CommonLib.Class_Config;
 using VisionMeasure;
 using CommonLib;
 using PLC监控;
+using PLC调试.Class;
 using XL.Tool;
 using SetProduct;
 namespace VisionMeasure.From
