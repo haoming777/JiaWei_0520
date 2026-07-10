@@ -63,6 +63,7 @@ namespace SetCamera
 		static IntPtr g_handle;
 		takephotoVm myZmcaux = new takephotoVm();
 		private int axis = 0;           // 轴号
+	private int _axisDir = 1;      // 轴方向：1=正向, -1=反向（从INI读取）
 
 		public DaHuaSDK cam1, cam2, cam3, cam4, cam5;
 		Bitmap bitmap = null;
@@ -326,7 +327,6 @@ namespace SetCamera
 				{
 					case 1:
 						axis = 1;
-
 						uiComboBox_cam.SelectedIndex = 3;
 						break;
 					case 2:
@@ -336,12 +336,32 @@ namespace SetCamera
 					case 3:
 						axis = 2;
 						uiComboBox_cam.SelectedIndex = 2;
-
 						break;
 					default:
 						break;
-
 				}
+				// 读取轴方向配置 [motion] axis{N}_dir, 1=正向 -1=反向
+				try
+				{
+					string iniPath = System.IO.Path.Combine(System.Windows.Forms.Application.StartupPath, "setup.ini");
+					if (System.IO.File.Exists(iniPath))
+					{
+						string key = "axis" + axis + "_dir";
+						foreach (var line in System.IO.File.ReadAllLines(iniPath))
+						{
+							string t = line.Trim();
+							if (t.StartsWith("[") || !t.Contains("=")) continue;
+							int eq = t.IndexOf('=');
+							if (t.Substring(0, eq).Trim() == key)
+							{
+								int.TryParse(t.Substring(eq + 1).Trim(), out _axisDir);
+								break;
+							}
+						}
+					}
+				}
+				catch { _axisDir = 1; }
+				if (_axisDir != 1 && _axisDir != -1) _axisDir = 1;
 			}
 			catch (Exception ex)
 			{
@@ -492,7 +512,7 @@ namespace SetCamera
 		{
 			try
 			{
-				myZmcaux.Vmove(g_handle, axis, -1);
+				myZmcaux.Vmove(g_handle, axis, -1 * _axisDir);
 				//toolClass.SaveLog($"Vmove -1 axis：{axis}");
 			}
 			catch (Exception ex)
@@ -507,7 +527,7 @@ namespace SetCamera
 		{
 			try
 			{
-				myZmcaux.Vmove(g_handle, axis, 1);
+				myZmcaux.Vmove(g_handle, axis, 1 * _axisDir);
 				//toolClass.SaveLog($"Vmove 1 axis：{axis}");
 			}
 			catch (Exception ex)

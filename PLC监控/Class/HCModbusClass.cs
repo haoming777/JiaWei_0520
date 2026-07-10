@@ -219,15 +219,39 @@ namespace PLC调试.Class
 		{
 			try
 			{
-				if (modbusState)
+				try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Info("RuningMethod 开始发送运行信号..."); } catch { }
+				// 等待 Modbus 连接就绪（最多重试 5 次，每次等 1 秒）
+				const int MAX_RETRY = 5;
+				for (int retry = 0; retry < MAX_RETRY; retry++)
 				{
-					modbusTcp.Write("MX7080.0", true);
+					if (modbusState) break;
+					if (retry == 0)
+						try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn(string.Format("RuningMethod: modbusState=false, 等待重连...({0}/{1})", retry + 1, MAX_RETRY)); } catch { }
+					System.Threading.Thread.Sleep(1000);
 				}
+				if (!modbusState)
+				{
+					try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Error("RuningMethod: 等待超时, modbusState 仍为 false, 未发送运行信号"); } catch { }
+					return;
+				}
+
+				try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Info("Modbus → MX7080.0=True"); } catch { }
+				modbusTcp.Write("MX7080.0", true);
+				// 回读验证
+				try
+				{
+					bool rb = modbusTcp.ReadBool("MX7080.0").Content;
+					try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Info(string.Format("Modbus 回读 → MX7080.0={0}", rb)); } catch { }
+					if (!rb)
+						try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn("Modbus RuningMethod 回读不一致! 期望:True"); } catch { }
+				}
+				catch { }
+				try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Info("RuningMethod 运行信号发送完成"); } catch { }
 			}
 			catch (Exception ex)
 			{
 				modbusState = false;
-				EventConnectState(false, $"RuningMethod发生错误...\r\n {ex.Message} \r\n {ex.StackTrace}");
+				EventConnectState(false, string.Format("RuningMethod发生错误...\r\n {0} \r\n {1}", ex.Message, ex.StackTrace));
 			}
 		}
 
@@ -291,6 +315,10 @@ namespace PLC调试.Class
 			{
 				short ok = 1;
 				short ng = 2;
+				short v1 = result1 ? ok : ng;
+				short v2 = result2 ? ok : ng;
+				short v3 = result3 ? ok : ng;
+				try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Debug($"Modbus → MB10008={v1} MB10010={v2} MB10012={v3} MB10014={ok}"); } catch { }
 
 				Stopwatch sw = new Stopwatch();
 
@@ -300,38 +328,54 @@ namespace PLC调试.Class
 					return false;
 				}
 
-				//Task.Run(() =>
-				//{
 				sw.Restart();
-				modbusTcp.Write($"MB10008", result1 ? ok : ng);
-				modbusTcp.Write($"MB10010", result2 ? ok : ng);
-				modbusTcp.Write($"MB10012", result3 ? ok : ng);
-				modbusTcp.Write($"MB10014", ok);
+				// 3路结果并行写入+立即回读
+				bool resultsWritten = false;
+				try
+				{
+					System.Threading.Tasks.Parallel.Invoke(
+						() => { modbusTcp.Write("MB10008", v1); try { short r = modbusTcp.ReadInt16("MB10008").Content; if (r != v1) try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"Modbus MB10008 回读不一致! 写:{v1} 读:{r}"); } catch { } } catch { } },
+						() => { modbusTcp.Write("MB10010", v2); try { short r = modbusTcp.ReadInt16("MB10010").Content; if (r != v2) try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"Modbus MB10010 回读不一致! 写:{v2} 读:{r}"); } catch { } } catch { } },
+						() => { modbusTcp.Write("MB10012", v3); try { short r = modbusTcp.ReadInt16("MB10012").Content; if (r != v3) try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"Modbus MB10012 回读不一致! 写:{v3} 读:{r}"); } catch { } } catch { } }
+					);
+					resultsWritten = true;
+				}
+				catch (Exception pex)
+				{
+					try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Error("Modbus 并行写入异常: " + pex.Message); } catch { }
+				}
 
+				// 确认信号：只有3路结果全部写入成功才发
+				if (resultsWritten)
+				{
+					modbusTcp.Write("MB10014", ok);
+					try { short r4 = modbusTcp.ReadInt16("MB10014").Content; if (r4 != ok) try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"Modbus MB10014 回读不一致! 写:{ok} 读:{r4}"); } catch { } } catch { }
+				}
+				else
+				{
+					try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn("Modbus 3路结果写入失败, 未发MB10014确认信号"); } catch { }
+					return false;
+				}
 
 				// 记录发送间隔
 				long interval = _plcSendStatistics.RecordSend();
-
 				if (interval > 0)
 				{
-					toolClass.SaveLog($"每组结果发送间隔: {interval}ms");
-
-					// 可选：定期输出统计
+					try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Debug($"每组结果发送间隔: {interval}ms"); } catch { }
 					if (_plcSendStatistics.GetStatistics().ValidCount % 10 == 0)
 					{
 						var stats = _plcSendStatistics.GetStatistics();
-						toolClass.SaveLog($"发送间隔统计（每10次）: {stats}");
+						try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Debug($"发送间隔统计（每10次）: {stats}"); } catch { }
 					}
 				}
-				toolClass.SaveLog($"写入结果完成，耗时：{sw.ElapsedMilliseconds}ms，结果：result1：{(result1 ? ok : ng)}、result2：{(result2 ? ok : ng)}、result3：{(result3 ? ok : ng)}");
-					if (sw.ElapsedMilliseconds > 50) { try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Debug("Modbus写入耗时偏高: " + sw.ElapsedMilliseconds + "ms"); } catch { } }
-				//});
+				try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Debug($"写入结果完成，耗时：{sw.ElapsedMilliseconds}ms，结果：result1：{(result1 ? ok : ng)}、result2：{(result2 ? ok : ng)}、result3：{(result3 ? ok : ng)}"); } catch { }
+				if (sw.ElapsedMilliseconds > 50) { try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Debug("Modbus写入耗时偏高: " + sw.ElapsedMilliseconds + "ms"); } catch { } }
 				return true;
 			}
 			catch (Exception ex)
 			{
 				modbusState = false;
-				EventConnectState(false, $"向Modbus写入结果时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
+				EventConnectState(false, string.Format("向Modbus写入结果时发生异常...\r\n {0} \r\n {1}", ex.Message, ex.StackTrace));
 				return false;
 			}
 		}

@@ -171,7 +171,7 @@ namespace PLC调试.Class
 						
 					if (test == 1)
 					{
-						if (triggerWatch.IsRunning) { long trigMs = triggerWatch.ElapsedMilliseconds; if (trigMs > 500) toolClass.SaveLog("触发间隔偏长: " + trigMs + "ms"); triggerWatch.Restart(); } else triggerWatch.Start();
+						if (triggerWatch.IsRunning) { long trigMs = triggerWatch.ElapsedMilliseconds; if (trigMs > 500) { try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn("触发间隔偏长: " + trigMs + "ms"); } catch { } } triggerWatch.Restart(); } else triggerWatch.Start();
 						EventTriggerGet();
 						Thread.Sleep(50);
 						plc.Write("DB1000.DBW0", val);
@@ -268,18 +268,37 @@ namespace PLC调试.Class
 		{
 			try
 			{
-				if (plcState)
+				try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Info("RuningMethod 开始发送运行信号..."); } catch { }
+				// 等待 PLC 连接就绪（最多重试 5 次，每次等 1 秒）
+				const int MAX_RETRY = 5;
+				for (int retry = 0; retry < MAX_RETRY; retry++)
 				{
-					short ok = 1;
-					plc.Write("DB1000.DBX72.4", true);
-					plc.Write("DB1000. DBW88", ok);
-
+					if (plcState) break;
+					if (retry == 0)
+						try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn(string.Format("RuningMethod: plcState=false, 等待重连...({0}/{1})", retry + 1, MAX_RETRY)); } catch { }
+					System.Threading.Thread.Sleep(1000);
 				}
+				if (!plcState)
+				{
+					try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Error("RuningMethod: 等待超时, plcState 仍为 false, 未发送运行信号"); } catch { }
+					return;
+				}
+
+				short ok = 1;
+				try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Info("S7-1200 → DBX72.4=True"); } catch { }
+				plc.Write("DB1000.DBX72.4", true);
+				try { bool rb1 = plc.ReadBool("DB1000.DBX72.4").Content; try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Info(string.Format("S7-1200 回读 → DBX72.4={0}", rb1)); } catch { } if (!rb1) try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn("S7-1200 DBX72.4 回读不一致!"); } catch { } } catch { }
+
+				try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Info("S7-1200 → DBW88=" + ok); } catch { }
+				plc.Write("DB1000.DBW88", ok);
+				try { short rw1 = plc.ReadInt16("DB1000.DBW88").Content; try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Info(string.Format("S7-1200 回读 → DBW88={0}", rw1)); } catch { } if (rw1 != ok) try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn(string.Format("S7-1200 DBW88 回读不一致! 期望:{0} 实际:{1}", ok, rw1)); } catch { } } catch { }
+
+				try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Info("RuningMethod 运行信号发送完成"); } catch { }
 			}
 			catch (Exception ex)
 			{
 				plcState = false;
-				EventConnectState(false, $"RuningMethod发生错误...\r\n {ex.Message} \r\n {ex.StackTrace}");
+				EventConnectState(false, string.Format("RuningMethod发生错误...\r\n {0} \r\n {1}", ex.Message, ex.StackTrace));
 			}
 		}
 
@@ -295,31 +314,58 @@ namespace PLC调试.Class
 
 				short ok = 1;
 				short ng = 2;
+				short v1 = result1 ? ok : ng;
+				short v2 = result2 ? ok : ng;
+				short v3 = result3 ? ok : ng;
+				try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Debug($"S7-1200 → DBW80={v1} DBW82={v2} DBW84={v3} DBW86={ok}"); } catch { }
 				var sw = Stopwatch.StartNew();
 
-				plc.Write("DB1000.DBW80", result1 ? ok : ng);
-				plc.Write("DB1000.DBW82", result2 ? ok : ng);
-				plc.Write("DB1000.DBW84", result3 ? ok : ng);
-				plc.Write("DB1000.DBW86", ok);
+				// 3路结果并行写入+立即回读
+				bool resultsWritten = false;
+				try
+				{
+					System.Threading.Tasks.Parallel.Invoke(
+						() => { plc.Write("DB1000.DBW80", v1); try { short r = plc.ReadInt16("DB1000.DBW80").Content; if (r != v1) try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"S7-1200 DBW80 回读不一致! 写:{v1} 读:{r}"); } catch { } } catch { } },
+						() => { plc.Write("DB1000.DBW82", v2); try { short r = plc.ReadInt16("DB1000.DBW82").Content; if (r != v2) try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"S7-1200 DBW82 回读不一致! 写:{v2} 读:{r}"); } catch { } } catch { } },
+						() => { plc.Write("DB1000.DBW84", v3); try { short r = plc.ReadInt16("DB1000.DBW84").Content; if (r != v3) try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"S7-1200 DBW84 回读不一致! 写:{v3} 读:{r}"); } catch { } } catch { } }
+					);
+					resultsWritten = true;
+				}
+				catch (Exception pex)
+				{
+					try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Error("S7-1200 并行写入异常: " + pex.Message); } catch { }
+				}
+
+				// 确认信号：只有3路结果全部写入成功才发DBW86
+				if (resultsWritten)
+				{
+					plc.Write("DB1000.DBW86", ok);
+					try { short r4 = plc.ReadInt16("DB1000.DBW86").Content; if (r4 != ok) try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"S7-1200 DBW86 回读不一致! 写:{ok} 读:{r4}"); } catch { } } catch { }
+				}
+				else
+				{
+					try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn("S7-1200 3路结果写入失败, 未发DBW86确认信号"); } catch { }
+					return false;
+				}
 
 				long interval = _plcSendStatistics.RecordSend();
 				if (interval > 0)
 				{
-					toolClass.SaveLog($"每组结果发送间隔: {interval}ms");
+					try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Debug($"每组结果发送间隔: {interval}ms"); } catch { }
 					if (_plcSendStatistics.GetStatistics().ValidCount % 10 == 0)
 					{
 						var stats = _plcSendStatistics.GetStatistics();
-						toolClass.SaveLog($"发送间隔统计（每10次）: {stats}");
+						try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Debug($"发送间隔统计（每10次）: {stats}"); } catch { }
 					}
 				}
-				toolClass.SaveLog($"写入结果完成，耗时：{sw.ElapsedMilliseconds}ms，结果：r1={(result1?ok:ng)}、r2={(result2?ok:ng)}、r3={(result3?ok:ng)}");
-					if (sw.ElapsedMilliseconds > 50) { try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Debug("S7-1200写入耗时偏高: " + sw.ElapsedMilliseconds + "ms"); } catch { } }
+				try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Debug($"写入结果完成，耗时：{sw.ElapsedMilliseconds}ms，结果：r1={(result1?ok:ng)}、r2={(result2?ok:ng)}、r3={(result3?ok:ng)}"); } catch { }
+				if (sw.ElapsedMilliseconds > 50) { try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Debug("S7-1200写入耗时偏高: " + sw.ElapsedMilliseconds + "ms"); } catch { } }
 				return true;
 			}
 			catch (Exception ex)
 			{
 				plcState = false;
-				EventConnectState(false, $"向PLC写入结果时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
+				EventConnectState(false, string.Format("向PLC写入结果时发生异常...\r\n {0} \r\n {1}", ex.Message, ex.StackTrace));
 				return false;
 			}
 		}
