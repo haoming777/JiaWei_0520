@@ -143,6 +143,7 @@ namespace VisionMeasure
 		private long _plcPerfIntervalMaxMs;
 		private Stopwatch _plcPerfIntervalWatch = new Stopwatch();
 		private int _perfReportCounter;
+		private int _perfBriefCounter;   // 轻量报告周期计数器
 
 		// 配置常量
 		private const int MAX_QUEUE_SIZE = 500;
@@ -649,8 +650,15 @@ namespace VisionMeasure
 				}
 
 				
-				// 每60秒输出详细耗时报告（Timer间隔5秒 → 12次）
-				if (++_perfReportCounter >= 12)
+				// 每1分钟输出轻量耗时汇总（Timer间隔5秒 → 12次）
+				if (++_perfBriefCounter >= 12)
+				{
+					_perfBriefCounter = 0;
+					ReportPerformanceBrief();
+				}
+
+				// 每5分钟输出详细耗时报告（Timer间隔5秒 → 60次）
+				if (++_perfReportCounter >= 60)
 				{
 					_perfReportCounter = 0;
 					ReportPerformanceDetail();
@@ -680,14 +688,37 @@ namespace VisionMeasure
 				var sb = new StringBuilder();
 				sb.AppendLine(string.Format("══════ 耗时报告 [{0}] ══════", DateTime.Now.ToString("HH:mm:ss")));
 				var processors = new[] { _processor1, _processor2, _processor3, _processor4, _processor5 };
+
+				// 收集各相机耗时快照（在 Reset 之前取值，避免浅拷贝字典被清空）
+				var snapNames = new List<string>();
+				var snapTotalAvg = new List<double>();
+				var snapTotalMax = new List<long>();
+				var snapAiAvg = new List<string>();
+				var snapAiMax = new List<long>();
 				foreach (var proc in processors)
 				{
 					if (proc == null) continue;
 					var perf = proc.Performance;
 					if (perf.ProcessCount == 0) continue;
 					sb.AppendLine(perf.GetStageReport(proc.CameraName));
+					snapNames.Add(proc.CameraName);
+					snapTotalAvg.Add(perf.AverageTimeMs);
+					snapTotalMax.Add(perf.MaxTimeMs);
+					long aiT = perf.StageTimes != null && perf.StageTimes.ContainsKey("AI模型推理") ? perf.StageTimes["AI模型推理"] : 0;
+					long aiM = perf.StageMax != null && perf.StageMax.ContainsKey("AI模型推理") ? perf.StageMax["AI模型推理"] : 0;
+					snapAiAvg.Add(aiT > 0 ? ((double)aiT / perf.ProcessCount).ToString("F0") : "-");
+					snapAiMax.Add(aiM);
 					proc.ResetPerformanceStats();
 				}
+				if (snapNames.Count > 0)
+				{
+					sb.Append("══ 推理汇总: ");
+					for (int i = 0; i < snapNames.Count; i++)
+						sb.Append(string.Format("{0}:总Avg={1:F0}Max={2} AIavg={3} AImax={4} | ", snapNames[i], snapTotalAvg[i], snapTotalMax[i], snapAiAvg[i], snapAiMax[i]));
+					sb.Length -= 3;
+					sb.AppendLine();
+				}
+
 				if (_plcPerfSendCount > 0)
 				{
 					long avgWriteMs = _plcPerfTotalMs / _plcPerfSendCount;
@@ -712,6 +743,39 @@ namespace VisionMeasure
 			catch (Exception ex)
 			{
 				try { if (FastLogger.IsInitialized) FastLogger.Instance.Error("[Perf] " + ex.Message); } catch { }
+			}
+		}
+
+		/// <summary>
+		/// 轻量耗时汇总（每1分钟），仅输出各相机总耗时+AI耗时 Min/Max/Avg
+		/// </summary>
+		private void ReportPerformanceBrief()
+		{
+			try
+			{
+				var sb = new StringBuilder();
+				sb.Append(string.Format("[{0}] ", DateTime.Now.ToString("HH:mm")));
+				var processors = new[] { _processor1, _processor2, _processor3, _processor4, _processor5 };
+				foreach (var proc in processors)
+				{
+					if (proc == null) continue;
+					var perf = proc.Performance;
+					if (perf.ProcessCount == 0) { sb.Append(proc.CameraName + ":无 "); continue; }
+					long aiT = perf.StageTimes != null && perf.StageTimes.ContainsKey("AI模型推理") ? perf.StageTimes["AI模型推理"] : 0;
+					long aiM = perf.StageMax != null && perf.StageMax.ContainsKey("AI模型推理") ? perf.StageMax["AI模型推理"] : 0;
+					long aiMin = perf.StageMin != null && perf.StageMin.ContainsKey("AI模型推理") ? perf.StageMin["AI模型推理"] : 0;
+					string aiAvg = aiT > 0 ? ((double)aiT / perf.ProcessCount).ToString("F0") : "-";
+					string aiMinStr = aiT > 0 ? aiMin.ToString() : "-";
+					sb.Append(string.Format("{0}:总Avg={1:F0}Min={2}Max={3} AIavg={4}Min={5}Max={6} | ",
+						proc.CameraName, perf.AverageTimeMs, perf.MinTimeMs, perf.MaxTimeMs, aiAvg, aiMinStr, aiM));
+				}
+				sb.Append(string.Format("PLC写Avg={0}ms 队列={1}", _plcPerfSendCount > 0 ? (_plcPerfTotalMs / _plcPerfSendCount).ToString() : "-", SendResultList.Count));
+				string report = sb.ToString();
+				try { if (FastLogger.IsInitialized) FastLogger.Instance.Info(report); } catch { }
+			}
+			catch (Exception ex)
+			{
+				try { if (FastLogger.IsInitialized) FastLogger.Instance.Error("[Brief] " + ex.Message); } catch { }
 			}
 		}
 		/// <summary>
@@ -2346,15 +2410,20 @@ namespace VisionMeasure
 				string result_Char_str = "0";
 				int index_ocr = 0;
 
+				var m4SwSeg = new Stopwatch();
+				var m4SwOcr = new Stopwatch();
+
 				if (_cameraEnabled[3])
 				{
-					_cam4Tasks[0] = Task.Run(() => Model_Segmentation_Cam4.Run(labelImage, out rsp_segmentation));
-					_cam4Tasks[1] = Task.Run(() => Model_Char_Cam4.Run(labelImage, out rsp_ocr));
+					_cam4Tasks[0] = Task.Run(() => { m4SwSeg.Start(); Model_Segmentation_Cam4.Run(labelImage, out rsp_segmentation); m4SwSeg.Stop(); });
+					_cam4Tasks[1] = Task.Run(() => { m4SwOcr.Start(); Model_Char_Cam4.Run(labelImage, out rsp_ocr); m4SwOcr.Stop(); });
 					Task.WaitAll(_cam4Tasks);
 				}
 
 				stageTimer.Stop();
 				context.StageTimes["AI模型推理"] = stageTimer.ElapsedMilliseconds;
+				context.StageTimes["  AI-分割"] = m4SwSeg.ElapsedMilliseconds;
+				context.StageTimes["  AI-OCR"] = m4SwOcr.ElapsedMilliseconds;
 				stageTimer.Restart();
 
 				if (rsp_segmentation != null && rsp_ocr != null)
@@ -2592,18 +2661,30 @@ namespace VisionMeasure
 				ResponseList<OcrResponse> rsp_ocr = null;
 				ResponseList<OcrResponse> rsp_PCode_ocr = null;
 
+				var mSwSeg = new Stopwatch();
+				var mSwOcr = new Stopwatch();
+				var mSwColor = new Stopwatch();
+				var mSwPCode = new Stopwatch();
+				var mSwRests = new Stopwatch();
+
 				if (_cameraEnabled[4])
 				{
-					_cam5Tasks[0] = Task.Run(() => Model_Segmentation_Cam5.Run(labelImage, out rsp_segmentation));
-					_cam5Tasks[1] = Task.Run(() => Model_Char_Cam5.Run(labelImage, out rsp_ocr));
-					_cam5Tasks[2] = Task.Run(() => Model_Color_Cam5.Run(labelImage, out rsp_color));
-					_cam5Tasks[3] = Task.Run(() => Model_Char_PCode_Cam5.Run(labelImage, out rsp_PCode_ocr));
-					_cam5Tasks[4] = Task.Run(() => Model_Rests_Cam5.Run(labelImage, out rsp_rests));
+					_cam5Tasks[0] = Task.Run(() => { mSwSeg.Start(); Model_Segmentation_Cam5.Run(labelImage, out rsp_segmentation); mSwSeg.Stop(); });
+					_cam5Tasks[1] = Task.Run(() => { mSwOcr.Start(); Model_Char_Cam5.Run(labelImage, out rsp_ocr); mSwOcr.Stop(); });
+					_cam5Tasks[2] = Task.Run(() => { mSwColor.Start(); Model_Color_Cam5.Run(labelImage, out rsp_color); mSwColor.Stop(); });
+					_cam5Tasks[3] = Task.Run(() => { mSwPCode.Start(); Model_Char_PCode_Cam5.Run(labelImage, out rsp_PCode_ocr); mSwPCode.Stop(); });
+					_cam5Tasks[4] = Task.Run(() => { mSwRests.Start(); Model_Rests_Cam5.Run(labelImage, out rsp_rests); mSwRests.Stop(); });
 					Task.WaitAll(_cam5Tasks);
 				}
 
 				stageTimer.Stop();
 				context.StageTimes["AI模型推理"] = stageTimer.ElapsedMilliseconds;
+				// 各模型单独耗时（并行执行，各自计时）
+				context.StageTimes["  AI-分割"] = mSwSeg.ElapsedMilliseconds;
+				context.StageTimes["  AI-OCR"] = mSwOcr.ElapsedMilliseconds;
+				context.StageTimes["  AI-色标"] = mSwColor.ElapsedMilliseconds;
+				context.StageTimes["  AI-PCode"] = mSwPCode.ElapsedMilliseconds;
+				context.StageTimes["  AI-缺陷"] = mSwRests.ElapsedMilliseconds;
 				stageTimer.Restart();
 				#endregion
 

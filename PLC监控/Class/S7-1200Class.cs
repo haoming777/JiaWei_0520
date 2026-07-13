@@ -320,33 +320,56 @@ namespace PLC调试.Class
 				try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Debug($"S7-1200 → DBW80={v1} DBW82={v2} DBW84={v3} DBW86={ok}"); } catch { }
 				var sw = Stopwatch.StartNew();
 
-				// 3路结果并行写入+立即回读
-				bool resultsWritten = false;
-				try
-				{
-					System.Threading.Tasks.Parallel.Invoke(
-						() => { plc.Write("DB1000.DBW80", v1); try { short r = plc.ReadInt16("DB1000.DBW80").Content; if (r != v1) try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"S7-1200 DBW80 回读不一致! 写:{v1} 读:{r}"); } catch { } } catch { } },
-						() => { plc.Write("DB1000.DBW82", v2); try { short r = plc.ReadInt16("DB1000.DBW82").Content; if (r != v2) try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"S7-1200 DBW82 回读不一致! 写:{v2} 读:{r}"); } catch { } } catch { } },
-						() => { plc.Write("DB1000.DBW84", v3); try { short r = plc.ReadInt16("DB1000.DBW84").Content; if (r != v3) try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"S7-1200 DBW84 回读不一致! 写:{v3} 读:{r}"); } catch { } } catch { } }
-					);
-					resultsWritten = true;
-				}
-				catch (Exception pex)
-				{
-					try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Error("S7-1200 并行写入异常: " + pex.Message); } catch { }
-				}
-
-				// 确认信号：只有3路结果全部写入成功才发DBW86
-				if (resultsWritten)
-				{
-					plc.Write("DB1000.DBW86", ok);
-					try { short r4 = plc.ReadInt16("DB1000.DBW86").Content; if (r4 != ok) try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"S7-1200 DBW86 回读不一致! 写:{ok} 读:{r4}"); } catch { } } catch { }
-				}
-				else
-				{
-					try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn("S7-1200 3路结果写入失败, 未发DBW86确认信号"); } catch { }
-					return false;
-				}
+				// 4路信号并行写入+立即回读
+				System.Threading.Tasks.Parallel.Invoke(
+					() =>
+					{
+						plc.Write("DB1000.DBW80", v1);
+						try
+						{
+							short r = plc.ReadInt16("DB1000.DBW80").Content;
+							if (r != v1)
+								try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"S7-1200 DBW80 回读不一致! 写:{v1} 读:{r}"); } catch { }
+						}
+						catch { }
+					},
+					() =>
+					{
+						plc.Write("DB1000.DBW82", v2);
+						try
+						{
+							short r = plc.ReadInt16("DB1000.DBW82").Content;
+							if (r != v2)
+								try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"S7-1200 DBW82 回读不一致! 写:{v2} 读:{r}"); } catch { }
+						}
+						catch { }
+					},
+					() =>
+					{
+						plc.Write("DB1000.DBW84", v3);
+						try
+						{
+							short r = plc.ReadInt16("DB1000.DBW84").Content;
+							if (r != v3)
+								try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"S7-1200 DBW84 回读不一致! 写:{v3} 读:{r}"); } catch { }
+						}
+						catch { }
+					},
+					() =>
+					{
+							var wr = plc.Write("DB1000.DBW86", ok);
+							if (!wr.IsSuccess)
+								try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"S7-1200 DBW86 写入失败! {wr.Message}"); } catch { }
+							System.Threading.Thread.Sleep(2);
+						try
+						{
+							short r = plc.ReadInt16("DB1000.DBW86").Content;
+							if (r != ok)
+								try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"S7-1200 DBW86 回读不一致! 写:{ok} 读:{r}"); } catch { }
+						}
+						catch { }
+					}
+				);
 
 				long interval = _plcSendStatistics.RecordSend();
 				if (interval > 0)
