@@ -53,7 +53,7 @@ namespace CommonLib
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog("加载切换型号错误..." + "\n\r" + ex.Message);
+				FastLogger.Instance.Error("加载切换型号错误", ex);
 				return false;
 			}
 		}
@@ -70,12 +70,12 @@ namespace CommonLib
 					default:
 						break;
 				}
-				toolClass.SaveLog("算法保存完成");
+				FastLogger.Instance.Info("算法保存完成");
 				return true;
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog("算法保存错误..." + "\n\r" + ex.Message);
+				FastLogger.Instance.Error("算法保存错误", ex);
 				return false;
 			}
 		}
@@ -109,7 +109,7 @@ namespace CommonLib
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog(ex.StackTrace);
+				FastLogger.Instance.Error(ex.StackTrace);
 			}
 
 		}
@@ -132,7 +132,7 @@ namespace CommonLib
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog(ex.StackTrace);
+				FastLogger.Instance.Error(ex.StackTrace);
 			}
 		}
 

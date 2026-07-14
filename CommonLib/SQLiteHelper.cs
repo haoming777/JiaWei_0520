@@ -17,7 +17,6 @@ namespace CommonLib
 	public class SQLiteHelper
 	{
 
-		XLToolClass toolClass = new XLToolClass();
 		/// <summary>
 		/// 数据库地址
 		/// </summary>
@@ -127,7 +126,7 @@ namespace CommonLib
 					}
 					catch (Exception ex)
 					{
-						toolClass.SaveLog($"数据库操作错误...\r\n {ex.Message} \r\n {ex.StackTrace}");
+						FastLogger.Instance.Error("数据库操作错误", ex);
 						return false;
 					}
 				}
@@ -154,7 +153,7 @@ namespace CommonLib
 					}
 					catch (Exception ex)
 					{
-						toolClass.SaveLog($"SQL查询异常: {ex.Message}\r\nSQL: {sql}");
+						FastLogger.Instance.Error("SQL查询异常: " + ex.Message + " SQL: " + sql);
 						throw;
 					}
 

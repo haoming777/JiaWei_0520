@@ -9,8 +9,6 @@ using System.Text;
 using System.Threading.Tasks;
 using OpenCvSharp;
 using SmartMore.ViMo;
-using XL.Tool;
-
 
 namespace AIsdk
 {
@@ -26,7 +24,6 @@ namespace AIsdk
 		private int deviceId = 0;
 		private int SegmentArea = 0;
 		Stopwatch stopwatch = new Stopwatch();
-		XLToolClass toolClass = new XLToolClass();
 		public ModuleType moduleType { get; set; }
 
 		IPipelines pipelines1;
@@ -52,7 +49,6 @@ namespace AIsdk
 		{
 			try
 			{
-				toolClass.SaveLog($"Init加载");
 				modelsPath = modelPath;
 				useGpu = usegup;
 				deviceId = deviceid;
@@ -61,12 +57,10 @@ namespace AIsdk
 				solution.LoadFromFile(modelsPath);
 				pipelines1 = solution.CreatePipelines(modelID, useGpu, deviceId);
 				moduleType = solution.GetModuleInfo(modelID).Type;
-				toolClass.SaveLog($"Init加载完成");
 				return ERROR_OK;
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog($"Init加载时时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
 				ErrorInfo = ex.ToString();
 				return ERROR_FAILED;
 			}
@@ -76,22 +70,17 @@ namespace AIsdk
 		{
 			try
 			{
-				toolClass.SaveLog("Init_Segmentation加载");
 				modelsPath = modelPath;
 				useGpu = usegup;
 				deviceId = deviceid;
 				modelID = modelid;
 				solution = new Solution();
 				solution.LoadFromFile(modelsPath);
-				//pipelines1 = solution.CreatePipelines(modelID, useGpu, deviceId);
-				//moduleType = solution.GetModuleInfo(modelID).Type;
 				module_segmentation = solution.CreateModule<ISegmentationModule>(modelID, useGpu, deviceId);
-				toolClass.SaveLog("Init_Segmentation加载完成");
 				return ERROR_OK;
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog($"Init_Segmentation加载时时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
 				ErrorInfo = ex.ToString();
 				return ERROR_FAILED;
 			}
@@ -101,25 +90,20 @@ namespace AIsdk
 		{
 			try
 			{
-				toolClass.SaveLog("Init_OrderOcr加载");
 				modelsPath = modelPath;
 				useGpu = usegup;
 				deviceId = deviceid;
 				modelID = modelid;
 				solution = new Solution();
 				solution.LoadFromFile(modelsPath);
-				//pipelines1 = solution.CreatePipelines(modelID, useGpu, deviceId);
-				//moduleType = solution.GetModuleInfo(modelID).Type;
 				module = solution.CreateModule<IOcrModule>(modelID, useGpu, deviceId);
 				var ocrParams = module.Params;
 				ocrParams.Order = OutputOrder.LeftToRight;
 				module.Params = ocrParams;
-				toolClass.SaveLog("Init_OrderOcr加载完成");
 				return ERROR_OK;
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog($"Init_OrderOcr加载时时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
 				ErrorInfo = ex.ToString();
 				return ERROR_FAILED;
 			}
@@ -129,7 +113,6 @@ namespace AIsdk
 		{
 			try
 			{
-				toolClass.SaveLog("Init_Class加载");
 				modelsPath = modelPath;
 				useGpu = usegup;
 				deviceId = deviceid;
@@ -137,12 +120,10 @@ namespace AIsdk
 				solution = new Solution();
 				solution.LoadFromFile(modelsPath);
 				module_class = solution.CreateModule<IClassificationModule>(modelID, useGpu, deviceId);
-				toolClass.SaveLog("Init_Class加载完成");
 				return ERROR_OK;
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog($"Init_Class加载时时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
 				ErrorInfo = ex.ToString();
 				return ERROR_FAILED;
 			}
@@ -151,27 +132,20 @@ namespace AIsdk
 		/// <summary>
 		/// SDK Run接口
 		/// </summary>
-		/// <param name="image"></param>
-		/// <param name="LabelImage"></param>
-		/// <param name="defects"></param>
-		/// <returns></returns>
 		public int Run(Mat image, out ResponseList<DetectionResponse> results)
 		{
 			try
 			{
-		var req = new Request(image);
+				var req = new Request(image);
 				stopwatch.Restart();
 				pipelines1.Run(req, out results);
-				Console.WriteLine($"运行SDK耗时{stopwatch.ElapsedMilliseconds}ms");
 				stopwatch.Stop();
-					return ERROR_OK;
+				return ERROR_OK;
 			}
 			catch (Exception ex)
 			{
 				results = null;
 				ErrorInfo = ex.ToString();
-				Console.WriteLine(ErrorInfo);
-
 				return ERROR_FAILED;
 			}
 		}
@@ -179,21 +153,13 @@ namespace AIsdk
 		/// <summary>
 		/// SDK Run接口
 		/// </summary>
-		/// <param name="image"></param>
-		/// <param name="LabelImage"></param>
-		/// <param name="defects"></param>
-		/// <returns></returns>
 		public int Run(Mat image, out ResponseList<SegmentationResponse> results)
 		{
 			try
 			{
 				var req = new Request(image);
 				stopwatch.Restart();
-
 				pipelines1.Run(req, out results);
-				Console.WriteLine($"运行SDK耗时{stopwatch.ElapsedMilliseconds}");
-				toolClass.SaveLog($"运行分割SDK耗时{stopwatch.ElapsedMilliseconds}");
-
 				stopwatch.Stop();
 				return ERROR_OK;
 			}
@@ -201,8 +167,6 @@ namespace AIsdk
 			{
 				results = null;
 				ErrorInfo = ex.ToString();
-				Console.WriteLine(ErrorInfo);
-
 				return ERROR_FAILED;
 			}
 		}
@@ -210,57 +174,38 @@ namespace AIsdk
 		/// <summary>
 		/// SDK Run接口
 		/// </summary>
-		/// <param name="image"></param>
-		/// <param name="LabelImage"></param>
-		/// <param name="defects"></param>
-		/// <returns></returns>
 		public int Run(Mat image, out ResponseList<ClassificationResponse> results)
 		{
 			try
 			{
-		var req = new Request(image);
+				var req = new Request(image);
 				stopwatch.Restart();
 				pipelines1.Run(req, out results);
-				Console.WriteLine($"运行SDK耗时{stopwatch.ElapsedMilliseconds}");
-				toolClass.SaveLog($"运行分类SDK耗时{stopwatch.ElapsedMilliseconds}");
 				stopwatch.Stop();
-					return ERROR_OK;
+				return ERROR_OK;
 			}
 			catch (Exception ex)
 			{
 				results = null;
 				ErrorInfo = ex.ToString();
-				Console.WriteLine(ErrorInfo);
-
 				return ERROR_FAILED;
 			}
 		}
-		// <summary>
-		/// SDK Run接口
-		/// </summary>
-		/// <param name="image"></param>
-		/// <param name="LabelImage"></param>
-		/// <param name="defects"></param>
-		/// <returns></returns>
+
 		public int Run(Mat image, out ResponseList<OcrResponse> results)
 		{
 			try
 			{
-		var req = new Request(image);
+				var req = new Request(image);
 				stopwatch.Restart();
-
 				pipelines1.Run(req, out results);
-				Console.WriteLine($"运行SDK耗时{stopwatch.ElapsedMilliseconds}");
-				//toolClass.SaveLog($"运行OcrSDK耗时{stopwatch.ElapsedMilliseconds}");
 				stopwatch.Stop();
-					return ERROR_OK;
+				return ERROR_OK;
 			}
 			catch (Exception ex)
 			{
 				results = null;
 				ErrorInfo = ex.ToString();
-				Console.WriteLine(ErrorInfo);
-
 				return ERROR_FAILED;
 			}
 		}
@@ -269,21 +214,16 @@ namespace AIsdk
 		{
 			try
 			{
-		var req = new Request(image);
+				var req = new Request(image);
 				stopwatch.Restart();
-
 				module.Run(req, out results);
-				Console.WriteLine($"运行SDK耗时{stopwatch.ElapsedMilliseconds}");
-				//toolClass.SaveLog($"运行OcrSDK耗时{stopwatch.ElapsedMilliseconds}");
 				stopwatch.Stop();
-					return ERROR_OK;
+				return ERROR_OK;
 			}
 			catch (Exception ex)
 			{
 				results = null;
 				ErrorInfo = ex.ToString();
-				Console.WriteLine(ErrorInfo);
-
 				return ERROR_FAILED;
 			}
 		}
@@ -292,21 +232,16 @@ namespace AIsdk
 		{
 			try
 			{
-		var req = new Request(image, roi);
+				var req = new Request(image, roi);
 				stopwatch.Restart();
-
 				module.Run(req, out results);
-				//Console.WriteLine($"运行SDK耗时{stopwatch.ElapsedMilliseconds}");
-				//toolClass.SaveLog($"运行OcrSDK耗时{stopwatch.ElapsedMilliseconds}");
 				stopwatch.Stop();
-					return ERROR_OK;
+				return ERROR_OK;
 			}
 			catch (Exception ex)
 			{
 				results = null;
 				ErrorInfo = ex.ToString();
-				Console.WriteLine(ErrorInfo);
-
 				return ERROR_FAILED;
 			}
 		}
@@ -315,21 +250,16 @@ namespace AIsdk
 		{
 			try
 			{
-		var req = new Request(image);
+				var req = new Request(image);
 				stopwatch.Restart();
-
 				module_segmentation.Run(req, out results);
-				Console.WriteLine($"运行SDK耗时{stopwatch.ElapsedMilliseconds}");
-				toolClass.SaveLog($"运行Run_Segmentation耗时{stopwatch.ElapsedMilliseconds}");
 				stopwatch.Stop();
-					return ERROR_OK;
+				return ERROR_OK;
 			}
 			catch (Exception ex)
 			{
 				results = null;
 				ErrorInfo = ex.ToString();
-				Console.WriteLine(ErrorInfo);
-
 				return ERROR_FAILED;
 			}
 		}
@@ -337,20 +267,16 @@ namespace AIsdk
 		{
 			try
 			{
-		var req = new Request(image, roi);
+				var req = new Request(image, roi);
 				stopwatch.Restart();
 				module_segmentation.Run(req, out results);
-				Console.WriteLine($"运行SDK耗时{stopwatch.ElapsedMilliseconds}");
-				toolClass.SaveLog($"运行Run_Color耗时{stopwatch.ElapsedMilliseconds}");
 				stopwatch.Stop();
-					return ERROR_OK;
+				return ERROR_OK;
 			}
 			catch (Exception ex)
 			{
 				results = null;
 				ErrorInfo = ex.ToString();
-				Console.WriteLine(ErrorInfo);
-
 				return ERROR_FAILED;
 			}
 		}
@@ -359,21 +285,16 @@ namespace AIsdk
 		{
 			try
 			{
-		var req = new Request(image, roi);
+				var req = new Request(image, roi);
 				stopwatch.Restart();
-
 				module_class.Run(req, out results);
-				Console.WriteLine($"运行SDK耗时{stopwatch.ElapsedMilliseconds}");
-				toolClass.SaveLog($"运行Run_Class耗时{stopwatch.ElapsedMilliseconds}");
 				stopwatch.Stop();
-					return ERROR_OK;
+				return ERROR_OK;
 			}
 			catch (Exception ex)
 			{
 				results = null;
 				ErrorInfo = ex.ToString();
-				Console.WriteLine(ErrorInfo);
-
 				return ERROR_FAILED;
 			}
 		}

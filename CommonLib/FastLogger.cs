@@ -50,7 +50,7 @@ namespace CommonLib
         #endregion
 
         /// <summary>调试日志开关。True=输出详细调试信息，False=仅输出关键事件</summary>
-        public static bool DebugEnabled { get; set; } = true;
+        public static bool DebugEnabled { get; set; } = false;
 
         private readonly BlockingCollection<LogEntry> _queue;
         private readonly Thread _worker;

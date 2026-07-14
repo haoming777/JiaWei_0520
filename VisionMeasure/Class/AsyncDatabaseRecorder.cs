@@ -9,8 +9,6 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using XL.Tool;
-
 namespace VisionMeasure
 {
 	/// <summary>
@@ -24,7 +22,6 @@ namespace VisionMeasure
 		private readonly SQLiteHelper _dbHelper;
 		private volatile bool _isRunning = true;
 		private bool _disposed = false;
-		private XLToolClass _toolClass = new XLToolClass();
 
 		// 连续爆管追踪
 		private long _lastSequenceId = 0;
@@ -36,6 +33,14 @@ namespace VisionMeasure
 		private string _cachedShift = "";
 		private string _cachedShiftDate = "";
 		private DateTime _lastShiftCheck = DateTime.MinValue;
+
+		// 汇总行缓存：记录已确认存在的 (date, shift, sku) 组合，避免每条记录都查 DB
+		private readonly HashSet<string> _summaryCache = new HashSet<string>();
+
+		// 数据保留策略：超过保留天数自动清理（默认90天）
+		private const int DATA_RETENTION_DAYS = 90;
+		private DateTime _lastCleanupTime = DateTime.MinValue;
+		private const int CLEANUP_INTERVAL_HOURS = 24;
 
 		public AsyncDatabaseRecorder(string databasePath = null)
 		{
@@ -69,7 +74,7 @@ namespace VisionMeasure
 			};
 			_workerThread.Start();
 
-			_toolClass.SaveLog("异步数据库记录器初始化完成");
+			FastLogger.Instance.Info("异步数据库记录器初始化完成");
 		}
 
 		private void InitializeDatabase()
@@ -137,16 +142,21 @@ namespace VisionMeasure
                     )";
 
 				_dbHelper.ExecuteNonQuery(createDetailTable);
+				// 【性能】关键索引：大幅加速大表查询（幂等：IF NOT EXISTS 防重复）
+				// sequence_id 索引 → IsConsecutiveBurstExcluded / RetroactiveUpdate
+				// p_shift_date 索引 → UpdateOrCreateSummary / 报表导出
+				_dbHelper.ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_detail_seq ON production_records_detail(sequence_id);");
+				_dbHelper.ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_detail_shift ON production_records_detail(p_shift_date, p_shift, sku);");
 				_dbHelper.ExecuteNonQuery(createSummaryTable);
 
 				// 补建检测标准列（兼容旧数据库）
 				EnsureSummaryConfigColumns();
 
-				_toolClass.SaveLog("数据库表初始化完成");
+				FastLogger.Instance.Info("数据库表初始化完成");
 			}
 			catch (Exception ex)
 			{
-				_toolClass.SaveLog($"[DB] 初始化数据库异常: {ex.Message}\n{ex.StackTrace}");
+				FastLogger.Instance.Error("DB初始化异常", ex);
 			}
 		}
 
@@ -168,7 +178,7 @@ namespace VisionMeasure
 			// 添加到队列（阻塞最多2秒等待消费者，防止记录丢失）
 			if (!_recordQueue.TryAdd(record, 2000))
 			{
-				_toolClass.SaveLog($"[严重] 记录队列阻塞超2秒仍未空，丢弃记录: SequenceId={record.SequenceId}");
+				FastLogger.Instance.Error($"记录队列阻塞: SequenceId={record.SequenceId}");
 			}
 		}
 
@@ -202,11 +212,11 @@ namespace VisionMeasure
 						new SQLiteParameter("@sku", currentSku));
 				}
 
-				_toolClass.SaveLog($"回溯更新连续爆管剔除记录: {currentSequenceId-2}, {currentSequenceId-1}, {currentSequenceId}");
+				FastLogger.Instance.Debug($"连续爆管回溯: {currentSequenceId-2}, {currentSequenceId-1}, {currentSequenceId}");
 			}
 			catch (Exception ex)
 			{
-				_toolClass.SaveLog($"回溯更新连续爆管剔除记录失败: {ex.Message}");
+				FastLogger.Instance.Error($"连续爆管回溯失败: {ex.Message}");
 			}
 		}
 
@@ -495,7 +505,7 @@ namespace VisionMeasure
 			// 当前记录已在 DB 中，所以查前两条即可凑齐3条连续
 			try
 			{
-				string sql = "SELECT COUNT(*) FROM production_records_detail WHERE sequence_id = @id1 AND cam5_result = 0 AND is_excluded = 0";
+				string sql = "SELECT COUNT(*) FROM production_records_detail WHERE sequence_id = @id1 AND ng_爆管 = 1 AND is_excluded = 0";
 				var r1 = _dbHelper.ExecuteQuery(sql, new SQLiteParameter("@id1", sequenceId - 1));
 				int c1 = (r1 != null && r1.Rows.Count > 0) ? Convert.ToInt32(r1.Rows[0][0]) : 0;
 				if (c1 == 0) return false;
@@ -554,7 +564,7 @@ namespace VisionMeasure
 				}
 				catch (Exception ex)
 				{
-					_toolClass.SaveLog($"处理数据库记录异常: {ex.Message}");
+					FastLogger.Instance.Error($"DB处理异常: {ex.Message}");
 				}
 			}
 		}
@@ -566,7 +576,7 @@ namespace VisionMeasure
 		{
 			try
 			{
-				_toolClass.SaveLog($"[DB] 开始保存记录 - SequenceId:{record.SequenceId}, FinalResult:{record.FinalResult}, SKU:{record.Sku}");
+				FastLogger.Instance.Debug($"DB写入: SeqId={record.SequenceId} Result={record.FinalResult} SKU={record.Sku}");
 
 				string insertSql = @"
                     INSERT INTO production_records_detail (
@@ -614,11 +624,11 @@ namespace VisionMeasure
 				bool success = _dbHelper.ExecuteNonQuery(insertSql, parameters);
 				if (!success)
 				{
-					_toolClass.SaveLog($"[DB] 保存记录失败 - SequenceId:{record.SequenceId}");
+					FastLogger.Instance.Error($"DB写入失败: SeqId={record.SequenceId}");
 				}
 				else
 				{
-					_toolClass.SaveLog($"[DB] 保存记录成功 - SequenceId:{record.SequenceId}");
+					FastLogger.Instance.Debug($"DB写入完成: SeqId={record.SequenceId}");
 
 					// 【INSERT 后检查连续爆管】记录已入库，查 DB 前 2 条是否也是爆管
 					if (record.Cam5_BaoguanResult == 0)
@@ -653,7 +663,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
-				_toolClass.SaveLog($"[DB] 保存记录异常: {ex.Message}\n{ex.StackTrace}");
+				FastLogger.Instance.Error("DB保存异常", ex);
 			}
 		}
 
@@ -670,6 +680,9 @@ namespace VisionMeasure
 				string shift = GetCurrentShift(now.Hour);
 				string date = shift == "夜班" && now.Hour < 8 ? now.AddDays(-1).ToString("yyMMdd") : now.ToString("yyMMdd");
 				UpdateOrCreateSummary(date, shift, sku);
+				// 每 30 秒触发一次 WAL checkpoint，防止 WAL 文件无限增长
+				try { _dbHelper.ExecuteNonQuery("PRAGMA wal_checkpoint(PASSIVE);"); }
+				catch { }
 			}
 			catch { }
 		}
@@ -694,7 +707,7 @@ namespace VisionMeasure
 				}
 				catch (Exception ex)
 				{
-					_toolClass.SaveLog($"生成班次汇总失败: {ex.Message}");
+					FastLogger.Instance.Error($"汇总生成失败: {ex.Message}");
 				}
 			});
 		}
@@ -724,7 +737,7 @@ namespace VisionMeasure
 					string reportPath = ExportFullShiftReportToCSV(date, shift, skipDetailExport);
 
 					string desc = skipDetailExport ? "汇总" : "完整";
-					_toolClass.SaveLog($"{desc}班次报表已导出: {date} {shift}");
+					FastLogger.Instance.Info($"报表已导出: {date} {shift}");
 
 					// 如果需要，打开保存报表的文件夹
 					if (openFolderAfterExport && !string.IsNullOrEmpty(reportPath) && Directory.Exists(reportPath))
@@ -734,7 +747,7 @@ namespace VisionMeasure
 				}
 				catch (Exception ex)
 				{
-					_toolClass.SaveLog($"导出完整班次报表失败: {ex.Message}");
+					FastLogger.Instance.Error($"报表导出失败: {ex.Message}");
 				}
 			});
 		}
@@ -775,7 +788,7 @@ namespace VisionMeasure
 					// ══════════════════════════════════
 					string summarySql = @"
 						SELECT * FROM production_records_summary
-						ORDER BY p_date DESC, p_shift DESC, sku";
+							ORDER BY p_date DESC, p_shift DESC, sku LIMIT 1000";
 
 					var summaryData = _dbHelper.ExecuteQuery(summarySql);
 
@@ -825,7 +838,7 @@ namespace VisionMeasure
 							       is_excluded, excluded_reason
 							FROM production_records_detail
 							WHERE p_shift_date = @date AND p_shift = @shift
-							ORDER BY p_time DESC";
+								ORDER BY p_time DESC LIMIT 50000";
 
 						var detailData = _dbHelper.ExecuteQuery(detailSql,
 							new SQLiteParameter("@date", date),
@@ -851,14 +864,14 @@ namespace VisionMeasure
 					}
 				}
 
-				_toolClass.SaveLog($"完整报表已导出: {filePath}");
+				FastLogger.Instance.Info($"报表已导出: {filePath}");
 
 				// 返回保存报表的文件夹路径
 				return exportDir;
 			}
 			catch (Exception ex)
 			{
-				_toolClass.SaveLog($"导出完整班次报表异常: {ex.Message}");
+				FastLogger.Instance.Error($"报表导出异常: {ex.Message}");
 				return null;
 			}
 		}
@@ -887,7 +900,7 @@ namespace VisionMeasure
 				{
 					string alterSql = "ALTER TABLE production_records_summary ADD COLUMN " + col.Name + " " + col.Type + " DEFAULT " + col.Default;
 					_dbHelper.ExecuteNonQuery(alterSql);
-					_toolClass.SaveLog("[DB迁移] 已添加列: " + col.Name);
+					FastLogger.Instance.Info("DB迁移: 已添加列 " + col.Name);
 					try { FastLogger.Instance.Info("DB迁移: 已添加列 " + col.Name); } catch { }
 				}
 				catch
@@ -915,7 +928,7 @@ private void GenerateShiftSummaryInternal(string date, string shift)
 				UpdateOrCreateSummary(date, shift, sku);
 			}
 
-			_toolClass.SaveLog($"班次汇总生成完成: {date} {shift}");
+			FastLogger.Instance.Info($"汇总生成完成: {date} {shift}");
 		}
 
 		private void UpdateOrCreateSummary(string date, string shift, string sku)
@@ -1072,12 +1085,12 @@ private void GenerateShiftSummaryInternal(string date, string shift)
 							$"{row["ng_混合多种缺陷"]},{row["continuous_exclude_count"]},{row["yield_rate"]}");
 					}
 
-					_toolClass.SaveLog($"报表已导出: {filePath}");
+					FastLogger.Instance.Debug($"报表已导出: {filePath}");
 				}
 			}
 			catch (Exception ex)
 			{
-				_toolClass.SaveLog($"导出Excel失败: {ex.Message}");
+				FastLogger.Instance.Error($"Excel导出失败: {ex.Message}");
 			}
 		}
 
@@ -1124,7 +1137,7 @@ private void GenerateShiftSummaryInternal(string date, string shift)
 				}
 				catch (Exception ex)
 				{
-					_toolClass.SaveLog($"手动触发班次汇总异常: {ex.Message}");
+					FastLogger.Instance.Error($"班次汇总异常: {ex.Message}");
 				}
 			});
 		}
@@ -1138,7 +1151,7 @@ private void GenerateShiftSummaryInternal(string date, string shift)
 			List<string> skus = new List<string>();
 			try
 			{
-				string sql = "SELECT DISTINCT sku FROM production_records_detail WHERE sku IS NOT NULL AND sku != ''";
+				string sql = "SELECT DISTINCT sku FROM production_records_detail WHERE sku IS NOT NULL AND sku != '' ORDER BY sku LIMIT 200";
 				var data = _dbHelper.ExecuteQuery(sql);
 				foreach (DataRow row in data.Rows)
 				{
@@ -1147,7 +1160,7 @@ private void GenerateShiftSummaryInternal(string date, string shift)
 			}
 			catch (Exception ex)
 			{
-				_toolClass.SaveLog($"获取SKU列表异常: {ex.Message}");
+				FastLogger.Instance.Error($"SKU列表获取异常: {ex.Message}");
 			}
 			return skus;
 		}
@@ -1157,37 +1170,45 @@ private void GenerateShiftSummaryInternal(string date, string shift)
 		/// 后续记录由30秒定时器全量更新
 		/// </summary>
 		private void EnsureSummaryExists(ProductionRecord record)
-		{
-			try
 			{
-				// 检查是否已存在汇总行
-				string checkSql = "SELECT COUNT(*) FROM production_records_summary WHERE p_date = @date AND p_shift = @shift AND sku = @sku";
-				var result = _dbHelper.ExecuteQuery(checkSql,
-					new SQLiteParameter("@date", record.ShiftDateStr),
-					new SQLiteParameter("@shift", record.Shift),
-					new SQLiteParameter("@sku", record.Sku));
+				try
+				{
+					// 内存缓存：已确认存在的汇总行跳过 DB 查询
+					string key = record.ShiftDateStr + "|" + record.Shift + "|" + record.Sku;
+					lock (_summaryCache)
+					{
+						if (_summaryCache.Contains(key))
+							return;
+					}
 
-				int existingCount = (result != null && result.Rows.Count > 0)
-					? Convert.ToInt32(result.Rows[0][0]) : 0;
-				if (existingCount == 0)
-				{
-					// 新SKU/新班次：立刻跑一次完整汇总，确保报表能立刻查到
-					UpdateOrCreateSummary(record.ShiftDateStr, record.Shift, record.Sku);
-					try { FastLogger.Instance.Debug($"首条汇总: SKU={record.Sku} Date={record.ShiftDateStr} Shift={record.Shift}"); } catch { }
+					// 缓存未命中：查 DB 确认
+					string checkSql = "SELECT COUNT(*) FROM production_records_summary WHERE p_date = @date AND p_shift = @shift AND sku = @sku";
+					var result = _dbHelper.ExecuteQuery(checkSql,
+						new SQLiteParameter("@date", record.ShiftDateStr),
+						new SQLiteParameter("@shift", record.Shift),
+						new SQLiteParameter("@sku", record.Sku));
+
+					int existingCount = (result != null && result.Rows.Count > 0)
+						? Convert.ToInt32(result.Rows[0][0]) : 0;
+					if (existingCount == 0)
+					{
+						// 新SKU/新班次：立刻跑一次完整汇总
+						UpdateOrCreateSummary(record.ShiftDateStr, record.Shift, record.Sku);
+					}
+					// 无论是否已存在，都加入缓存
+					lock (_summaryCache)
+					{
+						if (_summaryCache.Count > 1000) _summaryCache.Clear();
+						_summaryCache.Add(key);
+					}
 				}
-				else
+				catch (Exception ex)
 				{
-					try { FastLogger.Instance.Debug($"汇总行已存在: SKU={record.Sku} Date={record.ShiftDateStr}"); } catch { }
+					FastLogger.Instance.Error("汇总创建异常", ex);
 				}
 			}
-			catch (Exception ex)
-			{
-				_toolClass.SaveLog($"首条汇总创建异常: {ex.Message}\n{ex.StackTrace}");
-				try { CommonLib.FastLogger.Instance.Error($"汇总行创建失败 SKU={record.Sku} Date={record.ShiftDateStr} Shift={record.Shift}", ex); } catch { }
-			}
-		}
 
-		public void Dispose()
+			public void Dispose()
 		{
 			if (_disposed) return;
 			_disposed = true;
@@ -1200,7 +1221,7 @@ private void GenerateShiftSummaryInternal(string date, string shift)
 			}
 
 			_recordQueue.Dispose();
-			_toolClass.SaveLog("异步数据库记录器已释放");
+			FastLogger.Instance.Info("异步数据库记录器已释放");
 		}
 	}
 
