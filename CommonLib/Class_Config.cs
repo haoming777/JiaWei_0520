@@ -599,6 +599,25 @@ namespace CommonLib
 			}
 		}
 
+		/// <summary>【P2】强制落盘计数器（无5秒节流），在程序退出时调用防止最后几秒的计数丢失</summary>
+		public static void FlushCountersNow()
+		{
+			lock (_cntLock)
+			{
+				string ip = _instance._iniPath;
+				INIWriteValue(ip, "count", "total", _totalVal.ToString());
+				INIWriteValue(ip, "count", "ok", _okVal.ToString());
+				INIWriteValue(ip, "count", "ng_cam1", _ng1Val.ToString());
+				INIWriteValue(ip, "count", "ng_cam2", _ng2Val.ToString());
+				INIWriteValue(ip, "count", "ng_cam3", _ng3Val.ToString());
+				INIWriteValue(ip, "count", "ng_cam4", _ng4Val.ToString());
+				INIWriteValue(ip, "count", "ng_cam5", _ng5Val.ToString());
+				INIWriteValue(ip, "count", "burstExcludeCount", _burstVal.ToString());
+				_cntLastFlush = DateTime.Now;
+				try { FastLogger.Instance.Info("[Counters] Force-flushed to INI on shutdown"); } catch { }
+			}
+		}
+
 		public double total
 		{
 			get { LazyLoadCounters(); return _totalVal; }

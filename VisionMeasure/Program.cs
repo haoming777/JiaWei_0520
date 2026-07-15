@@ -15,14 +15,13 @@ namespace VisionMeasure
 		static void Main()
 		{
 			bool isAppRunning = false;
-			using (Mutex mutex = new Mutex(true, Application.ProductName, out isAppRunning))
+			Mutex appMutex = new Mutex(true, Application.ProductName, out isAppRunning);
+			if (!isAppRunning)
 			{
-				if (!isAppRunning)
-				{
-					MessageBox.Show("系统已经启动！", "系统提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-					Environment.Exit(1);
-				}
+				MessageBox.Show("系统已经启动！", "系统提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+				Environment.Exit(1);
 			}
+			// appMutex 必须持有到进程退出，不可 using/dispose 否则互斥失效
 
 			// ──── 初始化关键日志系统（最早调用）────
 			string logDir = Path.Combine(Application.StartupPath, "Logs");

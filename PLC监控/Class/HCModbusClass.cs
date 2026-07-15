@@ -272,7 +272,7 @@ namespace PLC调试.Class
 
 				while (true)
 				{
-					Thread.Sleep(10);
+					Thread.Sleep(100);
 					if (modbusState)
 					{
 						count1 = modbusTcp.ReadUInt32($"MB10100").Content;

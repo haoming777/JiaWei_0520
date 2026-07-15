@@ -153,22 +153,16 @@ namespace PLC调试.Class
 
 		private void ReadGetTrigger()
 		{
-			try
+			string path = "DB1000.DBW0";
+			short val = 0;
+			while (!_disposed)
 			{
-
-				string path = "DB1000.DBW0";
-				short val = 0;
-				//string path = _Config.gt_DataValid.ToString();
-				//toolClass.SaveLog($"触发地址：{path}");
-				while (!_disposed)
+				try
 				{
-
 					Thread.Sleep(50);
-					//toolClass.SaveLog(plcState + "状态");
 					if (!plcState) continue;
 
 					short test = Convert.ToInt16(plc.ReadInt16("DB1000.DBW0").Content);
-						
 					if (test == 1)
 					{
 						if (triggerWatch.IsRunning) { long trigMs = triggerWatch.ElapsedMilliseconds; if (trigMs > 500) { try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn("触发间隔偏长: " + trigMs + "ms"); } catch { } } triggerWatch.Restart(); } else triggerWatch.Start();
@@ -178,35 +172,33 @@ namespace PLC调试.Class
 						toolClass.SaveLog($"写零后读取{plc.ReadInt16(path).Content}");
 					}
 				}
-			}
-			catch (Exception ex)
-			{
-				plcState = false;
-				EventConnectState(false, $"读触发信号时出现异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
+				catch (Exception ex)
+				{
+					plcState = false;
+					EventConnectState(false, $"读触发信号时出现异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
+					Thread.Sleep(1000);
+				}
 			}
 		}
 
 
 		private void WriteKeepAlive()
 		{
-			try
+			short val = 1;
+			while (!_disposed)
 			{
-				short val = 1;
-				while (!_disposed)
+				try
 				{
 					Thread.Sleep(500);
-
 					if (plcState)
-					{
 						plc.Write("DB1000.DBW78", val);
-					}
 				}
-
-			}
-			catch (Exception ex)
-			{
-				plcState = false;
-				EventConnectState(false, $"向PLC写心跳时发生错误...\r\n {ex.Message} \r\n {ex.StackTrace}");
+				catch (Exception ex)
+				{
+					plcState = false;
+					EventConnectState(false, $"向PLC写心跳时发生错误...\r\n {ex.Message} \r\n {ex.StackTrace}");
+					Thread.Sleep(1000);
+				}
 			}
 		}
 
@@ -214,9 +206,9 @@ namespace PLC调试.Class
 		{
 			timeOut.Start();
 			short oldVal = 0;
-			try
+			while (!_disposed)
 			{
-				while (!_disposed)
+				try
 				{
 					Thread.Sleep(50);
 					if (plcState)
@@ -224,28 +216,24 @@ namespace PLC调试.Class
 						short newVal = plc.ReadInt16("DB1000.DBW78").Content;
 						if (oldVal != newVal)
 						{
-							Console.WriteLine($"状态变了 之前{oldVal} 现在{newVal}");
 							oldVal = newVal;
-							//Console.WriteLine(timeOut.ElapsedMilliseconds);
 							timeOut.Restart();
-
-							Console.WriteLine($"状态更新后 时间清空了{timeOut.ElapsedMilliseconds}");
 						}
 
 						if (timeOut.ElapsedMilliseconds > 10000)
 						{
-							Console.WriteLine($"超出十秒状态没有更新了 时间：{timeOut.ElapsedMilliseconds}ms");
 							plcState = false;
 							EventConnectState(false, $"心跳状态超十秒未更新，判定为通讯断开状态，最后一次为[{newVal}]");
-							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Debug("S7-1200心跳超时, 最后值=" + newVal + ""); } catch { }
+							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Debug("S7-1200心跳超时, 最后值=" + newVal); } catch { }
 						}
 					}
 				}
-			}
-			catch (Exception ex)
-			{
-				plcState = false;
-				EventConnectState(false, $"向PLC写心跳时发生错误...\r\n {ex.Message} \r\n {ex.StackTrace}");
+				catch (Exception ex)
+				{
+					plcState = false;
+					EventConnectState(false, $"DoState异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
+					Thread.Sleep(1000);
+				}
 			}
 		}
 
@@ -395,14 +383,14 @@ namespace PLC调试.Class
 
 		private void DoReadCount()
 		{
-			try
-			{
-				uint count1 = 0, count2 = 0, count3 = 0, count4 = 0, count5 = 0;
-				toolClass.SaveLog("读PLC计数开始");
+			uint count1 = 0, count2 = 0, count3 = 0, count4 = 0, count5 = 0;
+			toolClass.SaveLog("读PLC计数开始");
 
-				while (!_disposed)
+			while (!_disposed)
+			{
+				try
 				{
-					Thread.Sleep(10);
+					Thread.Sleep(100);
 					if (plcState)
 					{
 						count1 = plc.ReadUInt32("DB1000.DBD100").Content;
@@ -418,11 +406,12 @@ namespace PLC调试.Class
 						errorCount++;
 					}
 				}
-			}
-			catch (Exception ex)
-			{
-				plcState = false;
-				EventConnectState(false, $"读PLC计数错误...\r\n {ex.Message} \r\n {ex.StackTrace}");
+				catch (Exception ex)
+				{
+					plcState = false;
+					EventConnectState(false, $"读PLC计数错误...\r\n {ex.Message} \r\n {ex.StackTrace}");
+					Thread.Sleep(1000);
+				}
 			}
 		}
 

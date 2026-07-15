@@ -38,7 +38,7 @@ namespace VisionMeasure
 		private readonly HashSet<string> _summaryCache = new HashSet<string>();
 
 		// 数据保留策略：超过保留天数自动清理（默认90天）
-		private const int DATA_RETENTION_DAYS = 90;
+		private const int DATA_RETENTION_DAYS = 30; // 与图像保留天数一致，防DB文件过大
 		private DateTime _lastCleanupTime = DateTime.MinValue;
 		private const int CLEANUP_INTERVAL_HOURS = 24;
 
@@ -147,6 +147,8 @@ namespace VisionMeasure
 				// p_shift_date 索引 → UpdateOrCreateSummary / 报表导出
 				_dbHelper.ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_detail_seq ON production_records_detail(sequence_id);");
 				_dbHelper.ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_detail_shift ON production_records_detail(p_shift_date, p_shift, sku);");
+				_dbHelper.ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_detail_time ON production_records_detail(p_time);");
+				_dbHelper.ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_detail_date ON production_records_detail(p_date);");
 				_dbHelper.ExecuteNonQuery(createSummaryTable);
 
 				// 补建检测标准列（兼容旧数据库）
@@ -561,6 +563,9 @@ namespace VisionMeasure
 					{
 						SaveRecordToDatabase(record);
 					}
+			// 每次循环检查是否需要清理旧数据和WAL（时间节流，不阻塞热路径）
+				TryCleanupOldRecords();
+				TryCheckpointWal();
 				}
 				catch (Exception ex)
 				{
@@ -678,7 +683,7 @@ namespace VisionMeasure
 				if (string.IsNullOrEmpty(sku)) return;
 				var now = DateTime.Now;
 				string shift = GetCurrentShift(now.Hour);
-				string date = shift == "夜班" && now.Hour < 8 ? now.AddDays(-1).ToString("yyMMdd") : now.ToString("yyMMdd");
+				string date = shift == "夜班" && now.Hour < 8 ? now.AddDays(-1).ToString("yyyy-MM-dd") : now.ToString("yyyy-MM-dd");
 				UpdateOrCreateSummary(date, shift, sku);
 				// 每 30 秒触发一次 WAL checkpoint，防止 WAL 文件无限增长
 				try { _dbHelper.ExecuteNonQuery("PRAGMA wal_checkpoint(PASSIVE);"); }
@@ -1212,7 +1217,52 @@ private void GenerateShiftSummaryInternal(string date, string shift)
 				}
 			}
 
-			public void Dispose()
+			/// <summary>
+		/// 【DB文件防爆】每天清理超过保留天数的旧记录，分批删除防止长事务阻塞
+		/// </summary>
+		private void TryCleanupOldRecords()
+		{
+			if ((DateTime.Now - _lastCleanupTime).TotalHours < CLEANUP_INTERVAL_HOURS) return;
+			_lastCleanupTime = DateTime.Now;
+
+			try
+			{
+				string cutoffDate = DateTime.Now.AddDays(-DATA_RETENTION_DAYS).ToString("yyyy-MM-dd");
+				// 分 10 批删除，每批最多 5000 行，避免长锁
+				int batchCount = 0;
+				for (int batch = 0; batch < 10; batch++)
+				{
+					string deleteSql = "DELETE FROM production_records_detail WHERE id IN (SELECT id FROM production_records_detail WHERE p_date < @cutoff LIMIT 5000)";
+					bool ok = _dbHelper.ExecuteNonQuery(deleteSql, new SQLiteParameter("@cutoff", cutoffDate));
+					if (!ok) break;
+					batchCount++;
+				}
+				if (batchCount > 0)
+				{
+					FastLogger.Instance.Info($"[DBClean] 完成{batchCount}批清理(截止{cutoffDate}), 每批最多5000行");
+					// 清理后收缩数据库文件
+					try { _dbHelper.ExecuteNonQuery("PRAGMA optimize;"); } catch { }
+				}
+			}
+			catch (Exception ex)
+			{
+				FastLogger.Instance.Error($"[DBClean] 清理异常: {ex.Message}");
+			}
+		}
+
+		/// <summary>
+		/// 【WAL防爆】主动截断WAL文件防止无限增长导致checkpoint时长时间阻塞
+		/// </summary>
+		private DateTime _lastCheckpoint = DateTime.MinValue;
+		private void TryCheckpointWal()
+		{
+			if ((DateTime.Now - _lastCheckpoint).TotalMinutes < 30) return;
+			_lastCheckpoint = DateTime.Now;
+			try { _dbHelper.ExecuteNonQuery("PRAGMA wal_checkpoint(TRUNCATE);"); }
+			catch { }
+		}
+
+		public void Dispose()
 		{
 			if (_disposed) return;
 			_disposed = true;

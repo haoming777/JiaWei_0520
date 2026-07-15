@@ -164,6 +164,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Class\AsyncDatabaseRecorder.cs" />
+    <Compile Include="Class\DiskGuardService.cs" />
     <Compile Include="Class\RectClass.cs" />
     <Compile Include="Class\RoundnessDetector - 复制.cs" />
     <Compile Include="Class\RoundnessDetector.cs" />

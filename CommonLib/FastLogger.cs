@@ -71,6 +71,9 @@ namespace CommonLib
             if (!Directory.Exists(_logDir))
                 Directory.CreateDirectory(_logDir);
 
+            // 【P2】启动时清理超过30天的日志文件
+            CleanOldLogs(_logDir, 30);
+
             _queue = new BlockingCollection<LogEntry>(new ConcurrentQueue<LogEntry>(), 10000);
 
             _worker = new Thread(ProcessQueue)
@@ -112,7 +115,7 @@ namespace CommonLib
                     Message = message ?? "(null)",
                     ThreadId = Thread.CurrentThread.ManagedThreadId
                 };
-                if (!_queue.TryAdd(entry, 50))
+                if (!_queue.TryAdd(entry, 0))
                 {
                     int dropped = Interlocked.Increment(ref _droppedCount);
                     if (dropped % 100 == 0)
@@ -232,6 +235,34 @@ namespace CommonLib
                         try { _writer.Flush(); } catch { }
                         _entriesSinceFlush = 0;
                     }
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>【P2】清理超过 retentionDays 天的旧日志文件</summary>
+        private static void CleanOldLogs(string logDir, int retentionDays)
+        {
+            try
+            {
+                var cutoff = DateTime.Now.AddDays(-retentionDays);
+                foreach (var file in Directory.GetFiles(logDir, "app_*.log"))
+                {
+                    try
+                    {
+                        if (File.GetLastWriteTime(file) < cutoff)
+                            File.Delete(file);
+                    }
+                    catch { }
+                }
+                foreach (var file in Directory.GetFiles(logDir, "crash_*.log"))
+                {
+                    try
+                    {
+                        if (File.GetLastWriteTime(file) < cutoff)
+                            File.Delete(file);
+                    }
+                    catch { }
                 }
             }
             catch { }

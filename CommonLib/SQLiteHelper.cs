@@ -76,16 +76,17 @@ namespace CommonLib
 			}
 		}
 
-		public bool FindPassWord(string name, string psw)
-		{
-			using (var conn = new SQLiteConnection(@"Data Source = " + dataSource))
-			{
-				var DataTable = new DataTable();
-				var adp = new SQLiteDataAdapter($"select * from user_info where UserName = \"{name}\" and PassWord = \"{MD5Decode16(psw)}\"", conn);
-				adp.Fill(DataTable);
-				return DataTable.Rows.Count > 0;
-			}
-		}
+	public bool FindPassWord(string name, string psw)
+	{
+		// P0: parameterized query to prevent SQL injection, keep MD5-16 for compat
+		string sql = "select * from user_info where UserName=@name and PassWord=@psw";
+		var parameters = new SQLiteParameter[] {
+			new SQLiteParameter("@name", name),
+			new SQLiteParameter("@psw", MD5Decode16(psw))
+		};
+		DataTable dt = ExecuteQuery(sql, parameters);
+		return dt.Rows.Count > 0;
+	}
 
 		public UserClass FindUserName(string name)
 		{
