@@ -308,7 +308,7 @@ namespace VisionMeasure
 				for (int i = 0; i < 5; i++) _cameraEnabled[i] = true;
 			}
 			try { FastLogger.Instance.Info("工位启用状态: " + string.Join(" ", _cameraEnabled.Select((b,i) => "Cam"+(i+1)+"="+b)) + " (" + _cameraEnabled.Count(e=>e) + "/5 启用)"); } catch { }
-			if (IFSaveLog) FastLogger.Instance.Info("[CamCfg] 工位启用状态: Cam1=" + _cameraEnabled[0] + " Cam2=" + _cameraEnabled[1] + " Cam3=" + _cameraEnabled[2] + " Cam4=" + _cameraEnabled[3] + " Cam5=" + _cameraEnabled[4] + " (启用" + _cameraEnabled.Count(e=>e) + "路)")
+			if (IFSaveLog) FastLogger.Instance.Info("[CamCfg] 工位启用状态: Cam1=" + _cameraEnabled[0] + " Cam2=" + _cameraEnabled[1] + " Cam3=" + _cameraEnabled[2] + " Cam4=" + _cameraEnabled[3] + " Cam5=" + _cameraEnabled[4] + " (启用" + _cameraEnabled.Count(e=>e) + "路)");
 
 			// 【内存优化】Interactive模式允许后台并发GC，避免Batch模式下LOH碎片化导致OOM
 			// Batch模式禁用后台GC → Gen2/LOH只在分配失败时回收 → 碎片化后即使总空闲足够也无法分配大块
@@ -367,7 +367,7 @@ namespace VisionMeasure
 						SKU_Txt.Text = _savedSku;
 						SKU_Txt.Style = UIStyle.Green;
 					}
-					FastLogger.Instance.Debug($"已加载保存的SKU: {savedSku}")
+					FastLogger.Instance.Debug($"已加载保存的SKU: {savedSku}");
 				}
 				else
 				{
@@ -380,7 +380,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"初始化SKU异常: {ex.Message}")
+				FastLogger.Instance.Error($"初始化SKU异常: {ex.Message}");
 			}
 		}
 
@@ -401,13 +401,13 @@ namespace VisionMeasure
 				_bufferPool4 = _cameraEnabled[3] ? new ImageBufferPool(width45, height45, PixelFormat.Format8bppIndexed, 3, 10, 50 * 1024 * 1024) { PoolName = "Camera4_Pool" } : null;
 				_bufferPool5 = _cameraEnabled[4] ? new ImageBufferPool(width45, height45, PixelFormat.Format8bppIndexed, 3, 10, 50 * 1024 * 1024) { PoolName = "Camera5_Pool" } : null;
 
-				FastLogger.Instance.Debug("内存池初始化完成")
+				FastLogger.Instance.Debug("内存池初始化完成");
 		try { FastLogger.Instance.Info("内存池初始化完成"); } catch { }
 			}
 			catch (Exception ex)
 			{
 				try { FastLogger.Instance.Error("内存池初始化失败", ex); } catch { }
-			FastLogger.Instance.Error($"初始化内存池失败: {ex.Message}")
+			FastLogger.Instance.Error($"初始化内存池失败: {ex.Message}");
 			}
 		}
 
@@ -448,13 +448,13 @@ namespace VisionMeasure
 						}));
 				};
 				_dbRecorder.OnSummaryRefreshed = (total, ok, exclude) => { };
-				FastLogger.Instance.Debug("异步数据库记录器初始化完成")
+				FastLogger.Instance.Debug("异步数据库记录器初始化完成");
 			try { FastLogger.Instance.Info("异步数据库记录器初始化完成"); } catch { }
 			}
 			catch (Exception ex)
 			{
 				try { FastLogger.Instance.Error("数据库记录器初始化失败", ex); } catch { }
-			FastLogger.Instance.Error($"初始化数据库记录器失败: {ex.Message}")
+			FastLogger.Instance.Error($"初始化数据库记录器失败: {ex.Message}");
 			}
 		}
 
@@ -523,7 +523,7 @@ namespace VisionMeasure
 						if (!string.IsNullOrEmpty(_savedSku) && _dbRecorder != null)
 						{
 							_dbRecorder.ExportFullShiftReport(_currentShiftDate, _currentShift, skipDetailExport: true);
-							FastLogger.Instance.Debug($"SKU切换: {_savedSku} -> {currentSku}，已自动保存{_currentShift}班次汇总报表")
+							FastLogger.Instance.Debug($"SKU切换: {_savedSku} -> {currentSku}，已自动保存{_currentShift}班次汇总报表");
 						}
 
 						// SKU发生变化，清空统计数据
@@ -537,12 +537,12 @@ namespace VisionMeasure
 						// 设置边框为绿色
 						SetSkuTextBoxBorderColor(UIStyle.Green);
 
-						FastLogger.Instance.Info($"SKU已更新: {currentSku}，统计数据已清空")
+						FastLogger.Instance.Info($"SKU已更新: {currentSku}，统计数据已清空");
 					}
 				}
 				catch (Exception ex)
 				{
-					FastLogger.Instance.Error($"SKU保存异常: {ex.Message}")
+					FastLogger.Instance.Error($"SKU保存异常: {ex.Message}");
 				}
 				e.SuppressKeyPress = true;
 			}
@@ -611,11 +611,11 @@ namespace VisionMeasure
 				_totalSaveCount = 0;
 				_totalSaveTimeMs = 0;
 
-				FastLogger.Instance.Debug("高性能图像保存器初始化完成")
+				FastLogger.Instance.Debug("高性能图像保存器初始化完成");
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"初始化高性能保存器失败: {ex.Message}")
+				FastLogger.Instance.Error($"初始化高性能保存器失败: {ex.Message}");
 			}
 		}
 
@@ -670,7 +670,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"性能监控异常: {ex.Message}")
+				FastLogger.Instance.Error($"性能监控异常: {ex.Message}");
 			}
 		}
 
@@ -849,12 +849,24 @@ namespace VisionMeasure
 		{
 			try
 			{
-				var keys = _imageCache.Keys.ToArray();
-				foreach (var key in keys)
+			var keys = _imageCache.Keys.ToArray();
+			foreach (var key in keys)
+			{
+				ClearImageCache(key);
+				Interlocked.Increment(ref _cacheEvictCount);
+			}
+			// 同时清理滞留的存图待处理队列，防止对象池泄漏
+			{
+				var pendingKeys = _pendingImageSaves.Keys.ToArray();
+				foreach (var key in pendingKeys)
 				{
-					ClearImageCache(key);
-					Interlocked.Increment(ref _cacheEvictCount);
+					if (_pendingImageSaves.TryRemove(key, out var items))
+					{
+						foreach (var item in items)
+							try { QueueResultItem.Return(item); } catch { }
+					}
 				}
+			}
 				GC.Collect();
 				GC.WaitForPendingFinalizers();
 				System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
@@ -884,13 +896,13 @@ namespace VisionMeasure
 				_resultMatcher = new ResultMatcher(processors, OnResultsMatched);
 
 				int activeCount = processors.Count(p => p != null);
-				FastLogger.Instance.Info($"图像处理器初始化完成（{activeCount}/5 启用）")
+				FastLogger.Instance.Info($"图像处理器初始化完成（{activeCount}/5 启用）");
 				try { FastLogger.Instance.Info($"图像处理器初始化完成（{activeCount}/5 启用）"); } catch { }
 			}
 			catch (Exception ex)
 			{
 				try { FastLogger.Instance.Error("图像处理器初始化失败", ex); } catch { }
-			FastLogger.Instance.Error($"初始化图像处理器失败: {ex.Message}")
+			FastLogger.Instance.Error($"初始化图像处理器失败: {ex.Message}");
 			}
 		}
 
@@ -975,12 +987,12 @@ namespace VisionMeasure
 			try
 			{
 				try { FastLogger.Instance.Info("MainFrm_Load 开始初始化"); } catch { }
-				FastLogger.Instance.Info("系统开始初始化")
+				FastLogger.Instance.Info("系统开始初始化");
 				Loading.ShowLoadingScreen();
 
 				//if (!UsbDogClass.FindUsbDog())
 				//{
-				//	FastLogger.Instance.Info("初始化时，未找到加密狗")
+				//	FastLogger.Instance.Info("初始化时，未找到加密狗");
 				//	throw new Exception("初始化时，未找到加密狗");
 				//}
 				_Config.cameraDebug = 0;
@@ -996,13 +1008,13 @@ namespace VisionMeasure
 					if (plcTypeCfg == "HCMODBUS" || plcTypeCfg == "HC")
 					{
 						modbusClass = new HCModbusAdapter();
-						FastLogger.Instance.Info("[PLC] 使用 HCModbus 通讯协议")
+						FastLogger.Instance.Info("[PLC] 使用 HCModbus 通讯协议");
 						try { FastLogger.Instance.Info("PLC类型: HCModbus"); } catch { }
 					}
 					else
 					{
 						modbusClass = new S7_1200Class();
-						FastLogger.Instance.Info("[PLC] 使用 S7-1200 通讯协议（配置值:" + (string.IsNullOrEmpty(plcTypeCfg) ? "默认" : plcTypeCfg) + "）")
+						FastLogger.Instance.Info("[PLC] 使用 S7-1200 通讯协议（配置值:" + (string.IsNullOrEmpty(plcTypeCfg) ? "默认" : plcTypeCfg) + "）");
 						try { FastLogger.Instance.Info("PLC类型: S7-1200"); } catch { }
 					}
 				}
@@ -1010,13 +1022,13 @@ namespace VisionMeasure
 				{
 					// 兜底：任何异常都回退 S7-1200
 					modbusClass = new S7_1200Class();
-					FastLogger.Instance.Error($"[PLC] 类型选择异常，回退S7-1200: {plcInitEx.Message}")
+					FastLogger.Instance.Error($"[PLC] 类型选择异常，回退S7-1200: {plcInitEx.Message}");
 				}
 
 				if (modbusClass == null)
 				{
 					modbusClass = new S7_1200Class();
-					FastLogger.Instance.Info("[PLC] modbusClass为null，强制使用S7-1200")
+					FastLogger.Instance.Info("[PLC] modbusClass为null，强制使用S7-1200");
 				}
 
 				modbusClass.EventConnectState += ModbusConnectState;
@@ -1027,7 +1039,7 @@ namespace VisionMeasure
 					WriteResultThread = new Thread(WriteResultMethod);
 					WriteResultThread.IsBackground = true;
 					WriteResultThread.Start();
-					FastLogger.Instance.Info("Modbus连接完成")
+					FastLogger.Instance.Info("Modbus连接完成");
 				}
 
 				if (_Config.IFInitCamera.ToBool())
@@ -1057,13 +1069,13 @@ namespace VisionMeasure
 
 				modbusClass.RuningMethod();
 
-				FastLogger.Instance.Info("系统初始化完成")
+				FastLogger.Instance.Info("系统初始化完成");
 				try { FastLogger.Instance.Info("MainFrm_Load 初始化完成"); } catch { }
 			}
 			catch (Exception ex)
 			{
 				try { FastLogger.Instance.Error("MainFrm_Load 初始化失败", ex); } catch { }
-				FastLogger.Instance.Error($"初始化时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}")
+				FastLogger.Instance.Error($"初始化时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
 				MessageBox.Show($"系统初始化失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
 			}
 		}
@@ -1112,7 +1124,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"VerifyMethod出现异常...\r\n {ex.Message} \r\n {ex.StackTrace}")
+				FastLogger.Instance.Error($"VerifyMethod出现异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
 				return false;
 			}
 		}
@@ -1124,11 +1136,11 @@ namespace VisionMeasure
 				try
 				{
 					DeleteDir.DeleteMethod();
-					FastLogger.Instance.Info("过期图像清理完成")
+					FastLogger.Instance.Info("过期图像清理完成");
 				}
 				catch (Exception ex)
 				{
-					FastLogger.Instance.Error($"清理过期图像失败: {ex.Message}")
+					FastLogger.Instance.Error($"清理过期图像失败: {ex.Message}");
 				}
 			});
 		}
@@ -1166,7 +1178,7 @@ namespace VisionMeasure
 					{
 						try { FastLogger.Instance.Error("相机一加载失败", ex); } catch { }
 						try { FastLogger.Instance.Error("Camera1: 加载失败 " + ex.Message + ", 异常: " + ex.GetType().Name); } catch {}
-						if (IFSaveLog) FastLogger.Instance.Error("[CamCfg] Camera1 连接失败: " + ex.Message)
+						if (IFSaveLog) FastLogger.Instance.Error("[CamCfg] Camera1 连接失败: " + ex.Message);
 					}
 				}
 				else {  }
@@ -1198,7 +1210,7 @@ namespace VisionMeasure
 					{
 						try { FastLogger.Instance.Error("相机二加载失败", ex); } catch { }
 						try { FastLogger.Instance.Error("Camera2: 加载失败 " + ex.Message + ", 异常: " + ex.GetType().Name); } catch {}
-						if (IFSaveLog) FastLogger.Instance.Error("[CamCfg] Camera2 连接失败: " + ex.Message)
+						if (IFSaveLog) FastLogger.Instance.Error("[CamCfg] Camera2 连接失败: " + ex.Message);
 					}
 				}
 				else {  }
@@ -1230,7 +1242,7 @@ namespace VisionMeasure
 					{
 						try { FastLogger.Instance.Error("相机三加载失败", ex); } catch { }
 						try { FastLogger.Instance.Error("Camera3: 加载失败 " + ex.Message + ", 异常: " + ex.GetType().Name); } catch {}
-						if (IFSaveLog) FastLogger.Instance.Error("[CamCfg] Camera3 连接失败: " + ex.Message)
+						if (IFSaveLog) FastLogger.Instance.Error("[CamCfg] Camera3 连接失败: " + ex.Message);
 					}
 				}
 				else {  }
@@ -1300,13 +1312,13 @@ namespace VisionMeasure
 					+ (camera3SDK != null ? 1 : 0)
 					+ (camera4SDK != null ? 1 : 0)
 					+ (camera5SDK != null ? 1 : 0);
-				FastLogger.Instance.Info("相机初始化完成")
+				FastLogger.Instance.Info("相机初始化完成");
 				try { FastLogger.Instance.Info("Camera Init: 完成, " + connectedCount + "/5已连接"); } catch {}
 			}
 			catch (Exception ex)
 			{
 				try { FastLogger.Instance.Error("相机初始化失败", ex); } catch { }
-				FastLogger.Instance.Error($"连接相机错误...\r\n {ex.Message} \r\n {ex.StackTrace}")
+				FastLogger.Instance.Error($"连接相机错误...\r\n {ex.Message} \r\n {ex.StackTrace}");
 			}
 		}
 
@@ -1337,13 +1349,13 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"更新PLC计数异常: {ex.Message}")
+				FastLogger.Instance.Error($"更新PLC计数异常: {ex.Message}");
 			}
 		}
 
 		private void ModbusConnectState(bool state, string error)
 		{
-			FastLogger.Instance.Info($"ModbusConnectState: {error}")
+			FastLogger.Instance.Info($"ModbusConnectState: {error}");
 			if (state)
 			{
 				PlcState.State = Sunny.UI.UILightState.On;
@@ -1359,23 +1371,23 @@ namespace VisionMeasure
 		{
 			try
 			{
-				FastLogger.Instance.Info("控制器IP：" + ip)
+				FastLogger.Instance.Info("控制器IP：" + ip);
 				try { FastLogger.Instance.Info("运动控制卡开始连接 IP=" + ip); } catch { }
 				if (!myZmcaux.Connect(ref g_handle, ip))
 				{
-					try { FastLogger.Instance.Error("运动控制卡连接失败 IP=" + ip + " (Connect返回false)"); } catch { }
+					try { FastLogger.Instance.Error("运动控制卡连接失败 IP=" + ip + " (Connect返回false);"); } catch { }
 					return false;
 				}
 
 				MotionState.State = UILightState.On;
 				myZmcaux.Init(g_handle);
-				FastLogger.Instance.Info($"运控卡连接成功，句柄为：{g_handle}")
+				FastLogger.Instance.Info($"运控卡连接成功，句柄为：{g_handle}");
 				try { FastLogger.Instance.Info("运动控制卡连接成功 Handle=" + g_handle.ToInt64() + " IP=" + ip); } catch { }
 				return true;
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"连接运控卡出现异常...\r\n {ex.Message} \r\n {ex.StackTrace}")
+				FastLogger.Instance.Error($"连接运控卡出现异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
 				try { FastLogger.Instance.Error("运动控制卡连接异常 IP=" + ip, ex); } catch { }
 				return false;
 			}
@@ -1459,11 +1471,11 @@ namespace VisionMeasure
 					catch { }
 				}));
 
-				FastLogger.Instance.Info($"配置加载完成: cam1偏移{offset_cam1}, cam2偏移{offset_cam2}, cam3偏移{offset_cam3}, cam4偏移{offset_cam4}, cam5偏移{offset_cam5}, 发送偏移{offset_send}")
+				FastLogger.Instance.Info($"配置加载完成: cam1偏移{offset_cam1}, cam2偏移{offset_cam2}, cam3偏移{offset_cam3}, cam4偏移{offset_cam4}, cam5偏移{offset_cam5}, 发送偏移{offset_send}");
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"加载配置失败: {ex.Message}")
+				FastLogger.Instance.Error($"加载配置失败: {ex.Message}");
 			}
 		}
 
@@ -1519,7 +1531,7 @@ namespace VisionMeasure
 				}
 				else status[4] = "跳过(工位未启用)";
 
-				FastLogger.Instance.Info("AI模型初始化完成")
+				FastLogger.Instance.Info("AI模型初始化完成");
 				// 汇总日志
 				try { FastLogger.Instance.Info("AI模型初始化: Cam1=" + status[0] + " Cam2=" + status[1] + " Cam3=" + status[2] + " Cam4=" + status[3] + " Cam5=" + status[4] + " (" + loadedCount + "/5 已加载)"); } catch { }
 				// 明细日志（调试模式）
@@ -1528,7 +1540,7 @@ namespace VisionMeasure
 			catch (Exception ex)
 			{
 				try { FastLogger.Instance.Error("AI模型初始化失败", ex); } catch { }
-				FastLogger.Instance.Error($"AI模型初始化失败: {ex.Message}")
+				FastLogger.Instance.Error($"AI模型初始化失败: {ex.Message}");
 			}
 		}
 
@@ -1552,11 +1564,11 @@ namespace VisionMeasure
 				updateThread = new Thread(UpdateMethod);
 				updateThread.IsBackground = true;
 				updateThread.Start();
-				FastLogger.Instance.Info("IO线程已启动")
+				FastLogger.Instance.Info("IO线程已启动");
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"启动IO线程失败: {ex.Message}")
+				FastLogger.Instance.Error($"启动IO线程失败: {ex.Message}");
 			}
 		}
 
@@ -1573,14 +1585,14 @@ namespace VisionMeasure
 			catch (Exception ex)
 			{
 				if (!_isClosing)
-					FastLogger.Instance.Error($"读IO信号异常...\r\n {ex.Message} \r\n {ex.StackTrace}")
+					FastLogger.Instance.Error($"读IO信号异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
 			}
 		}
 
 		#region 实现相机接口
 		public void OnCameraClose(string cameraName, string cameraKey)
 		{
-			FastLogger.Instance.Info(string.Format("相机【{0}】关闭连接", cameraKey))
+			FastLogger.Instance.Info(string.Format("相机【{0}】关闭连接", cameraKey));
 			if (FastLogger.IsInitialized) FastLogger.Instance.Debug("相机断连: " + cameraName + " key=" + cameraKey);
 			if (camera1SDK != null && camera1SDK.curCameraKey.Equals(cameraKey))
 				camera1State.State = Sunny.UI.UILightState.Off;
@@ -1596,7 +1608,7 @@ namespace VisionMeasure
 
 		public void OnCameraOpen(string cameraName, string cameraKey)
 		{
-			FastLogger.Instance.Info(string.Format("相机【{0}】连接", cameraKey))
+			FastLogger.Instance.Info(string.Format("相机【{0}】连接", cameraKey));
 			if (camera1SDK != null && camera1SDK.curCameraKey.Equals(cameraKey))
 				camera1State.State = Sunny.UI.UILightState.On;
 			else if (camera2SDK != null && camera2SDK.curCameraKey.Equals(cameraKey))
@@ -1611,7 +1623,7 @@ namespace VisionMeasure
 
 		public void OnCameraConnectLoss(string cameraName, string cameraKey)
 		{
-			FastLogger.Instance.Info(string.Format("相机【{0}】丢失连接", cameraKey))
+			FastLogger.Instance.Info(string.Format("相机【{0}】丢失连接", cameraKey));
 			if (camera1SDK != null && camera1SDK.curCameraKey.Equals(cameraKey))
 			{
 				camera1State.State = Sunny.UI.UILightState.Off;
@@ -1626,7 +1638,7 @@ namespace VisionMeasure
 						{
 							try
 							{
-								FastLogger.Instance.Info(string.Format("相机{0}【{1}】重连", 1, cameraKey))
+								FastLogger.Instance.Info(string.Format("相机{0}【{1}】重连", 1, cameraKey));
 								camera1SDK.SetCameraByKey(_Config.Camera1SN);
 								camera1SDK.Open();
 							}
@@ -1651,7 +1663,7 @@ namespace VisionMeasure
 						{
 							try
 							{
-								FastLogger.Instance.Info(string.Format("相机{0}【{1}】重连", 2, cameraKey))
+								FastLogger.Instance.Info(string.Format("相机{0}【{1}】重连", 2, cameraKey));
 								camera2SDK.SetCameraByKey(_Config.Camera2SN);
 								camera2SDK.Open();
 							}
@@ -1676,7 +1688,7 @@ namespace VisionMeasure
 						{
 							try
 							{
-								FastLogger.Instance.Info(string.Format("相机{0}【{1}】重连", 3, cameraKey))
+								FastLogger.Instance.Info(string.Format("相机{0}【{1}】重连", 3, cameraKey));
 								camera3SDK.SetCameraByKey(_Config.Camera3SN);
 								camera3SDK.Open();
 							}
@@ -1701,7 +1713,7 @@ namespace VisionMeasure
 						{
 							try
 							{
-								FastLogger.Instance.Info(string.Format("相机{0}【{1}】重连", 4, cameraKey))
+								FastLogger.Instance.Info(string.Format("相机{0}【{1}】重连", 4, cameraKey));
 								camera4SDK.SetCameraByKey(_Config.Camera4SN);
 								camera4SDK.Open();
 							}
@@ -1726,7 +1738,7 @@ namespace VisionMeasure
 						{
 							try
 							{
-								FastLogger.Instance.Info(string.Format("相机{0}【{1}】重连", 5, cameraKey))
+								FastLogger.Instance.Info(string.Format("相机{0}【{1}】重连", 5, cameraKey));
 								camera5SDK.SetCameraByKey(_Config.Camera5SN);
 								camera5SDK.Open();
 							}
@@ -1753,7 +1765,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"相机一图像处理失败: {ex.Message}")
+				FastLogger.Instance.Error($"相机一图像处理失败: {ex.Message}");
 			}
 		}
 
@@ -1769,7 +1781,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"相机二图像处理失败: {ex.Message}")
+				FastLogger.Instance.Error($"相机二图像处理失败: {ex.Message}");
 			}
 		}
 
@@ -1785,7 +1797,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"相机三图像处理失败: {ex.Message}")
+				FastLogger.Instance.Error($"相机三图像处理失败: {ex.Message}");
 			}
 		}
 
@@ -1808,7 +1820,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"相机四图像处理失败: {ex.Message}")
+				FastLogger.Instance.Error($"相机四图像处理失败: {ex.Message}");
 				try { FastLogger.Instance.Error("Camera4 AddImage异常", ex); } catch { }
 			}
 		}
@@ -1832,7 +1844,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"相机五图像处理失败: {ex.Message}")
+				FastLogger.Instance.Error($"相机五图像处理失败: {ex.Message}");
 				try { FastLogger.Instance.Error("Camera5 AddImage异常", ex); } catch { }
 			}
 		}
@@ -1859,7 +1871,7 @@ namespace VisionMeasure
 			try
 			{
 				if (IFSaveLog)
-					FastLogger.Instance.Debug($"time[{DateTime.Now:HH:mm:ss:fff}]相机一开始处理，ID: {id}")
+					FastLogger.Instance.Debug($"time[{DateTime.Now:HH:mm:ss:fff}]相机一开始处理，ID: {id}");
 
 				StartMethod(CameraSelect.Camera1);
 
@@ -1950,7 +1962,7 @@ namespace VisionMeasure
 
 									foreach (var ctr in contours)
 									{
-										FastLogger.Instance.Debug($"相机一分割结果 Label：{kv.Key}, Area: {area}")
+										FastLogger.Instance.Debug($"相机一分割结果 Label：{kv.Key}, Area: {area}");
 										totalArea += area;
 									}
 
@@ -1965,7 +1977,7 @@ namespace VisionMeasure
 				else
 				{
 					result_Segmentation = true;
-					FastLogger.Instance.Error($"相机一分割模型出错：rsp_segmentation == null")
+					FastLogger.Instance.Error($"相机一分割模型出错：rsp_segmentation == null");
 				}
 
 				stageTimer.Stop();
@@ -2005,7 +2017,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"[Camera1] ID:{id} 处理异常: {ex.Message}\n{ex.StackTrace}")
+				FastLogger.Instance.Error($"[Camera1] ID:{id} 处理异常: {ex.Message}\n{ex.StackTrace}");
 				// context.Result 已在上方赋值，异常时保留该结果
 				_resultMatcher?.SignalNewResult();
 			}
@@ -2051,7 +2063,7 @@ namespace VisionMeasure
 			try
 			{
 				if (IFSaveLog)
-					FastLogger.Instance.Debug($"time[{DateTime.Now:HH:mm:ss:fff}]相机二开始处理，ID: {id}")
+					FastLogger.Instance.Debug($"time[{DateTime.Now:HH:mm:ss:fff}]相机二开始处理，ID: {id}");
 
 				StartMethod(CameraSelect.Camera2);
 
@@ -2129,7 +2141,7 @@ namespace VisionMeasure
 				else
 				{
 					result_flaw = true;
-					FastLogger.Instance.Error($"分类模型出错：rsp_class == null")
+					FastLogger.Instance.Error($"分类模型出错：rsp_class == null");
 				}
 
 				stageTimer.Stop();
@@ -2169,7 +2181,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"[Camera2] ID:{id} 处理异常: {ex.Message}\n{ex.StackTrace}")
+				FastLogger.Instance.Error($"[Camera2] ID:{id} 处理异常: {ex.Message}\n{ex.StackTrace}");
 				_resultMatcher?.SignalNewResult();
 			}
 			finally
@@ -2207,7 +2219,7 @@ namespace VisionMeasure
 			try
 			{
 				if (IFSaveLog)
-					FastLogger.Instance.Debug($"time[{DateTime.Now:HH:mm:ss:fff}]相机三开始处理，ID: {id}")
+					FastLogger.Instance.Debug($"time[{DateTime.Now:HH:mm:ss:fff}]相机三开始处理，ID: {id}");
 
 				StartMethod(CameraSelect.Camera3);
 
@@ -2245,7 +2257,7 @@ namespace VisionMeasure
 				#region 圆度检测
 				if (labelImage.Empty())
 				{
-					FastLogger.Instance.Error($"相机三图像异常..")
+					FastLogger.Instance.Error($"相机三图像异常..");
 					resultImage = labelImage.Clone();
 				}
 				else
@@ -2270,12 +2282,12 @@ namespace VisionMeasure
 
 						if (IFSaveLog)
 						{
-							FastLogger.Instance.Debug($"[Camera3] ID:{id} 圆度检测 - LongEdge:{longEdge:F3}, PipeDiameter:{PipeDiameter}, Roundness:{roundness:F3}, Up:{_Config.Camera3RoundnessUp}, Down:{_Config.Camera3RoundnessDown}, Result:{result}")
+							FastLogger.Instance.Debug($"[Camera3] ID:{id} 圆度检测 - LongEdge:{longEdge:F3}, PipeDiameter:{PipeDiameter}, Roundness:{roundness:F3}, Up:{_Config.Camera3RoundnessUp}, Down:{_Config.Camera3RoundnessDown}, Result:{result}");
 						}
 					}
 					else
 					{
-						FastLogger.Instance.Error($"[Camera3] ID:{id} 圆度检测失败，设置为OK")
+						FastLogger.Instance.Error($"[Camera3] ID:{id} 圆度检测失败，设置为OK");
 						result = true;
 						context.ProcessResult = result;
 						resultImage = labelImage.Clone();
@@ -2315,7 +2327,7 @@ namespace VisionMeasure
 
 				if (IFSaveLog)
 				{
-					if (RunLogEnabled) FastLogger.Instance.Debug($"[Camera3] ID:{id} 最终结果 - ProcessResult:{result}, SequenceId:{context.SequenceId}, Offset:{context.Offset}")
+					if (RunLogEnabled) FastLogger.Instance.Debug($"[Camera3] ID:{id} 最终结果 - ProcessResult:{result}, SequenceId:{context.SequenceId}, Offset:{context.Offset}");
 				}
 
 				Interlocked.Increment(ref resultCount3);
@@ -2324,7 +2336,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"[Camera3] ID:{context.SequenceId} 处理异常: {ex.Message}\n{ex.StackTrace}")
+				FastLogger.Instance.Error($"[Camera3] ID:{context.SequenceId} 处理异常: {ex.Message}\n{ex.StackTrace}");
 				// ProcessResult已在上方设置，异常时保留原值
 				_resultMatcher?.SignalNewResult();
 			}
@@ -2363,7 +2375,7 @@ namespace VisionMeasure
 			try
 			{
 				if (IFSaveLog)
-					FastLogger.Instance.Debug($"time[{DateTime.Now:HH:mm:ss:fff}]相机四开始处理，ID: {id}")
+					FastLogger.Instance.Debug($"time[{DateTime.Now:HH:mm:ss:fff}]相机四开始处理，ID: {id}");
 
 				StartMethod(CameraSelect.Camera4);
 
@@ -2413,8 +2425,8 @@ namespace VisionMeasure
 
 				if (_cameraEnabled[3])
 				{
-					_cam4Tasks[0] = Task.Run(() => { m4SwSeg.Start(); Model_Segmentation_Cam4.Run(labelImage, out rsp_segmentation); m4SwSeg.Stop(); });
-					_cam4Tasks[1] = Task.Run(() => { m4SwOcr.Start(); Model_Char_Cam4.Run(labelImage, out rsp_ocr); m4SwOcr.Stop(); });
+					_cam4Tasks[0] = Task.Factory.StartNew(() => { m4SwSeg.Start(); Model_Segmentation_Cam4.Run(labelImage, out rsp_segmentation); m4SwSeg.Stop(); }, TaskCreationOptions.LongRunning);
+					_cam4Tasks[1] = Task.Factory.StartNew(() => { m4SwOcr.Start(); Model_Char_Cam4.Run(labelImage, out rsp_ocr); m4SwOcr.Stop(); }, TaskCreationOptions.LongRunning);
 					Task.WaitAll(_cam4Tasks);
 				}
 
@@ -2473,7 +2485,7 @@ namespace VisionMeasure
 								result_Char_str += "1";
 							}
 							result_Char_str += "0";
-							FastLogger.Instance.Error($"相机四OCR模型出错：rsp_ocr == null")
+							FastLogger.Instance.Error($"相机四OCR模型出错：rsp_ocr == null");
 						}
 
 						if (index_ocr > 0)
@@ -2495,27 +2507,27 @@ namespace VisionMeasure
 						}
 
 						result_char = Convert.ToInt32(result_Char_str, 2) == 0;
-						if (RunLogEnabled) FastLogger.Instance.Debug($"[Camera4] ID:{id} 字符检测 - IndexOCR:{index_ocr}, StandChar:{camera4StandChar}, ResultStr:{result_Char_str}, ResultChar:{result_char}")
+						if (RunLogEnabled) FastLogger.Instance.Debug($"[Camera4] ID:{id} 字符检测 - IndexOCR:{index_ocr}, StandChar:{camera4StandChar}, ResultStr:{result_Char_str}, ResultChar:{result_char}");
 						if (!result_char && rsp_ocr != null) foreach (var item in rsp_ocr) { var blocks = item.Item2?.Blocks; if (blocks != null) foreach (var block in blocks) Cv2.Rectangle(labelImage1, Cv2.BoundingRect(block.Polygon), new Scalar(0, 0, 255), 2); }
 					}
 					else
 					{
 						order_ocr = $"Char Count: Workpiece Not Found";
 						result_char = true;
-						FastLogger.Instance.Debug($"[Camera4] ID:{id} 工件未找到")
+						FastLogger.Instance.Debug($"[Camera4] ID:{id} 工件未找到");
 					}
 				}
 				else
 				{
 					if (rsp_segmentation == null)
 					{
-						FastLogger.Instance.Debug($"[Camera4] ID:{id} rsp_segmentation == null")
+						FastLogger.Instance.Debug($"[Camera4] ID:{id} rsp_segmentation == null");
 						order_ocr = $"Cam4 rsp_segmentation == null;";
 					}
 					else if (rsp_ocr == null)
 					{
 						order_ocr = $"Cam4 result_char == null;";
-						FastLogger.Instance.Debug($"[Camera4] ID:{id} result_char == null")
+						FastLogger.Instance.Debug($"[Camera4] ID:{id} result_char == null");
 					}
 					result_char = true;
 				}
@@ -2559,14 +2571,14 @@ namespace VisionMeasure
 				context.StageTimes["存储图像"] = stageTimer.ElapsedMilliseconds;
 				stageTimer.Restart();
 
-				if (RunLogEnabled) FastLogger.Instance.Debug($"[Camera4] ID:{id} 处理完成 - result_char:{result_char}, result:{result}")
+				if (RunLogEnabled) FastLogger.Instance.Debug($"[Camera4] ID:{id} 处理完成 - result_char:{result_char}, result:{result}");
 				Interlocked.Increment(ref resultCount4);
 				_resultMatcher?.SignalNewResult();
 			if (resultCount4 % 10 == 0) try { FastLogger.Instance.Info("📊 状态对比: imgRcvd4=" + _imgRcvd4 + " proc4=" + resultCount4 + " | imgRcvd5=" + _imgRcvd5 + " proc5=" + resultCount5 + " diff=" + (_imgRcvd4 - _imgRcvd5)); } catch {}
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"[Camera4] ID:{id} 处理异常: {ex.Message}\n{ex.StackTrace}")
+				FastLogger.Instance.Error($"[Camera4] ID:{id} 处理异常: {ex.Message}\n{ex.StackTrace}");
 				// context.Result 已在上方赋值，异常时保留该结果
 				_resultMatcher?.SignalNewResult();
 			}
@@ -2605,7 +2617,7 @@ namespace VisionMeasure
 			try
 			{
 				if (IFSaveLog)
-					FastLogger.Instance.Debug($"time[{DateTime.Now:HH:mm:ss:fff}]相机五开始处理，ID: {id}")
+					FastLogger.Instance.Debug($"time[{DateTime.Now:HH:mm:ss:fff}]相机五开始处理，ID: {id}");
 
 				StartMethod(CameraSelect.Camera5);
 
@@ -2667,11 +2679,11 @@ namespace VisionMeasure
 
 				if (_cameraEnabled[4])
 				{
-					_cam5Tasks[0] = Task.Run(() => { mSwSeg.Start(); Model_Segmentation_Cam5.Run(labelImage, out rsp_segmentation); mSwSeg.Stop(); });
-					_cam5Tasks[1] = Task.Run(() => { mSwOcr.Start(); Model_Char_Cam5.Run(labelImage, out rsp_ocr); mSwOcr.Stop(); });
-					_cam5Tasks[2] = Task.Run(() => { mSwColor.Start(); Model_Color_Cam5.Run(labelImage, out rsp_color); mSwColor.Stop(); });
-					_cam5Tasks[3] = Task.Run(() => { mSwPCode.Start(); Model_Char_PCode_Cam5.Run(labelImage, out rsp_PCode_ocr); mSwPCode.Stop(); });
-					_cam5Tasks[4] = Task.Run(() => { mSwRests.Start(); Model_Rests_Cam5.Run(labelImage, out rsp_rests); mSwRests.Stop(); });
+					_cam5Tasks[0] = Task.Factory.StartNew(() => { mSwSeg.Start(); Model_Segmentation_Cam5.Run(labelImage, out rsp_segmentation); mSwSeg.Stop(); }, TaskCreationOptions.LongRunning);
+					_cam5Tasks[1] = Task.Factory.StartNew(() => { mSwOcr.Start(); Model_Char_Cam5.Run(labelImage, out rsp_ocr); mSwOcr.Stop(); }, TaskCreationOptions.LongRunning);
+					_cam5Tasks[2] = Task.Factory.StartNew(() => { mSwColor.Start(); Model_Color_Cam5.Run(labelImage, out rsp_color); mSwColor.Stop(); }, TaskCreationOptions.LongRunning);
+					_cam5Tasks[3] = Task.Factory.StartNew(() => { mSwPCode.Start(); Model_Char_PCode_Cam5.Run(labelImage, out rsp_PCode_ocr); mSwPCode.Stop(); }, TaskCreationOptions.LongRunning);
+					_cam5Tasks[4] = Task.Factory.StartNew(() => { mSwRests.Start(); Model_Rests_Cam5.Run(labelImage, out rsp_rests); mSwRests.Stop(); }, TaskCreationOptions.LongRunning);
 					Task.WaitAll(_cam5Tasks);
 				}
 
@@ -2741,7 +2753,7 @@ namespace VisionMeasure
 				else
 				{
 					result_Char_str += "0";
-					FastLogger.Instance.Error($"OCR模型出错：rsp_ocr == null")
+					FastLogger.Instance.Error($"OCR模型出错：rsp_ocr == null");
 				}
 
 				if (_Config.Camera5IFOcr)
@@ -2807,7 +2819,7 @@ namespace VisionMeasure
 				else
 				{
 					result_Char_PCode_str += "0";
-					FastLogger.Instance.Error($"OCR模型出错：rsp_ocr == null")
+					FastLogger.Instance.Error($"OCR模型出错：rsp_ocr == null");
 				}
 
 				if (_Config.Camera5IFPCode)
@@ -2882,7 +2894,7 @@ namespace VisionMeasure
 					result_char = true;
 					result_PCode_char = true;
 					isEmptyCup = true;
-					FastLogger.Instance.Debug($"[Camera5] ID:{id} 空杯产品")
+					FastLogger.Instance.Debug($"[Camera5] ID:{id} 空杯产品");
 				}
 				result = result_char && result_PCode_char && result_flaw && result_Segmentation;
 
@@ -2891,19 +2903,19 @@ namespace VisionMeasure
 				{
 					// 所有子项都OK但综合结果NG（理论上不可能，兜底保护）
 					result_char = false; // 默认归为"背面工号缺失"
-					FastLogger.Instance.Debug($"[Camera5] ID:{id} ⚠ 兜底触发! 综合NG但无缺陷分类, 原始标签:[{label_str}], result_class:[{result_class}]")
+					FastLogger.Instance.Debug($"[Camera5] ID:{id} ⚠ 兜底触发! 综合NG但无缺陷分类, 原始标签:[{label_str}], result_class:[{result_class}]");
 					result = false;
 				}
 				else if (!result && !result_flaw && string.IsNullOrEmpty(result_class))
 				{
-					FastLogger.Instance.Debug($"[Camera5] ID:{id} ⚠ 缺陷模型标记NG但result_class为空! 原始标签:[{label_str}], result_Class_str:[{result_Class_str}]")
+					FastLogger.Instance.Debug($"[Camera5] ID:{id} ⚠ 缺陷模型标记NG但result_class为空! 原始标签:[{label_str}], result_Class_str:[{result_Class_str}]");
 					// 用label_str兜底：写入原始模型标签
 					if (!string.IsNullOrEmpty(label_str))
 						result_class = "标签:" + label_str.Replace(";", ",").TrimEnd(',', ' ');
 				}
 
 				context.ProcessResult = result;
-				if (RunLogEnabled) FastLogger.Instance.Debug($"[Camera5] ID:{id} 最终结果 - result_char:{result_char}, result_PCode_char:{result_PCode_char}, result_flaw:{result_flaw}, result_Segmentation:{result_Segmentation}, FinalResult:{result}")
+				if (RunLogEnabled) FastLogger.Instance.Debug($"[Camera5] ID:{id} 最终结果 - result_char:{result_char}, result_PCode_char:{result_PCode_char}, result_flaw:{result_flaw}, result_Segmentation:{result_Segmentation}, FinalResult:{result}");
 
 				stageTimer.Stop();
 				context.StageTimes["结果处理"] = stageTimer.ElapsedMilliseconds;
@@ -2923,7 +2935,7 @@ namespace VisionMeasure
 					}
 					else if (queueDepth % 10 == 0)
 					{
-						if (RunLogEnabled) FastLogger.Instance.Debug($"[Camera5] 积压{queueDepth}帧，跳过显示提效")
+						if (RunLogEnabled) FastLogger.Instance.Debug($"[Camera5] 积压{queueDepth}帧，跳过显示提效");
 					}
 
 					// 始终缓存图像用于存图（无论是否积压）
@@ -2944,9 +2956,9 @@ namespace VisionMeasure
 					Cam5_CharResult = result_char ? 1 : 0,
 					Cam5_PCodeResult = result_PCode_char ? 1 : 0,
 					Cam5_SebiaoResult = result_Segmentation ? 1 : 0,
-					Cam5_BaoguanResult = (_Config.Camera5IFBaoGuan && result_class.Contains("爆管")) ? 0 : 1,
-					Cam5_XiekouResult = (_Config.Camera5IFXieKou && result_class.Contains("斜口")) ? 0 : 1,
-					Cam5_WeijianduanResult = (_Config.Camera5IFWeiJianDuan && result_class.Contains("未剪断")) ? 0 : 1,
+						Cam5_BaoguanResult = result_class.Contains("爆管") ? 0 : 1,
+						Cam5_XiekouResult = result_class.Contains("斜口") ? 0 : 1,
+						Cam5_WeijianduanResult = result_class.Contains("未剪断") ? 0 : 1,
 						IsEmptyCup = isEmptyCup
 					};
 
@@ -2964,7 +2976,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"[Camera5] ID:{context.SequenceId} 处理异常: {ex.Message}\n{ex.StackTrace}")
+				FastLogger.Instance.Error($"[Camera5] ID:{context.SequenceId} 处理异常: {ex.Message}\n{ex.StackTrace}");
 				// context.Result / context.ProcessResult 已在上方赋值，异常时保留原值
 				_resultMatcher?.SignalNewResult();
 			}
@@ -3051,7 +3063,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"{cameraName} 高速保存异常: {ex.Message}")
+				FastLogger.Instance.Error($"{cameraName} 高速保存异常: {ex.Message}");
 			}
 			finally
 			{
@@ -3102,7 +3114,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"{cameraName} 原图保存异常: {ex.Message}")
+				FastLogger.Instance.Error($"{cameraName} 原图保存异常: {ex.Message}");
 			}
 		}
 
@@ -3121,7 +3133,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"{cameraName} 结果图保存异常: {ex.Message}")
+				FastLogger.Instance.Error($"{cameraName} 结果图保存异常: {ex.Message}");
 			}
 		}
 
@@ -3181,7 +3193,7 @@ namespace VisionMeasure
 			{
 				originalCopy?.Dispose();
 				resultCopy?.Dispose();
-				FastLogger.Instance.Error($"缓存图像异常: {ex.Message}")
+				FastLogger.Instance.Error($"缓存图像异常: {ex.Message}");
 			}
 		}
 
@@ -3236,7 +3248,8 @@ namespace VisionMeasure
 				// 卸载JPEG编码到线程池，不阻塞DB消费者线程
 				long captureId = unifiedId;
 				var captureResults = results;
-				System.Threading.ThreadPool.QueueUserWorkItem(_ =>
+				Task.Factory.StartNew(() =>
+				// 使用 LongRunning 创建独立线程，脱离 ThreadPool，防止存图阻塞 AI 推理
 				{
 					try
 					{
@@ -3244,7 +3257,7 @@ namespace VisionMeasure
 					}
 					catch (Exception ex)
 					{
-						FastLogger.Instance.Error($"[存图] UnifiedId:{captureId} 存图异常: {ex.Message}")
+						FastLogger.Instance.Error($"[存图] UnifiedId:{captureId} 存图异常: {ex.Message}");
 					}
 					finally
 					{
@@ -3256,7 +3269,7 @@ namespace VisionMeasure
 							}
 						}
 					}
-				});
+				}, TaskCreationOptions.LongRunning);
 			}
 			else
 			{
@@ -3330,7 +3343,7 @@ namespace VisionMeasure
 							basePath = Path.Combine(basePath, defectFolder);
 						}
 
-						FastLogger.Instance.Debug($"开始存图: SequenceId={sequenceId}, Camera={cameraName}, OverallDefect={overallDefect}, Defect={defectFolder}, Path={basePath}")
+						if (IFSaveLog) FastLogger.Instance.Debug($"开始存图: SequenceId={sequenceId}, Camera={cameraName}, OverallDefect={overallDefect}, Defect={defectFolder}, Path={basePath}");
 
 						// 保存原图
 						if (original != null && ((isOk && IFSaveOKRawImage) || (!isOk && IFSaveNGRawImage)))
@@ -3350,12 +3363,12 @@ namespace VisionMeasure
 				}
 				else
 				{
-					FastLogger.Instance.Debug($"缓存中未找到图像: SequenceId={sequenceId}")
+					FastLogger.Instance.Debug($"缓存中未找到图像: SequenceId={sequenceId}");
 				}
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"按缺陷类型存图异常: {ex.Message}")
+				FastLogger.Instance.Error($"按缺陷类型存图异常: {ex.Message}");
 				// 发生异常时也要清理缓存，避免内存泄漏
 				ClearImageCache(sequenceId);
 			}
@@ -3417,12 +3430,17 @@ namespace VisionMeasure
 					// 2种及以上缺陷 → 混合缺陷
 					if (defectCount >= 2) return "混合缺陷";
 					// 单一缺陷按优先级返回
-					return results[4].Cam5_BaoguanResult == 0 ? "爆管" :
-						results[4].Cam5_XiekouResult == 0 ? "斜口" :
-						results[4].Cam5_WeijianduanResult == 0 ? "未剪断" :
-						results[4].Cam5_CharResult == 0 ? "背面工号缺失" :
-						results[4].Cam5_PCodeResult == 0 ? "P-Code" :
-						results[4].Cam5_SebiaoResult == 0 ? "色标对中" : "背面工号缺失";
+						if (defectCount == 0)
+						{
+							FastLogger.Instance.Debug($"[存图] Camera5 NG但defectCount=0! Seq={results[4].SequenceId}, Baoguan={results[4].Cam5_BaoguanResult}, Xiekou={results[4].Cam5_XiekouResult}, Weijianduan={results[4].Cam5_WeijianduanResult}, Char={results[4].Cam5_CharResult}, PCode={results[4].Cam5_PCodeResult}, Sebiao={results[4].Cam5_SebiaoResult}, ConfigBaoGuan={_Config.Camera5IFBaoGuan}, Result={results[4].Result}");
+							return "无分类";
+						}
+						return results[4].Cam5_BaoguanResult == 0 ? "爆管" :
+							results[4].Cam5_XiekouResult == 0 ? "斜口" :
+							results[4].Cam5_WeijianduanResult == 0 ? "未剪断" :
+							results[4].Cam5_CharResult == 0 ? "背面工号缺失" :
+							results[4].Cam5_PCodeResult == 0 ? "P-Code" :
+							results[4].Cam5_SebiaoResult == 0 ? "色标对中" : "无分类";
 				default:
 					return "OK";
 			}
@@ -3455,7 +3473,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"清理图像缓存异常: {ex.Message}")
+				FastLogger.Instance.Error($"清理图像缓存异常: {ex.Message}");
 			}
 		}
 		#endregion
@@ -3774,7 +3792,7 @@ namespace VisionMeasure
 						                 r.Cam5_XiekouResult == 1 && r.Cam5_CharResult == 1 &&
 						                 r.Cam5_PCodeResult == 1 && r.Cam5_SebiaoResult == 1;
 						string marker = isVirtual ? "(虚拟OK)" : "";
-						FastLogger.Instance.Debug("[ResultMatch] " + camNames[ci] + ": Seq=" + r.SequenceId + " Offset=" + r.Offset + " Result=" + r.Result + " " + marker)
+						FastLogger.Instance.Debug("[ResultMatch] " + camNames[ci] + ": Seq=" + r.SequenceId + " Offset=" + r.Offset + " Result=" + r.Result + " " + marker);
 					}
 				}
 
@@ -3787,7 +3805,7 @@ namespace VisionMeasure
 						try { if (FastLogger.IsInitialized) FastLogger.Instance.Info($"[ResultMatch-Debug] 匹配#{debugCount} ID:{unifiedId} Cam1:{results[0].Result} Cam2:{results[1].Result} Cam3:{results[2].Result} Cam4:{results[3].Result} Cam5:{results[4].Result} Final:{finalResult} Total:{_Config.total} OK:{_Config.ok} SendQueue:{SendResultList.Count}"); } catch { }
 					}
 				}
-			if (unifiedId % 100 == 0) { try { if (FastLogger.IsInitialized) FastLogger.Instance.Debug("里程碑: ID=" + unifiedId + " FinalResult=" + (finalResult?"OK":"NG") + " Total=" + _Config.total + " OK=" + _Config.ok); } catch { } }
+			if (IFSaveLog && unifiedId % 100 == 0) { try { if (FastLogger.IsInitialized) FastLogger.Instance.Debug("里程碑: ID=" + unifiedId + " FinalResult=" + (finalResult?"OK":"NG") + " Total=" + _Config.total + " OK=" + _Config.ok); } catch { } }
 
 				// 空杯产品：不计入数据库记录，不保存图像
 				bool isRealProduct = !results[4].IsEmptyCup;
@@ -3795,7 +3813,19 @@ namespace VisionMeasure
 				{
 					AddProductionRecordBuffered(results, finalResult);
 					// 图像保存改为DB记录提交后触发（OnDbRecordCommitted回调），确保记录与图片一一对应
-					_pendingImageSaves[unifiedId] = results;
+					if (!_pendingImageSaves.TryAdd(unifiedId, results))
+					{
+						// 重复key：旧条目已泄露，归还当前results到对象池
+						FastLogger.Instance.Warn($"[存图] UnifiedId={unifiedId} 重复，旧条目被覆盖，归还当前results到池");
+						foreach (var item in results)
+							try { QueueResultItem.Return(item); } catch { }
+					}
+				}
+				else
+				{
+					// 空杯产品：立即归还QueueResultItem到对象池，防止泄露
+					foreach (var item in results)
+						try { QueueResultItem.Return(item); } catch { }
 				}
 				// 计数器更新必须与burstExcludeCount同步，不能放在BeginInvoke中延迟
 				ResultCountMethod(results[0].Result, results[1].Result, results[2].Result, results[3].Result, results[4].Result, results[4].IsEmptyCup);
@@ -3839,78 +3869,13 @@ namespace VisionMeasure
 							OffsetTxt4.Text = results[3].Offset.ToString();
 							OffsetTxt5.Text = results[4].Offset.ToString();
 						}
-						catch (Exception uiEx) { FastLogger.Instance.Error($"UI更新异常: {uiEx.Message}") }
+						catch (Exception uiEx) { FastLogger.Instance.Error($"UI更新异常: {uiEx.Message}"); }
 					}));
 				}
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"结果匹配回调异常: {ex.Message}")
-			}
-		}
-
-		/// <summary>
-		/// 添加生产记录（异步，不阻塞）
-		/// </summary>
-		private void AddProductionRecord(QueueResultItem[] results, bool finalResult)
-		{
-			if (_dbRecorder == null) return;
-
-			try
-			{
-				var record = new ProductionRecord
-				{
-					DetectionTime = DateTime.Now,
-					SequenceId = results[0].SequenceId,
-						UnifiedId = results[0].SequenceId - results[0].Offset,
-					FinalResult = finalResult ? "OK" : "NG",
-					Sku = GetCurrentSkuValue(),
-
-					// 相机结果 (1=OK, 0=NG)
-					Cam1Result = results[0].Result ? 1 : 0,
-					Cam2Result = results[1].Result ? 1 : 0,
-					Cam3Result = results[2].Result ? 1 : 0,
-					Cam4Result = results[3].Result ? 1 : 0,
-					Cam5Result = results[4].Result ? 1 : 0,
-
-					// 相机5细分结果
-					Cam5_CharResult = results[4].Cam5_CharResult,
-					Cam5_PCodeResult = results[4].Cam5_PCodeResult,
-					Cam5_SebiaoResult = results[4].Cam5_SebiaoResult,
-					Cam5_BaoguanResult = results[4].Cam5_BaoguanResult,
-					Cam5_XiekouResult = results[4].Cam5_XiekouResult,
-					Cam5_WeijianduanResult = results[4].Cam5_WeijianduanResult
-				};
-
-				// 先更新连续爆管状态
-				if (_dbRecorder != null)
-				{
-					// 只要有爆管缺陷即可，不管是否有其他缺陷
-					bool isBurstNg = results[4].Cam5_BaoguanResult == 0;  // 爆管检测为NG
-
-					_dbRecorder.UpdateConsecutiveBurst(results[0].SequenceId, isBurstNg);
-				}
-
-				// 再添加记录（此时历史记录已经更新，可以正确判断连续爆管）
-				_dbRecorder.AddRecord(record);
-
-				// 检查是否被标记为连续爆管剔除，如果是则增加计数（连续3个爆管，所以增加3）
-				if (record.IsExcluded && record.ExcludedReason == "连续爆管剔除")
-				{
-					// 爆管计数已由ResultCountMethod同步处理，此处不再累加
-					if (BaoGuanNGTxt != null)
-					{
-						this.Invoke(new Action(() =>
-						{
-							if (BaoGuanNGTxt != null)
-								BaoGuanNGTxt.Text = _Config.burstExcludeCount.ToString();
-						}));
-					}
-				}
-			}
-			catch (Exception ex)
-			{
-				FastLogger.Instance.Error($"添加生产记录异常: {ex.Message}")
+				FastLogger.Instance.Error($"结果匹配回调异常: {ex.Message}");
 			}
 		}
 
@@ -3964,7 +3929,7 @@ namespace VisionMeasure
 
 				}
 			}
-			catch (Exception ex) { FastLogger.Instance.Error($"批量生产记录异常: {ex.Message}") }
+			catch (Exception ex) { FastLogger.Instance.Error($"批量生产记录异常: {ex.Message}"); }
 		}
 
 		private void FlushPendingRecords()
@@ -4006,7 +3971,7 @@ namespace VisionMeasure
 				else
 					UpdateResultPanel(result);
 			}
-			catch (Exception ex) { FastLogger.Instance.Error($"显示结果异常: {ex.Message}") }
+			catch (Exception ex) { FastLogger.Instance.Error($"显示结果异常: {ex.Message}"); }
 		}
 
 		private void UpdateResultPanel(bool result)
@@ -4072,7 +4037,7 @@ namespace VisionMeasure
 
 				InitData();
 			}
-			catch (Exception ex) { FastLogger.Instance.Error($"更新计数异常: {ex.Message}") }
+			catch (Exception ex) { FastLogger.Instance.Error($"更新计数异常: {ex.Message}"); }
 		}
 
 		private void InitData()
@@ -4110,7 +4075,7 @@ namespace VisionMeasure
 			try
 			{
 				try { FastLogger.Instance.Info("MainFrm_FormClosing 开始关闭流程"); } catch { }
-				FastLogger.Instance.Info("应用程序正在关闭...")
+				FastLogger.Instance.Info("应用程序正在关闭...");
 
 				// 取消所有任务
 				_cts?.Cancel();
@@ -4156,10 +4121,10 @@ namespace VisionMeasure
 					{
 						myZmcaux.CloseConnect(g_handle);
 						g_handle = IntPtr.Zero;
-						FastLogger.Instance.Info("运动控制卡已断开")
+						FastLogger.Instance.Info("运动控制卡已断开");
 					}
 				}
-				catch (Exception ex) { FastLogger.Instance.Error($"断开运控卡异常: {ex.Message}") }
+				catch (Exception ex) { FastLogger.Instance.Error($"断开运控卡异常: {ex.Message}"); }
 
 				// 释放AI模型资源
 				DisposeAIModels();
@@ -4167,16 +4132,29 @@ namespace VisionMeasure
 				// 通知等待完成
 				_closeWaitHandle.Set();
 
-				// 释放数据库记录器
+				// 释放数据库记录器前，清理所有滞留的存图待处理条目，归还对象池
+				{
+					var pendingKeys = _pendingImageSaves.Keys.ToArray();
+					foreach (var key in pendingKeys)
+					{
+						if (_pendingImageSaves.TryRemove(key, out var items))
+						{
+							foreach (var item in items)
+								try { QueueResultItem.Return(item); } catch { }
+						}
+					}
+					try { FastLogger.Instance.Info($"[关机] 清理{pendingKeys.Length}个残留存图条目"); } catch { }
+				}
+
 				_dbRecorder?.Dispose();
 
 				try { FastLogger.Instance.Info("MainFrm_FormClosing 关闭完成"); } catch { }
-				FastLogger.Instance.Info("应用程序关闭完成")
+				FastLogger.Instance.Info("应用程序关闭完成");
 			}
 			catch (Exception ex)
 			{
 				try { FastLogger.Instance.Error("MainFrm_FormClosing 异常", ex); } catch { }
-				FastLogger.Instance.Error($"关闭时异常: {ex.Message}")
+				FastLogger.Instance.Error($"关闭时异常: {ex.Message}");
 			}
 			finally
 			{
@@ -4204,15 +4182,15 @@ namespace VisionMeasure
 					{
 						var task = Task.Run(() => cam.StopStreamGrabber());
 						if (!task.Wait(CAM_TIMEOUT))
-							FastLogger.Instance.Info($"⚠ {names[i]} StopStreamGrabber 超时({CAM_TIMEOUT}ms)，跳过")
+							FastLogger.Instance.Info($"⚠ {names[i]} StopStreamGrabber 超时({CAM_TIMEOUT}ms)，跳过");
 					}
-					catch (Exception ex) { FastLogger.Instance.Error($"{names[i]} StopStreamGrabber 异常: {ex.Message}") }
+					catch (Exception ex) { FastLogger.Instance.Error($"{names[i]} StopStreamGrabber 异常: {ex.Message}"); }
 				}
-				FastLogger.Instance.Info("相机采图已停止")
+				FastLogger.Instance.Info("相机采图已停止");
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"停止相机采图异常: {ex.Message}")
+				FastLogger.Instance.Error($"停止相机采图异常: {ex.Message}");
 			}
 		}
 
@@ -4226,11 +4204,11 @@ namespace VisionMeasure
 				_processor4?.Dispose();
 				_processor5?.Dispose();
 				_resultMatcher?.Dispose();
-				FastLogger.Instance.Info("处理器已释放")
+				FastLogger.Instance.Info("处理器已释放");
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"释放处理器异常: {ex.Message}")
+				FastLogger.Instance.Error($"释放处理器异常: {ex.Message}");
 			}
 		}
 
@@ -4249,21 +4227,21 @@ namespace VisionMeasure
 						{
 							if (!thread.Join(timeout))
 							{
-								FastLogger.Instance.Info($"线程 {thread.Name} 未在 {timeout}ms 内结束")
+								FastLogger.Instance.Info($"线程 {thread.Name} 未在 {timeout}ms 内结束");
 							}
 						}
 						catch (Exception ex)
 						{
-							FastLogger.Instance.Error($"等待线程结束异常: {ex.Message}")
+							FastLogger.Instance.Error($"等待线程结束异常: {ex.Message}");
 						}
 					}
 				}
 
-				FastLogger.Instance.Info("所有工作线程已停止")
+				FastLogger.Instance.Info("所有工作线程已停止");
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"停止线程异常: {ex.Message}")
+				FastLogger.Instance.Error($"停止线程异常: {ex.Message}");
 			}
 		}
 
@@ -4276,11 +4254,11 @@ namespace VisionMeasure
 				_highSpeedSaver3?.Dispose();
 				_highSpeedSaver4?.Dispose();
 				_highSpeedSaver5?.Dispose();
-				FastLogger.Instance.Info("高速保存器已释放")
+				FastLogger.Instance.Info("高速保存器已释放");
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"释放高速保存器异常: {ex.Message}")
+				FastLogger.Instance.Error($"释放高速保存器异常: {ex.Message}");
 			}
 		}
 
@@ -4293,11 +4271,11 @@ namespace VisionMeasure
 				_bufferPool3?.Dispose();
 				_bufferPool4?.Dispose();
 				_bufferPool5?.Dispose();
-				FastLogger.Instance.Info("内存池已释放")
+				FastLogger.Instance.Info("内存池已释放");
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"释放内存池异常: {ex.Message}")
+				FastLogger.Instance.Error($"释放内存池异常: {ex.Message}");
 			}
 		}
 
@@ -4316,15 +4294,15 @@ namespace VisionMeasure
 					{
 						var task = Task.Run(() => cam.Close());
 						if (!task.Wait(CAM_TIMEOUT))
-							FastLogger.Instance.Info($"⚠ {names[i]} Close 超时({CAM_TIMEOUT}ms)，跳过")
+							FastLogger.Instance.Info($"⚠ {names[i]} Close 超时({CAM_TIMEOUT}ms)，跳过");
 					}
-					catch (Exception ex) { FastLogger.Instance.Error($"{names[i]} Close 异常: {ex.Message}") }
+					catch (Exception ex) { FastLogger.Instance.Error($"{names[i]} Close 异常: {ex.Message}"); }
 				}
-				FastLogger.Instance.Info("相机已关闭")
+				FastLogger.Instance.Info("相机已关闭");
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"关闭相机异常: {ex.Message}")
+				FastLogger.Instance.Error($"关闭相机异常: {ex.Message}");
 			}
 		}
 
@@ -4332,7 +4310,7 @@ namespace VisionMeasure
 		{
 			try
 			{
-				FastLogger.Instance.Info("开始清理所有资源...")
+				FastLogger.Instance.Info("开始清理所有资源...");
 
 				lock (SendResultList)
 				{
@@ -4356,11 +4334,11 @@ namespace VisionMeasure
 				GC.WaitForPendingFinalizers();
 				GC.Collect();
 
-				FastLogger.Instance.Info("资源清理完成")
+				FastLogger.Instance.Info("资源清理完成");
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"清理资源异常: {ex.Message}")
+				FastLogger.Instance.Error($"清理资源异常: {ex.Message}");
 			}
 		}
 
@@ -4380,11 +4358,11 @@ namespace VisionMeasure
 				Model_Color_Cam5?.Dispose();
 				Model_Rests_Cam5?.Dispose();
 				Model_Segmentation_Cam5?.Dispose();
-				FastLogger.Instance.Info("AI模型已释放")
+				FastLogger.Instance.Info("AI模型已释放");
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"释放AI模型异常: {ex.Message}")
+				FastLogger.Instance.Error($"释放AI模型异常: {ex.Message}");
 			}
 		}
 		#endregion
@@ -4407,7 +4385,7 @@ namespace VisionMeasure
 				{
 					// 上一个班次结束，自动保存
 					AutoSaveShiftReport(_currentShiftDate, _currentShift);
-					FastLogger.Instance.Debug($"班次切换: {_currentShift} -> {newShift}, 已自动保存{_currentShift}班次报表")
+					FastLogger.Instance.Debug($"班次切换: {_currentShift} -> {newShift}, 已自动保存{_currentShift}班次报表");
 
 					// 清空统计数据，准备新班次
 					this.Invoke(new Action(() =>
@@ -4421,7 +4399,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"检查班次变化异常: {ex.Message}")
+				FastLogger.Instance.Error($"检查班次变化异常: {ex.Message}");
 			}
 		}
 
@@ -4466,7 +4444,7 @@ namespace VisionMeasure
 		{
 			if (!string.IsNullOrEmpty(_currentShiftDate) && !string.IsNullOrEmpty(_currentShift))
 			{
-				FastLogger.Instance.Debug($"开始手动保存班次报表: {_currentShiftDate} {_currentShift}")
+				FastLogger.Instance.Debug($"开始手动保存班次报表: {_currentShiftDate} {_currentShift}");
 
 				// 异步导出汇总表，保存完成后自动打开文件夹
 				if (_dbRecorder != null)
@@ -4533,11 +4511,11 @@ namespace VisionMeasure
 			Random random = new Random();
 			testflag = true;
 
-			FastLogger.Instance.Info($"imagePath1: {imagePath1}")
-			FastLogger.Instance.Info($"imagePath2: {imagePath2}")
-			FastLogger.Instance.Info($"imagePath3: {imagePath3}")
-			FastLogger.Instance.Info($"imagePath4: {imagePath4}")
-			FastLogger.Instance.Info($"imagePath5: {imagePath5}")
+			FastLogger.Instance.Info($"imagePath1: {imagePath1}");
+			FastLogger.Instance.Info($"imagePath2: {imagePath2}");
+			FastLogger.Instance.Info($"imagePath3: {imagePath3}");
+			FastLogger.Instance.Info($"imagePath4: {imagePath4}");
+			FastLogger.Instance.Info($"imagePath5: {imagePath5}");
 
 			try
 			{
@@ -4555,7 +4533,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"创建 Bitmap 错误: {ex.Message}")
+				FastLogger.Instance.Error($"创建 Bitmap 错误: {ex.Message}");
 			}
 		}
 
@@ -4619,7 +4597,7 @@ namespace VisionMeasure
 			{
 				_simRunning = false;
 				clearBtn.Text = "模拟运行";
-				FastLogger.Instance.Info("模拟运行已停止")
+				FastLogger.Instance.Info("模拟运行已停止");
 				return;
 			}
 
@@ -4637,7 +4615,7 @@ namespace VisionMeasure
 			_simBatchNum = 0;
 			clearBtn.Text = "停止模拟";
 			int enabledCount = _cameraEnabled.Count(x => x);
-			FastLogger.Instance.Debug($"模拟运行启动，{enabledCount}个工位，3个/组间隔10ms")
+			FastLogger.Instance.Debug($"模拟运行启动，{enabledCount}个工位，3个/组间隔10ms");
 
 			await Task.Run(() =>
 			{
@@ -4669,7 +4647,7 @@ namespace VisionMeasure
 							if (g < 2)
 								Thread.Sleep(100);
 						}
-						catch (Exception ex) { FastLogger.Instance.Error($"模拟运行异常: {ex.Message}") }
+						catch (Exception ex) { FastLogger.Instance.Error($"模拟运行异常: {ex.Message}"); }
 					}
 
 					_simGroupSw.Stop();
@@ -4681,7 +4659,7 @@ namespace VisionMeasure
 
 			_simRunning = false;
 			this.Invoke(new Action(() => clearBtn.Text = "模拟运行"));
-			FastLogger.Instance.Info("模拟运行已停止")
+			FastLogger.Instance.Info("模拟运行已停止");
 		}
 
 		private Stopwatch _sendIntervalTimer = Stopwatch.StartNew();
@@ -4691,7 +4669,7 @@ namespace VisionMeasure
 		{
 			try
 			{
-				FastLogger.Instance.Info("写入结果线程启动")
+				FastLogger.Instance.Info("写入结果线程启动");
 
 				int consecutiveFailures = 0;
 				const int MAX_CONSECUTIVE_FAILURES = 50;
@@ -4728,7 +4706,7 @@ namespace VisionMeasure
 							if (startIndex < 0 && SendResultList.Count > 0)
 							{
 								startIndex = (int)SendResultList.Min(item => item.SequenceId);
-								FastLogger.Instance.Debug($"[PLC] startIndex 初始化为 {startIndex}")
+								FastLogger.Instance.Debug($"[PLC] startIndex 初始化为 {startIndex}");
 							}
 
 							if (SendResultList.Count >= 3 + offset_send)
@@ -4808,7 +4786,7 @@ namespace VisionMeasure
 													resultBool3.ForeColor = result3 ? Color.Green : Color.Red;
 													WriteCountTxt.Text = writeNGCount.ToString();
 												}
-												catch (Exception uiEx) { FastLogger.Instance.Error($"更新UI异常: {uiEx.Message}") }
+												catch (Exception uiEx) { FastLogger.Instance.Error($"更新UI异常: {uiEx.Message}"); }
 											}));
 										}
 
@@ -4824,21 +4802,21 @@ namespace VisionMeasure
 									else
 									{
 										retryCount++;
-										FastLogger.Instance.Error($"写入PLC失败，重试 {retryCount}/{MAX_RETRY}")
+										FastLogger.Instance.Error($"写入PLC失败，重试 {retryCount}/{MAX_RETRY}");
 										Thread.Sleep(1);
 									}
 								}
 								catch (Exception writeEx)
 								{
 									retryCount++;
-									FastLogger.Instance.Error($"写入PLC异常，重试 {retryCount}/{MAX_RETRY}: {writeEx.Message}")
+									FastLogger.Instance.Error($"写入PLC异常，重试 {retryCount}/{MAX_RETRY}: {writeEx.Message}");
 									Thread.Sleep(1);
 								}
 							}
 
 							if (!writeSuccess)
 							{
-								FastLogger.Instance.Error($"写入PLC失败，已达到最大重试次数 {MAX_RETRY}")
+								FastLogger.Instance.Error($"写入PLC失败，已达到最大重试次数 {MAX_RETRY}");
 							}
 						}
 						else
@@ -4848,14 +4826,14 @@ namespace VisionMeasure
 					}
 					catch (Exception ex)
 					{
-						FastLogger.Instance.Error($"写入结果线程异常: {ex.Message}")
+						FastLogger.Instance.Error($"写入结果线程异常: {ex.Message}");
 						Thread.Sleep(1000);
 					}
 				}
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"写入结果线程严重异常: {ex.Message}\n{ex.StackTrace}")
+				FastLogger.Instance.Error($"写入结果线程严重异常: {ex.Message}\n{ex.StackTrace}");
 			}
 		}
 
@@ -4920,7 +4898,7 @@ namespace VisionMeasure
 										 (_processor5?.ImageQueueCount ?? 0);
 						if (totalQueue > 500)
 						{
-							FastLogger.Instance.Debug($"队列积压: {totalQueue}")
+							FastLogger.Instance.Debug($"队列积压: {totalQueue}");
 						}
 					}
 				}
@@ -4928,7 +4906,7 @@ namespace VisionMeasure
 			catch (Exception ex)
 			{
 				if (!_isClosing)
-					FastLogger.Instance.Error($"更新线程异常: {ex.Message}")
+					FastLogger.Instance.Error($"更新线程异常: {ex.Message}");
 			}
 		}
 		#endregion
@@ -4962,22 +4940,22 @@ namespace VisionMeasure
 			{
 				this.Invoke(new Action(() =>
 				{
-					FastLogger.Instance.Info("切换事件触发了 spec: " + spec)
+					FastLogger.Instance.Info("切换事件触发了 spec: " + spec);
 					versionNum.Text = _Config.CurCheckSpec.ToString() != "" ? _Config.CurCheckSpec.ToString() : " - ";
 					Task.Run(() =>
 					{
 						if (!_isClosing)
 						{
-							FastLogger.Instance.Info($"切换型号时，轴1自动移动至拍照位。Position：{_Config.zhengPosition}")
+							FastLogger.Instance.Info($"切换型号时，轴1自动移动至拍照位。Position：{_Config.zhengPosition}");
 							try { FastLogger.Instance.Info("运动控制: 轴1移动至 " + _Config.zhengPosition); } catch { }
 							myZmcaux.GoPosition(g_handle, 1, Convert.ToSingle(_Config.zhengPosition));
-							FastLogger.Instance.Info($"轴1自动移动至拍照位完成，当前轴1位置：{myZmcaux.GetLocation(g_handle, 1)}\r\n")
+							FastLogger.Instance.Info($"轴1自动移动至拍照位完成，当前轴1位置：{myZmcaux.GetLocation(g_handle, 1)}\r\n");
 							try { FastLogger.Instance.Info("运动控制: 轴1移动完成 位置=" + myZmcaux.GetLocation(g_handle, 1)); } catch { }
 
-							FastLogger.Instance.Info($"切换型号时，轴0自动移动至拍照位。Position：{_Config.fanPosition}")
+							FastLogger.Instance.Info($"切换型号时，轴0自动移动至拍照位。Position：{_Config.fanPosition}");
 							try { FastLogger.Instance.Info("运动控制: 轴0移动至 " + _Config.fanPosition); } catch { }
 							myZmcaux.GoPosition(g_handle, 0, Convert.ToSingle(_Config.fanPosition));
-							FastLogger.Instance.Info($"轴0自动移动至拍照位完成，当前轴0位置：{myZmcaux.GetLocation(g_handle, 0)}")
+							FastLogger.Instance.Info($"轴0自动移动至拍照位完成，当前轴0位置：{myZmcaux.GetLocation(g_handle, 0)}");
 							try { FastLogger.Instance.Info("运动控制: 轴0移动完成 位置=" + myZmcaux.GetLocation(g_handle, 0)); } catch { }
 
 							MessageBox.Show("切换型号完成，已将轴移动至对应拍照位！");
@@ -4987,7 +4965,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"系统初始化时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}")
+				FastLogger.Instance.Error($"系统初始化时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
 			}
 		}
 
@@ -5034,7 +5012,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"error... {ex.Message}\r\n{ex.StackTrace}")
+				FastLogger.Instance.Error($"error... {ex.Message}\r\n{ex.StackTrace}");
 			}
 		}
 
@@ -5518,7 +5496,7 @@ namespace VisionMeasure
 			catch (ThreadAbortException) { }
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"{_cameraName} 处理器异常: {ex.Message}")
+				FastLogger.Instance.Error($"{_cameraName} 处理器异常: {ex.Message}");
 			}
 		}
 
@@ -5551,7 +5529,7 @@ namespace VisionMeasure
 				}
 				catch (Exception ex)
 				{
-					FastLogger.Instance.Error($"{_cameraName} 处理异常: {ex.Message}")
+					FastLogger.Instance.Error($"{_cameraName} 处理异常: {ex.Message}");
 					var errorResult = QueueResultItem.Rent();
 					errorResult.SequenceId = context.SequenceId;
 					errorResult.Offset = context.Offset;
@@ -5575,7 +5553,7 @@ namespace VisionMeasure
 							_performanceStats.AddStageTime(stage.Key, stage.Value);
 							stringBuilder.Append($"{stage.Key}: {stage.Value}\r\n");
 						}
-						if (MainFrm.RunLogEnabled) FastLogger.Instance.Info(stringBuilder.ToString())
+						if (MainFrm.RunLogEnabled) FastLogger.Instance.Info(stringBuilder.ToString());
 						// FastLogger 耗时日志（每50帧汇总一次，减少输出量）
 						if (_performanceStats.ProcessCount % 50 == 0) { try { FastLogger.Instance.Debug(_cameraName + " 耗时汇总: Avg=" + _performanceStats.AverageTimeMs + "ms Min=" + _performanceStats.MinTimeMs + "ms Max=" + _performanceStats.MaxTimeMs + "ms 帧数=" + _performanceStats.ProcessCount); foreach (var stage in context.StageTimes) { try { FastLogger.Instance.Debug(_cameraName + " " + stage.Key + ": " + stage.Value + "ms"); } catch {} } } catch {} }
 
@@ -5690,12 +5668,12 @@ namespace VisionMeasure
 			// 防呆：至少一个处理器
 			if (_activeProcessorCount == 0)
 			{
-				FastLogger.Instance.Debug("[ResultMatcher] 警告：所有处理器均未启用，匹配器不会触发")
+				FastLogger.Instance.Debug("[ResultMatcher] 警告：所有处理器均未启用，匹配器不会触发");
 				_disposed = true; // 标记为已释放，线程不会启动
 				return;
 			}
 
-			FastLogger.Instance.Debug($"[ResultMatcher] {_activeProcessorCount}/{_processors.Length} 个处理器启用，锚点下标={_firstActiveIndex}")
+			FastLogger.Instance.Debug($"[ResultMatcher] {_activeProcessorCount}/{_processors.Length} 个处理器启用，锚点下标={_firstActiveIndex}");
 
 			_matchingThread = new Thread(MatchingWorker)
 			{
@@ -5742,7 +5720,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"结果匹配器异常: {ex.Message}")
+				FastLogger.Instance.Error($"结果匹配器异常: {ex.Message}");
 			}
 		}
 
@@ -5844,7 +5822,7 @@ namespace VisionMeasure
 
 					if (anyPast)
 					{
-						FastLogger.Instance.Error("[ResultMatch] ID:" + targetSequenceId + " 匹配失败(超时丢弃)，锚点=" + anchorCamName)
+						FastLogger.Instance.Error("[ResultMatch] ID:" + targetSequenceId + " 匹配失败(超时丢弃);，锚点=" + anchorCamName);
 						// 丢弃锚点结果
 						_processors[_firstActiveIndex].GetNextResult();
 						// 丢弃所有已超时的结果
@@ -5866,7 +5844,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
-				FastLogger.Instance.Error($"匹配过程异常: {ex.Message}")
+				FastLogger.Instance.Error($"匹配过程异常: {ex.Message}");
 			}
 		}
 
@@ -5931,7 +5909,7 @@ namespace VisionMeasure
 			if (_saveQueue.Count >= _saveQueue.BoundedCapacity)
 			{
 				if (_saveQueue.TryTake(out var discardedTask))
-					FastLogger.Instance.Debug($"{_saverName} 队列已满，丢弃任务: {discardedTask.FilePath}")
+					FastLogger.Instance.Warn($"{_saverName} 队列已满，丢弃最旧任务: {discardedTask.FilePath}");
 				else return false;
 			}
 
@@ -5956,7 +5934,7 @@ namespace VisionMeasure
 				{
 					if (_disposed) break;
 					try { SaveImageDirect(task); }
-					catch (Exception ex) { FastLogger.Instance.Error($"{_saverName} 保存失败: {ex.Message}") }
+					catch (Exception ex) { FastLogger.Instance.Error($"{_saverName} 保存失败: {ex.Message}"); }
 				}
 			}
 			catch { }
@@ -5973,7 +5951,7 @@ namespace VisionMeasure
 				var delay = (DateTime.Now - task.EnqueueTime).TotalMilliseconds;
 				if (delay > 100) try { if (FastLogger.IsInitialized) FastLogger.Instance.Info($"{_saverName} 保存延迟较高: {delay:F1}ms"); } catch { }
 			}
-			catch (Exception ex) { FastLogger.Instance.Error($"{_saverName} 文件写入失败: {ex.Message}") }
+			catch (Exception ex) { FastLogger.Instance.Error($"{_saverName} 文件写入失败: {ex.Message}"); }
 		}
 
 		public void Dispose()
@@ -5993,6 +5971,8 @@ namespace VisionMeasure
 
 	public static class BitmapFastConverter
 	{
+		// 缓存默认质量的编码参数，避免热路径每次 new int[2]
+		private static readonly int[] s_jpegEncodeParams = new int[] { (int)ImwriteFlags.JpegQuality, 85 };
 
 		/// <summary>
 		/// 【修复编译版】直接使用 OpenCV 原生 C++ 算头进行 Jpeg 压缩
@@ -6003,7 +5983,8 @@ namespace VisionMeasure
 			if (mat == null || mat.Empty()) return null;
 			try
 			{
-				int[] encodeParams = new int[] { (int)ImwriteFlags.JpegQuality, quality };
+				// 缓存编码参数数组，避免每次编码时 new int[2] 产生堆分配
+				int[] encodeParams = quality == 85 ? s_jpegEncodeParams : new int[] { (int)ImwriteFlags.JpegQuality, quality };
 
 				// 【修复】使用 out 关键字传递参数，承接编码后的字节数组
 				byte[] buf;
@@ -6175,9 +6156,9 @@ namespace VisionMeasure
 
 					Interlocked.Add(ref _totalAllocatedMemory, EstimateBitmapSize(bitmap) + EstimateMatSize(mat));
 				}
-				catch (Exception ex) { FastLogger.Instance.Error($"{PoolName} 初始化失败: {ex.Message}") }
+				catch (Exception ex) { FastLogger.Instance.Error($"{PoolName} 初始化失败: {ex.Message}"); }
 			}
-			FastLogger.Instance.Info($"{PoolName} 初始化完成: {_initialCapacity}个Bitmap和Mat已预分配")
+			FastLogger.Instance.Info($"{PoolName} 初始化完成: {_initialCapacity}个Bitmap和Mat已预分配");
 		}
 
 		private long EstimateBitmapSize(Bitmap bitmap)
@@ -6279,7 +6260,7 @@ namespace VisionMeasure
 					CleanOldItems(_bitmapPool, cutoff, item => item.Resource.Dispose());
 					CleanOldItems(_matPool, cutoff, item => item.Resource.Dispose());
 				}
-				catch (Exception ex) { FastLogger.Instance.Error($"{PoolName} 监控异常: {ex.Message}") }
+				catch (Exception ex) { FastLogger.Instance.Error($"{PoolName} 监控异常: {ex.Message}"); }
 			}
 		}
 
@@ -6316,7 +6297,7 @@ namespace VisionMeasure
 			_disposed = true;
 			try { Clear(); } catch { }
 			GC.SuppressFinalize(this);
-			FastLogger.Instance.Info($"{PoolName} 已释放")
+			FastLogger.Instance.Info($"{PoolName} 已释放");
 		}
 	}
 
@@ -6397,7 +6378,7 @@ namespace VisionMeasure
 					if (targetData != null) target.UnlockBits(targetData);
 				}
 			}
-			catch (Exception ex) { FastLogger.Instance.Error($"FastCopyTo失败: {ex.Message}") }
+			catch (Exception ex) { FastLogger.Instance.Error($"FastCopyTo失败: {ex.Message}"); }
 		}
 	}
 	#endregion

@@ -176,7 +176,7 @@ namespace VisionMeasure
 			// 【关键修复2：把 RetroactiveUpdateExcludedRecords 从这里删掉，绝不能在这里阻塞主线程】
 
 			// 添加到队列（阻塞最多2秒等待消费者，防止记录丢失）
-			if (!_recordQueue.TryAdd(record, 2000))
+			if (!_recordQueue.TryAdd(record, 200))
 			{
 				FastLogger.Instance.Error($"记录队列阻塞: SequenceId={record.SequenceId}");
 			}
@@ -724,11 +724,13 @@ namespace VisionMeasure
 			{
 				try
 				{
-					// 等待队列处理完成
-					while (_recordQueue.Count > 0)
+					// 等待队列处理完成（最多30秒，防止生产运行时死循环）
+					int waitLoops = 0;
+					while (_recordQueue.Count > 0 && waitLoops++ < 300)
 					{
 						Thread.Sleep(100);
 					}
+					if (_recordQueue.Count > 0) FastLogger.Instance.Warn($"导出报表：队列仍有{_recordQueue.Count}条未处理，跳过等待");
 
 					// 首先生成所有SKU的汇总
 					GenerateShiftSummaryInternal(date, shift);
@@ -1118,11 +1120,13 @@ private void GenerateShiftSummaryInternal(string date, string shift)
 			{
 				try
 				{
-					// 等待队列处理完成
-					while (_recordQueue.Count > 0)
+					// 等待队列处理完成（最多30秒）
+					int waitLoops2 = 0;
+					while (_recordQueue.Count > 0 && waitLoops2++ < 300)
 					{
 						Thread.Sleep(100);
 					}
+					if (_recordQueue.Count > 0) FastLogger.Instance.Warn($"汇总报表：队列仍有{_recordQueue.Count}条未处理，跳过等待");
 
 					// 生成汇总
 					if (string.IsNullOrEmpty(sku))
