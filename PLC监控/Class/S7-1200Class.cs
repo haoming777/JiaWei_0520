@@ -116,6 +116,7 @@ namespace PLC调试.Class
 			{
 				plc.IpAddress = _Config.PlcIP;
 				plc.Port = _Config.PlcPort;
+				plc.ConnectTimeOut = 2000; // P1: 2s timeout prevents PLC blocking from stalling threads
 
 				plc?.ConnectClose();
 				OperateResult connectState = plc.ConnectServer();

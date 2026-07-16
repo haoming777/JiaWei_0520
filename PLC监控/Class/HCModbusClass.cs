@@ -84,7 +84,7 @@ namespace PLC调试.Class
 				modbusTcp.AddressStartWithZero = true;
 				modbusTcp.DataFormat = HslCommunication.Core.DataFormat.CDAB;
 				modbusTcp.IsStringReverse = true;
-				modbusTcp.ConnectTimeOut = 5000;
+				modbusTcp.ConnectTimeOut = 2000; // P1: reduced from 5000
 
 				OperateResult connectState = modbusTcp.ConnectServer();
 				modbusState = connectState.IsSuccess;

@@ -807,9 +807,8 @@ namespace VisionMeasure
 					long memMB = proc.WorkingSet64 / 1024 / 1024;
 					if (memMB > MEMORY_WARN_THRESHOLD)
 					{
-						try { FastLogger.Instance.Warn($"[内存] 内存偏高: {memMB}MB, 触发GC"); } catch {}
-						// P1: single GC instead of triple full-stop + LOH compaction
-						GC.Collect();
+						try { FastLogger.Instance.Warn($"[内存] 内存偏高: {memMB}MB, 仅驱逐缓存"); } catch {}
+						EvictOldestCacheEntries(MAX_IMAGE_CACHE_SIZE / 2);
 					}
 					if (memMB > MEMORY_CRITICAL_THRESHOLD)
 					{
@@ -867,7 +866,6 @@ namespace VisionMeasure
 				}
 			}
 				// P1: single GC only
-				GC.Collect();
 				try { FastLogger.Instance.Error($"[内存] 紧急清理完成，清除{keys.Length}组缓存"); } catch {}
 			}
 			catch { }
@@ -5093,9 +5091,14 @@ namespace VisionMeasure
 		private void UpdatePictureBox1(Bitmap image)
 		{
 			if (xlPictureBox1.InvokeRequired)
-				xlPictureBox1.BeginInvoke(new Action(() => UpdatePictureBoxInternal(xlPictureBox1, image)));
+			{
+				var cloned = (Bitmap)image.Clone();
+				xlPictureBox1.BeginInvoke(new Action(() => UpdatePictureBoxInternal(xlPictureBox1, cloned)));
+			}
 			else
-				UpdatePictureBoxInternal(xlPictureBox1, image);
+			{
+				UpdatePictureBoxInternal(xlPictureBox1, (Bitmap)image.Clone());
+			}
 		}
 
 		private void UpdatePictureBoxInternal(PictureBox pictureBox, Bitmap image)
@@ -5104,8 +5107,8 @@ namespace VisionMeasure
 			try
 			{
 				var oldImage = pictureBox.Image;
-				if (oldImage != null && oldImage != image) { try { oldImage.Dispose(); } catch { } }
-				pictureBox.Image = (Bitmap)image.Clone();
+				pictureBox.Image = image;
+				if (oldImage != null) { try { oldImage.Dispose(); } catch { } }
 			}
 			catch { }
 		}
@@ -5113,9 +5116,14 @@ namespace VisionMeasure
 		private void UpdatePictureBox2(Bitmap image)
 		{
 			if (xlPictureBox2.InvokeRequired)
-				xlPictureBox2.BeginInvoke(new Action(() => UpdatePictureBoxInternal2(xlPictureBox2, image)));
+			{
+				var cloned = (Bitmap)image.Clone();
+				xlPictureBox2.BeginInvoke(new Action(() => UpdatePictureBoxInternal2(xlPictureBox2, cloned)));
+			}
 			else
-				UpdatePictureBoxInternal2(xlPictureBox2, image);
+			{
+				UpdatePictureBoxInternal2(xlPictureBox2, (Bitmap)image.Clone());
+			}
 		}
 
 		private void UpdatePictureBoxInternal2(PictureBox pictureBox, Bitmap image)
@@ -5124,8 +5132,8 @@ namespace VisionMeasure
 			try
 			{
 				var oldImage = pictureBox.Image;
-				if (oldImage != null && oldImage != image) { try { oldImage.Dispose(); } catch { } }
-				pictureBox.Image = (Bitmap)image.Clone();
+				pictureBox.Image = image;
+				if (oldImage != null) { try { oldImage.Dispose(); } catch { } }
 			}
 			catch { }
 		}
@@ -5133,9 +5141,14 @@ namespace VisionMeasure
 		private void UpdatePictureBox3(Bitmap image)
 		{
 			if (xlPictureBox3.InvokeRequired)
-				xlPictureBox3.BeginInvoke(new Action(() => UpdatePictureBoxInternal3(xlPictureBox3, image)));
+			{
+				var cloned = (Bitmap)image.Clone();
+				xlPictureBox3.BeginInvoke(new Action(() => UpdatePictureBoxInternal3(xlPictureBox3, cloned)));
+			}
 			else
-				UpdatePictureBoxInternal3(xlPictureBox3, image);
+			{
+				UpdatePictureBoxInternal3(xlPictureBox3, (Bitmap)image.Clone());
+			}
 		}
 
 		private void UpdatePictureBoxInternal3(PictureBox pictureBox, Bitmap image)
@@ -5144,8 +5157,8 @@ namespace VisionMeasure
 			try
 			{
 				var oldImage = pictureBox.Image;
-				if (oldImage != null && oldImage != image) { try { oldImage.Dispose(); } catch { } }
-				pictureBox.Image = (Bitmap)image.Clone();
+				pictureBox.Image = image;
+				if (oldImage != null) { try { oldImage.Dispose(); } catch { } }
 			}
 			catch { }
 		}
@@ -5159,9 +5172,14 @@ namespace VisionMeasure
 		private void UpdatePictureBox4(Bitmap image)
 		{
 			if (xlPictureBox4.InvokeRequired)
-				xlPictureBox4.BeginInvoke(new Action(() => UpdatePictureBoxInternal4(xlPictureBox4, image)));
+			{
+				var cloned = (Bitmap)image.Clone();
+				xlPictureBox4.BeginInvoke(new Action(() => UpdatePictureBoxInternal4(xlPictureBox4, cloned)));
+			}
 			else
-				UpdatePictureBoxInternal4(xlPictureBox4, image);
+			{
+				UpdatePictureBoxInternal4(xlPictureBox4, (Bitmap)image.Clone());
+			}
 		}
 
 		private void UpdatePictureBoxInternal4(PictureBox pictureBox, Bitmap image)
@@ -5170,8 +5188,8 @@ namespace VisionMeasure
 			try
 			{
 				var oldImage = pictureBox.Image;
-				if (oldImage != null && oldImage != image) { try { oldImage.Dispose(); } catch { } }
-				pictureBox.Image = (Bitmap)image.Clone();
+				pictureBox.Image = image;
+				if (oldImage != null) { try { oldImage.Dispose(); } catch { } }
 			}
 			catch { }
 		}
@@ -5179,9 +5197,14 @@ namespace VisionMeasure
 		private void UpdatePictureBox5(Bitmap image)
 		{
 			if (xlPictureBox5.InvokeRequired)
-				xlPictureBox5.BeginInvoke(new Action(() => UpdatePictureBoxInternal5(xlPictureBox5, image)));
+			{
+				var cloned = (Bitmap)image.Clone();
+				xlPictureBox5.BeginInvoke(new Action(() => UpdatePictureBoxInternal5(xlPictureBox5, cloned)));
+			}
 			else
-				UpdatePictureBoxInternal5(xlPictureBox5, image);
+			{
+				UpdatePictureBoxInternal5(xlPictureBox5, (Bitmap)image.Clone());
+			}
 		}
 
 		private void UpdatePictureBoxInternal5(PictureBox pictureBox, Bitmap image)
@@ -5190,8 +5213,8 @@ namespace VisionMeasure
 			try
 			{
 				var oldImage = pictureBox.Image;
-				if (oldImage != null && oldImage != image) { try { oldImage.Dispose(); } catch { } }
-				pictureBox.Image = (Bitmap)image.Clone();
+				pictureBox.Image = image;
+				if (oldImage != null) { try { oldImage.Dispose(); } catch { } }
 			}
 			catch { }
 		}
@@ -5590,15 +5613,20 @@ namespace VisionMeasure
 					if (context.ProcessingTimer != null)
 					{
 						long elapsedMs = context.ProcessingTimer.ElapsedMilliseconds;
-						_performanceStats.AddTime(elapsedMs);
-						StringBuilder stringBuilder = new StringBuilder();
-						stringBuilder.Append($"\r\nCamera: {context.Camera}\r\nID:{context.SequenceId - context.Offset}\r\n总耗时: {elapsedMs}ms\r\n");
+							_performanceStats.AddTime(elapsedMs);
+						// AddStageTime always needed; StringBuilder only when RunLogEnabled
 						foreach (var stage in context.StageTimes)
 						{
 							_performanceStats.AddStageTime(stage.Key, stage.Value);
-							stringBuilder.Append($"{stage.Key}: {stage.Value}\r\n");
 						}
-						if (MainFrm.RunLogEnabled) FastLogger.Instance.Info(stringBuilder.ToString());
+						if (MainFrm.RunLogEnabled)
+						{
+							var sb = new StringBuilder();
+							sb.Append($"\r\nCamera: {context.Camera}\r\nID:{context.SequenceId - context.Offset}\r\n总耗时: {elapsedMs}ms\r\n");
+							foreach (var stage in context.StageTimes)
+								sb.Append($"{stage.Key}: {stage.Value}\r\n");
+							FastLogger.Instance.Info(sb.ToString());
+						}
 						// FastLogger 耗时日志（每50帧汇总一次，减少输出量）
 						if (_performanceStats.ProcessCount % 50 == 0) { try { FastLogger.Instance.Debug(_cameraName + " 耗时汇总: Avg=" + _performanceStats.AverageTimeMs + "ms Min=" + _performanceStats.MinTimeMs + "ms Max=" + _performanceStats.MaxTimeMs + "ms 帧数=" + _performanceStats.ProcessCount); foreach (var stage in context.StageTimes) { try { FastLogger.Instance.Debug(_cameraName + " " + stage.Key + ": " + stage.Value + "ms"); } catch {} } } catch {} }
 
