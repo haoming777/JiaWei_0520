@@ -72,7 +72,9 @@ namespace VisionMeasure
 		XLUsbDogClass UsbDogClass = new XLUsbDogClass();
 
 		private AsyncDatabaseRecorder _dbRecorder;
-	private DiskGuardService _diskGuard; // 【P2】磁盘空间监控
+	private DiskGuardService _diskGuard;
+	internal static volatile bool SaveOkAndRawPaused;
+	internal static volatile bool SaveNgResultPaused;
 
 		/// <summary>运行时日志开关（热路径诊断用，默认关闭。设为true可输出每帧详细日志）</summary>
 		public static volatile bool RunLogEnabled = false;
@@ -625,8 +627,8 @@ namespace VisionMeasure
 		}
 
 		private const int MAX_IMAGE_CACHE_SIZE = 50; // 最多同时缓存50组图像（约600MB），超限时强制清理旧条目
-		private const long MEMORY_WARN_THRESHOLD = 1500; // 内存超过1500MB时强制GC
-		private const long MEMORY_CRITICAL_THRESHOLD = 2000; // 内存超过2000MB时丢弃缓存腾空间
+		private const long MEMORY_WARN_THRESHOLD = 2500; // 内存超过1500MB时强制GC
+		private const long MEMORY_CRITICAL_THRESHOLD = 2800; // 内存超过2000MB时丢弃缓存腾空间
 		private long _cacheEvictCount = 0;
 		private int _memCheckCounter = 0;  // 内存检查计数器（替代 DateTime.Now.Second % 30 的不精确判断）
 		private int _perfCheckCounter = 0; // 性能重置计数器（替代 DateTime.Now.Minute % 5 的不精确判断）
@@ -2281,7 +2283,7 @@ namespace VisionMeasure
 					}
 					else
 					{
-						FastLogger.Instance.Error($"[Camera3] ID:{id} 圆度检测失败，设置为OK");
+						FastLogger.Instance.Debug($"[Camera3] ID:{id} 圆度检测失败，设置为OK");
 						result = true;
 						context.ProcessResult = result;
 						resultImage = labelImage.Clone();
@@ -3826,7 +3828,7 @@ namespace VisionMeasure
 				ResultCountMethod(r0, r1, r2, r3, r4, isEmptyCup);
 
 				// 空杯仍加入PLC发送队列（保持流水线序列号连续性）
-				if (modbusClass.modbusState && !_isClosing)
+				if (!_isClosing) // P0: 无论PLC是否连接都入队，重连后补发
 				{
 					lock (SendResultList)
 					{
@@ -4748,7 +4750,7 @@ namespace VisionMeasure
 									{ long _cm = _plcPerfMaxMs; while (_plcMs > _cm) { long _o = Interlocked.CompareExchange(ref _plcPerfMaxMs, _plcMs, _cm); if (_o == _cm) break; _cm = _o; } }
 									if (_plcPerfIntervalWatch.IsRunning) { long _iv = _plcPerfIntervalWatch.ElapsedMilliseconds; _plcPerfIntervalWatch.Restart(); long _ci = _plcPerfIntervalMaxMs; while (_iv > _ci) { long _ox = Interlocked.CompareExchange(ref _plcPerfIntervalMaxMs, _iv, _ci); if (_ox == _ci) break; _ci = _ox; } }
 									else { _plcPerfIntervalWatch.Start(); }
-								_plcSendCount++;	if (_plcSendCount <= 1 || _plcSendCount % 50 == 0) try { FastLogger.Instance.Info("PLC发送[" + _plcSendCount + "]: ID=" + startIndex + "-" + (startIndex+2) + " R1=" + result1 + " R2=" + result2 + " R3=" + result3 + " 成功=" + writeSuccess); } catch {}
+								_plcSendCount++; try { FastLogger.Instance.Info("PLC发送[" + _plcSendCount + "]: ID=" + startIndex + "-" + (startIndex+2) + " R1=" + result1 + " R2=" + result2 + " R3=" + result3 + " 成功=" + writeSuccess); } catch {}
 								// 调试日志：周期输出PLC发送统计
 								if (RunLogEnabled)
 								{
@@ -4820,7 +4822,9 @@ namespace VisionMeasure
 
 							if (!writeSuccess)
 							{
-								FastLogger.Instance.Error($"写入PLC失败，已达到最大重试次数 {MAX_RETRY}");
+								FastLogger.Instance.Error(string.Format("PLC写入失败已达最大重试{0}次, 跳过 startIndex={1}", MAX_RETRY, startIndex));
+								lock (SendResultList) { SendResultList.RemoveAll(item => item.SequenceId == startIndex); SendResultList.RemoveAll(item => item.SequenceId == startIndex + 1); SendResultList.RemoveAll(item => item.SequenceId == startIndex + 2); }
+								startIndex += 3;
 							}
 						}
 						else

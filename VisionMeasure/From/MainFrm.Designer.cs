@@ -4402,6 +4402,7 @@ namespace VisionMeasure
 			this.tableLayoutPanel20.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
 			this.tableLayoutPanel20.Size = new System.Drawing.Size(190, 30);
 			this.tableLayoutPanel20.TabIndex = 2;
+			this.tableLayoutPanel20.Visible = false;
 			// 
 			// uiComboBox1
 			// 
@@ -4978,6 +4979,7 @@ namespace VisionMeasure
 			this.clearBtn.Text = "Test";
 			this.clearBtn.TipsFont = new System.Drawing.Font("宋体", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
 			this.clearBtn.UseWaitCursor = true;
+			this.clearBtn.Visible = false;
 			this.clearBtn.Click += new System.EventHandler(this.clearBtn_Click);
 			// 
 			// panel53

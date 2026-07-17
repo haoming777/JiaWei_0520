@@ -46,11 +46,22 @@ namespace VisionMeasure
 			AppDomain.CurrentDomain.UnhandledException += (sender, e) =>
 			{
 				var ex = e.ExceptionObject as Exception;
-				FastLogger.Emergency(ex, "未处理异常(AppDomain)");
 				string msg = ex?.Message ?? e.ExceptionObject?.ToString();
-				MessageBox.Show($"程序发生严重异常，即将退出。\n{msg}", "严重错误",
+				// 同步写 crash 日志（不走队列，确保落盘）
+				try
+				{
+					string crashDir = Path.Combine(Application.StartupPath, "Logs");
+					if (!Directory.Exists(crashDir)) Directory.CreateDirectory(crashDir);
+					string crashFile = Path.Combine(crashDir, "crash_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".log");
+					string crashInfo = string.Format("[{0}] CRASH: {1}\n{2}",
+						DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"), msg,
+						ex?.StackTrace ?? "(no stack)");
+					File.AppendAllText(crashFile, crashInfo + Environment.NewLine);
+				}
+				catch { }
+				try { FastLogger.Emergency(ex, "未处理异常(AppDomain)"); } catch { }
+				MessageBox.Show(string.Format("程序发生严重异常，即将退出。\n{0}\n\n详细信息已写入 Logs\\crash_*.log", msg), "严重错误",
 					MessageBoxButtons.OK, MessageBoxIcon.Error);
-				Environment.Exit(1);
 			};
 
 			try

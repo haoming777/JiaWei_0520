@@ -167,7 +167,7 @@ namespace PLC调试.Class
 					if (test == 1)
 					{
 						if (triggerWatch.IsRunning) { long trigMs = triggerWatch.ElapsedMilliseconds; if (trigMs > 500) { try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn("触发间隔偏长: " + trigMs + "ms"); } catch { } } triggerWatch.Restart(); } else triggerWatch.Start();
-						EventTriggerGet();
+						EventTriggerGet?.Invoke();
 						Thread.Sleep(50);
 						plc.Write("DB1000.DBW0", val);
 						toolClass.SaveLog($"写零后读取{plc.ReadInt16(path).Content}");
@@ -314,49 +314,18 @@ namespace PLC调试.Class
 					() =>
 					{
 						plc.Write("DB1000.DBW80", v1);
-						try
-						{
-							short r = plc.ReadInt16("DB1000.DBW80").Content;
-							if (r != v1)
-								try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"S7-1200 DBW80 回读不一致! 写:{v1} 读:{r}"); } catch { }
-						}
-						catch { }
 					},
 					() =>
 					{
 						plc.Write("DB1000.DBW82", v2);
-						try
-						{
-							short r = plc.ReadInt16("DB1000.DBW82").Content;
-							if (r != v2)
-								try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"S7-1200 DBW82 回读不一致! 写:{v2} 读:{r}"); } catch { }
-						}
-						catch { }
 					},
 					() =>
 					{
 						plc.Write("DB1000.DBW84", v3);
-						try
-						{
-							short r = plc.ReadInt16("DB1000.DBW84").Content;
-							if (r != v3)
-								try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"S7-1200 DBW84 回读不一致! 写:{v3} 读:{r}"); } catch { }
-						}
-						catch { }
 					},
 					() =>
 					{
-							var wr = plc.Write("DB1000.DBW86", ok);
-							if (!wr.IsSuccess)
-								try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"S7-1200 DBW86 写入失败! {wr.Message}"); } catch { }
-							System.Threading.Thread.Sleep(2);
-						try
-						{
-							short r = plc.ReadInt16("DB1000.DBW86").Content;
-							if (r != ok)
-								try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"S7-1200 DBW86 回读不一致! 写:{ok} 读:{r}"); } catch { }
-						}
-						catch { }
+						plc.Write("DB1000.DBW86", ok);
 					}
 				);
 

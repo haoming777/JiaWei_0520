@@ -903,18 +903,14 @@ namespace VisionMeasure
 
 			foreach (var col in columns)
 			{
-				try
-				{
-					string alterSql = "ALTER TABLE production_records_summary ADD COLUMN " + col.Name + " " + col.Type + " DEFAULT " + col.Default;
-					_dbHelper.ExecuteNonQuery(alterSql);
-					FastLogger.Instance.Info("DB迁移: 已添加列 " + col.Name);
-					try { FastLogger.Instance.Info("DB迁移: 已添加列 " + col.Name); } catch { }
-				}
-				catch
-				{
-					// 列已存在，正常跳过
-					try { FastLogger.Instance.Debug("DB迁移: 列已存在 " + col.Name); } catch { }
-				}
+				// 先查列是否存在，避免 ALTER TABLE 失败产生 ERROR 日志
+				string checkSql = "SELECT COUNT(*) FROM pragma_table_info('production_records_summary') WHERE name='" + col.Name + "'";
+				var checkResult = _dbHelper.ExecuteQuery(checkSql);
+				if (checkResult.Rows.Count > 0 && Convert.ToInt32(checkResult.Rows[0][0]) > 0)
+					continue; // 列已存在，跳过
+				string alterSql = "ALTER TABLE production_records_summary ADD COLUMN " + col.Name + " " + col.Type + " DEFAULT " + col.Default;
+				_dbHelper.ExecuteNonQuery(alterSql);
+				FastLogger.Instance.Info("DB迁移: 已添加列 " + col.Name);
 			}
 		}
 

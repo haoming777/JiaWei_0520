@@ -31,7 +31,7 @@ namespace CommonLib
 			{
 				_Config.CurCheckSpec = spec;
 				_Config.CurProductId = productId;
-				ChangeMode(_Config.CurCheckSpec);
+				ChangeMode?.Invoke(_Config.CurCheckSpec);
 
 				if (LoadVision())
 				{
