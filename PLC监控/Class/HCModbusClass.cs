@@ -27,7 +27,9 @@ namespace PLC调试.Class
 
 		Stopwatch timeOut;
 
-		public HCModbusClass()
+		private volatile bool _disposed = false;
+
+	public HCModbusClass()
 		{
 			try
 			{
@@ -113,11 +115,21 @@ namespace PLC调试.Class
 			}
 		}
 
-		public void CloseModbus()
+	public void Dispose()
+		{
+		if (_disposed) return;
+		_disposed = true;
+		try { modbusTcp?.ConnectClose(); } catch { }
+		modbusState = false;
+		_plcSendStatistics.Stop();
+		}
+
+	public void CloseModbus()
 		{
 			try
 			{
 				_plcSendStatistics.Stop();
+				_disposed = true;
 				modbusTcp.ConnectClose();
 				modbusState = false;
 				toolClass.SaveLog($"关闭Modbus连接...");
@@ -135,7 +147,7 @@ namespace PLC调试.Class
 			uint oldVal = 0;
 			try
 			{
-				while (true)
+				while (!_disposed)
 				{
 					Thread.Sleep(50);
 					if (modbusState)
@@ -143,19 +155,14 @@ namespace PLC调试.Class
 						uint newVal = modbusTcp.ReadUInt16($"{_Config.keepAlive}").Content;
 						if (oldVal != newVal)
 						{
-							Console.WriteLine($"状态变了 之前{oldVal} 现在{newVal}");
 							oldVal = newVal;
-							//Console.WriteLine(timeOut.ElapsedMilliseconds);
-							timeOut.Restart();
+														timeOut.Restart();
 
-							Console.WriteLine($"状态更新后 时间清空了{timeOut.ElapsedMilliseconds}");
 						}
 
-						//Console.WriteLine($"111: {timeOut.ElapsedMilliseconds}");
-
+						//
 						if (timeOut.ElapsedMilliseconds > 10000)
 						{
-							Console.WriteLine($"超出十秒状态没有更新了 时间：{timeOut.ElapsedMilliseconds}ms");
 							modbusState = false;
 							EventConnectState(false, $"心跳状态超十秒未更新，判定为通讯断开状态，最后一次为[{newVal}]");
 							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Debug("Modbus心跳超时, 最后值=" + newVal + ", 超时ms=" + timeOut.ElapsedMilliseconds + ""); } catch { }
@@ -177,7 +184,7 @@ namespace PLC调试.Class
 		{
 			try
 			{
-				while (true)
+				while (!_disposed)
 				{
 					Thread.Sleep(500);
 					//toolClass.SaveLog($"modbusState: {modbusState}");
@@ -185,9 +192,8 @@ namespace PLC调试.Class
 					{
 						//toolClass.SaveLog($"进来了: {modbusState}");
 						//心跳
-						modbusTcp.Write($"{_Config.keepAlive}", (short)1);
-						int text = modbusTcp.ReadInt16($"{_Config.keepAlive}").Content;
-						//toolClass.SaveLog($"写入后读取: {text}");
+						var hbWr = modbusTcp.Write(_Config.keepAlive.ToString(), (short)1); if (!hbWr.IsSuccess) try { CommonLib.FastLogger.Instance.Warn("HC心跳写失败: " + hbWr.Message); } catch { }
+
 					}
 				}
 			}
@@ -270,7 +276,7 @@ namespace PLC调试.Class
 				toolClass.SaveLog($"modbusState为{modbusState}");
 				toolClass.SaveLog($"EventCount为{(EventCount == null ? "null" : "正常")}");
 
-				while (true)
+				while (!_disposed)
 				{
 					Thread.Sleep(100);
 					if (modbusState)
@@ -333,26 +339,10 @@ namespace PLC调试.Class
 				System.Threading.Tasks.Parallel.Invoke(
 					() =>
 					{
-						modbusTcp.Write("MB10008", v1);
-						try
-						{
-							short r = modbusTcp.ReadInt16("MB10008").Content;
-							if (r != v1)
-								try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"Modbus MB10008 回读不一致! 写:{v1} 读:{r}"); } catch { }
-						}
-						catch { }
-					},
+						modbusTcp.Write("MB10008", v1);				},
 					() =>
 					{
-						modbusTcp.Write("MB10010", v2);
-						try
-						{
-							short r = modbusTcp.ReadInt16("MB10010").Content;
-							if (r != v2)
-								try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"Modbus MB10010 回读不一致! 写:{v2} 读:{r}"); } catch { }
-						}
-						catch { }
-					},
+						modbusTcp.Write("MB10010", v2);				},
 					() =>
 					{
 						modbusTcp.Write("MB10012", v3);
@@ -369,7 +359,6 @@ namespace PLC调试.Class
 						var wr = modbusTcp.Write("MB10014", ok);
 						if (!wr.IsSuccess)
 							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"Modbus MB10014 写入失败! {wr.Message}"); } catch { }
-						System.Threading.Thread.Sleep(2);
 						try
 						{
 							short r = modbusTcp.ReadInt16("MB10014").Content;
@@ -704,14 +693,6 @@ namespace PLC调试.Class
 		{
 			var finalStats = _sendStatistics.GetStatistics();
 
-			Console.WriteLine("=== 发送间隔统计结果 ===");
-			Console.WriteLine($"本次间隔: {finalStats.CurrentInterval}ms");
-			Console.WriteLine($"最大间隔: {finalStats.MaxInterval}ms");
-			Console.WriteLine($"最小间隔: {finalStats.MinInterval}ms");
-			Console.WriteLine($"平均间隔: {finalStats.AverageInterval:F2}ms");
-			Console.WriteLine($"总发送次数: {finalStats.TotalCount}");
-			Console.WriteLine($"有效记录次数: {finalStats.ValidCount}");
-			Console.WriteLine("=======================");
 
 			// 记录到日志文件
 			// Log.Info($"发送间隔最终统计: {finalStats}");
@@ -723,7 +704,6 @@ namespace PLC调试.Class
 		public void DisplayCurrentStatistics()
 		{
 			var stats = _sendStatistics.GetStatistics();
-			Console.WriteLine($"当前统计: {stats}");
 		}
 	}
 }

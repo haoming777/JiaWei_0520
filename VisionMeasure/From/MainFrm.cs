@@ -336,7 +336,7 @@ namespace VisionMeasure
 			System.Runtime.GCSettings.LatencyMode = System.Runtime.GCLatencyMode.Interactive;
 			// 提示GC当前是大内存场景，避免频繁触发Gen0/Gen1
 			System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
-			try { FastLogger.Instance.Info("[内存] GC模式=Interactive, LOH压缩=CompactOnce"); } catch { }
+			try { FastLogger.Instance.Info("[内存] ServerGC=" + System.Runtime.GCSettings.IsServerGC + ", GC模式=" + System.Runtime.GCSettings.LatencyMode + ", LOH压缩=CompactOnce"); } catch { }
 			// 【新增优化】提升当前进程在操作系统中的优先级，确保多线程调度更稳定
 			Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.High;
 			// 【内存】锁定工作集防OS换出（避免检测时硬缺页）
@@ -760,6 +760,8 @@ namespace VisionMeasure
 			{
 				var sb = new StringBuilder();
 				sb.Append(string.Format("[{0}] ", DateTime.Now.ToString("HH:mm")));
+				string csvTs = DateTime.Now.ToString("HH:mm:ss");
+				var csvRows = new List<string>();
 				var processors = new[] { _processor1, _processor2, _processor3, _processor4, _processor5 };
 				foreach (var proc in processors)
 				{
@@ -773,15 +775,41 @@ namespace VisionMeasure
 					string aiMinStr = aiT > 0 ? aiMin.ToString() : "-";
 					sb.Append(string.Format("{0}:总Avg={1:F0}Min={2}Max={3} AIavg={4}Min={5}Max={6} | ",
 						proc.CameraName, perf.AverageTimeMs, perf.MinTimeMs, perf.MaxTimeMs, aiAvg, aiMinStr, aiM));
+					csvRows.Add(string.Format("{0},{1},{2},{3:F0},{4},{5},{6},{7},{8},,,,",
+						csvTs, proc.CameraName, perf.ProcessCount, perf.AverageTimeMs, perf.MinTimeMs, perf.MaxTimeMs, aiAvg, aiMinStr, aiM));
 				}
-				sb.Append(string.Format("PLC写Avg={0}ms 队列={1}", _plcPerfSendCount > 0 ? (_plcPerfTotalMs / _plcPerfSendCount).ToString() : "-", SendResultList.Count));
+				long plcCnt = Interlocked.Read(ref _plcPerfSendCount);
+				string plcAvg = plcCnt > 0 ? (Interlocked.Read(ref _plcPerfTotalMs) / plcCnt).ToString() : "-";
+				sb.Append(string.Format("PLC写Avg={0}ms 队列={1}", plcAvg, SendResultList.Count));
+				csvRows.Add(string.Format("{0},PLC,{1},,,,,,,{2},{3},{4},{5}",
+					csvTs, plcCnt, plcCnt > 0 ? plcAvg : "", Interlocked.Read(ref _plcPerfMaxMs), Interlocked.Read(ref _plcPerfIntervalMaxMs), SendResultList.Count));
 				string report = sb.ToString();
 				try { if (FastLogger.IsInitialized) FastLogger.Instance.Info(report); } catch { }
+				WritePerfCsv(csvRows);
 			}
 			catch (Exception ex)
 			{
 				try { if (FastLogger.IsInitialized) FastLogger.Instance.Error("[Brief] " + ex.Message); } catch { }
 			}
+		}
+
+		/// <summary>
+		/// 耗时数据落盘为 CSV 表格：Logs/PerfStats/yyyyMMdd.csv（每1分钟随轻量汇总追加一批行）
+		/// 统计区间说明：相机耗时与PLC写耗时均为"自上次5分钟详细报告清零以来"的累计统计
+		/// </summary>
+		private void WritePerfCsv(List<string> rows)
+		{
+			try
+			{
+				if (rows == null || rows.Count == 0) return;
+				string dir = Path.Combine(Directory.GetCurrentDirectory(), "Logs", "PerfStats");
+				if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+				string file = Path.Combine(dir, DateTime.Now.ToString("yyyyMMdd") + ".csv");
+				if (!File.Exists(file))
+					File.WriteAllText(file, "时间,对象,帧数/发送次数,总Avg(ms),总Min(ms),总Max(ms),AIavg(ms),AIMin(ms),AIMax(ms),PLC写Avg(ms),PLC写Max(ms),PLC间隔Max(ms),发送队列\r\n", new UTF8Encoding(true));
+				File.AppendAllText(file, string.Join("\r\n", rows) + "\r\n", Encoding.UTF8);
+			}
+			catch { }
 		}
 		/// <summary>
 		/// 内存压力检查：当缓存过大或总内存超过阈值时强制清理
@@ -4748,9 +4776,10 @@ namespace VisionMeasure
 									Interlocked.Increment(ref _plcPerfSendCount);
 									Interlocked.Add(ref _plcPerfTotalMs, _plcMs);
 									{ long _cm = _plcPerfMaxMs; while (_plcMs > _cm) { long _o = Interlocked.CompareExchange(ref _plcPerfMaxMs, _plcMs, _cm); if (_o == _cm) break; _cm = _o; } }
-									if (_plcPerfIntervalWatch.IsRunning) { long _iv = _plcPerfIntervalWatch.ElapsedMilliseconds; _plcPerfIntervalWatch.Restart(); long _ci = _plcPerfIntervalMaxMs; while (_iv > _ci) { long _ox = Interlocked.CompareExchange(ref _plcPerfIntervalMaxMs, _iv, _ci); if (_ox == _ci) break; _ci = _ox; } }
+									long _ivMs = -1;
+									if (_plcPerfIntervalWatch.IsRunning) { _ivMs = _plcPerfIntervalWatch.ElapsedMilliseconds; _plcPerfIntervalWatch.Restart(); long _ci = _plcPerfIntervalMaxMs; while (_ivMs > _ci) { long _ox = Interlocked.CompareExchange(ref _plcPerfIntervalMaxMs, _ivMs, _ci); if (_ox == _ci) break; _ci = _ox; } }
 									else { _plcPerfIntervalWatch.Start(); }
-								_plcSendCount++; try { FastLogger.Instance.Info("PLC发送[" + _plcSendCount + "]: ID=" + startIndex + "-" + (startIndex+2) + " R1=" + result1 + " R2=" + result2 + " R3=" + result3 + " 成功=" + writeSuccess); } catch {}
+								_plcSendCount++; try { FastLogger.Instance.Info("PLC发送[" + _plcSendCount + "]: ID=" + startIndex + "-" + (startIndex+2) + " R1=" + result1 + " R2=" + result2 + " R3=" + result3 + " 成功=" + writeSuccess + " 写耗时=" + _plcMs + "ms" + (_ivMs >= 0 ? " 距上次=" + _ivMs + "ms" : "")); } catch {}
 								// 调试日志：周期输出PLC发送统计
 								if (RunLogEnabled)
 								{
