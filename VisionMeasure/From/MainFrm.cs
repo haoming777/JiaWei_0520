@@ -504,7 +504,9 @@ namespace VisionMeasure
 			{
 				try
 				{
-					string currentSku = GetCurrentSkuValue();
+					// 【修复】必须读控件当前文本，不能用 GetCurrentSkuValue()（它优先返回 _savedSku 缓存，
+					// 导致 _savedSku != currentSku 永远不成立，SKU 更新和统计清零功能失效）
+					string currentSku = SKU_Txt?.Text?.Trim() ?? "";
 
 					if (currentSku.Length < 6 || currentSku.Length > 10)
 					{
@@ -566,7 +568,8 @@ namespace VisionMeasure
 		{
 			try
 			{
-				string currentSku = GetCurrentSkuValue();
+				// 【修复】同 SKU_Txt_Enter：读控件当前文本做比较，用缓存值会导致永远"相同"、边框颜色提示失效
+				string currentSku = SKU_Txt?.Text?.Trim() ?? "";
 
 				// 本地没有SKU时显示红色
 				if (string.IsNullOrEmpty(_savedSku))
@@ -2020,14 +2023,14 @@ namespace VisionMeasure
 
 				if (!_isClosing)
 				{
-
+					// 【存图带字】先把界面同款中文信息画到结果Mat上，存图克隆与显示共用已绘制图像
+					DrawOnMat(labelImage1, bmp => DrawGdiCam1(bmp, result, result_Segmentation, totalArea, totalArea_Camera1, id));
 					CacheImageForDefectSave("Camera1", labelImage, labelImage1, id);
 
 					// 降频刷新 UI（仅 1/3 帧显示，节约 GDI 渲染开销）
 					if (id % 3 == 0)
 					{
-						displayBitmap = labelImage1.ToBitmap();
-						DrawGdiCam1(displayBitmap, result, result_Segmentation, totalArea, totalArea_Camera1, id);
+						displayBitmap = labelImage1.ToBitmap();   // 文字已绘制在Mat上，无需重复绘制
 						UpdatePictureBox1(displayBitmap);
 					}
 				}
@@ -2184,14 +2187,14 @@ namespace VisionMeasure
 
 				if (!_isClosing)
 				{
-
+					// 【存图带字】先把界面同款中文信息画到结果Mat上，存图克隆与显示共用已绘制图像
+					DrawOnMat(labelImage1, bmp => DrawGdiCam2(bmp, result, result_class, id));
 					CacheImageForDefectSave("Camera2", labelImage, labelImage1, id);
 
 					// 降频刷新 UI（仅 1/3 帧显示，节约 GDI 渲染开销）
 					if (id % 3 == 0)
 					{
-						displayBitmap = labelImage1.ToBitmap();
-						DrawGdiCam2(displayBitmap, result, result_class, id);
+						displayBitmap = labelImage1.ToBitmap();   // 文字已绘制在Mat上，无需重复绘制
 						UpdatePictureBox2(displayBitmap);
 					}
 				}
@@ -2324,6 +2327,8 @@ namespace VisionMeasure
 
 				if (!_isClosing)
 				{
+					// 【存图带字】先把界面同款中文信息画到结果Mat上，存图克隆与显示共用已绘制图像
+					DrawOnMat(resultImage, bmp => DrawGdiCam3(bmp, result, longEdge, PipeDiameter, roundness, id));
 					CacheImageForDefectSave("Camera3", labelImage, resultImage, id);
 
 					// 降频刷新 UI（仅 1/3 帧显示，节约 GDI 渲染开销）
@@ -2333,8 +2338,7 @@ namespace VisionMeasure
 						context.StageTimes["图像绘制"] = stageTimer.ElapsedMilliseconds;
 						stageTimer.Restart();
 
-						displayBitmap = resultImage.ToBitmap();
-						DrawGdiCam3(displayBitmap, result, longEdge, PipeDiameter, roundness, id);
+						displayBitmap = resultImage.ToBitmap();   // 文字已绘制在Mat上，无需重复绘制
 						UpdatePictureBox3(displayBitmap);
 
 						stageTimer.Stop();
@@ -2569,6 +2573,8 @@ namespace VisionMeasure
 
 				if (!_isClosing)
 				{
+					// 【存图带字】先把界面同款中文信息画到结果Mat上，存图克隆与显示共用已绘制图像
+					DrawOnMat(labelImage1, bmp => DrawGdiCam4(bmp, result, result_char, order_ocr, id));
 					CacheImageForDefectSave("Camera4", labelImage, labelImage1, id);
 
 					// 降频刷新 UI（仅 1/3 帧显示，节约 GDI 渲染开销）
@@ -2578,8 +2584,7 @@ namespace VisionMeasure
 						context.StageTimes["图像绘制"] = stageTimer.ElapsedMilliseconds;
 						stageTimer.Restart();
 
-						displayBitmap = labelImage1.ToBitmap();
-						DrawGdiCam4(displayBitmap, result, result_char, order_ocr, id);
+						displayBitmap = labelImage1.ToBitmap();   // 文字已绘制在Mat上，无需重复绘制
 						UpdatePictureBox4(displayBitmap);
 
 						stageTimer.Stop();
@@ -2944,6 +2949,8 @@ namespace VisionMeasure
 
 				if (!_isClosing)
 				{
+					// 【存图带字】先把界面同款中文信息画到结果Mat上，存图克隆与显示共用已绘制图像
+					DrawOnMat(labelImage1, bmp => DrawGdiCam5(bmp, result, result_char, result_PCode_char, result_flaw, result_Segmentation, result_class, order_ocr, pcode_ocr, projectionLength, segmentationResult, id));
 					// 始终缓存图像用于存图（无论是否积压）
 					CacheImageForDefectSave("Camera5", labelImage, labelImage1, id);
 
@@ -2953,8 +2960,7 @@ namespace VisionMeasure
 					// Camera5积压时跳过显示，省50ms提速追赶
 					if (needOutput)
 					{
-						displayBitmap = labelImage1.ToBitmap();
-						DrawGdiCam5(displayBitmap, result, result_char, result_PCode_char, result_flaw, result_Segmentation, result_class, order_ocr, pcode_ocr, projectionLength, segmentationResult, id);
+						displayBitmap = labelImage1.ToBitmap();   // 文字已绘制在Mat上，无需重复绘制
 						UpdatePictureBox5(displayBitmap);
 					}
 					else if (queueDepth % 10 == 0)
@@ -3500,6 +3506,36 @@ namespace VisionMeasure
 		#endregion
 
 		#region GDI+中文绘制
+		/// <summary>
+		/// 用 Bitmap 零拷贝包裹 BGR Mat 的像素内存执行 GDI+ 绘制，文字直接落入 Mat 数据，
+		/// 使后续的存图克隆与界面显示共用同一份已绘制图像（包裹写法先例：AIsdk Vimo.Visualize）。
+		/// </summary>
+		private static void DrawOnMat(Mat mat, Action<Bitmap> drawAction)
+		{
+			if (mat == null || mat.Empty() || mat.Type() != MatType.CV_8UC3) return;
+			try
+			{
+				if (mat.Step() % 4 == 0)   // GDI+ 要求 stride 4字节对齐，工业相机分辨率基本都满足
+				{
+					using (var bmp = new Bitmap(mat.Cols, mat.Rows, (int)mat.Step(), PixelFormat.Format24bppRgb, mat.Data))
+						drawAction(bmp);
+				}
+				else                       // 兜底：非对齐分辨率走一次拷贝绘制再写回，保证功能正确
+				{
+					using (var bmp = mat.ToBitmap())
+					{
+						drawAction(bmp);
+						using (var tmp = BitmapConverter.ToMat(bmp))
+							tmp.CopyTo(mat);
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				FastLogger.Instance.Error($"DrawOnMat 绘制异常: {ex.Message}");
+			}
+		}
+
 		private void DrawGdiCam1(Bitmap bmp, bool result, bool result_Segmentation, double totalArea, int totalArea_Camera1, long id)
 		{
 			try
