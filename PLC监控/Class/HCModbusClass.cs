@@ -335,37 +335,33 @@ namespace PLC调试.Class
 				}
 
 				sw.Restart();
-				// 4路信号并行写入+立即回读
+				// 4路信号并行写入，以 Write 返回的 IsSuccess（Modbus TCP 协议级应答）确认写入成功。
+				// 【已移除回读验证】PLC 收到 1 后立即处理并置 0，以太网往返延迟下回读经常读到
+				// 已被 PLC 置 0 的值，造成大量"回读不一致"误报；且每次回读多一次网络往返徒增耗时
 				System.Threading.Tasks.Parallel.Invoke(
 					() =>
 					{
-						modbusTcp.Write("MB10008", v1);				},
+						var wr = modbusTcp.Write("MB10008", v1);
+						if (!wr.IsSuccess)
+							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"Modbus MB10008 写入失败! {wr.Message}"); } catch { }
+					},
 					() =>
 					{
-						modbusTcp.Write("MB10010", v2);				},
+						var wr = modbusTcp.Write("MB10010", v2);
+						if (!wr.IsSuccess)
+							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"Modbus MB10010 写入失败! {wr.Message}"); } catch { }
+					},
 					() =>
 					{
-						modbusTcp.Write("MB10012", v3);
-						try
-						{
-							short r = modbusTcp.ReadInt16("MB10012").Content;
-							if (r != v3)
-								try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"Modbus MB10012 回读不一致! 写:{v3} 读:{r}"); } catch { }
-						}
-						catch { }
+						var wr = modbusTcp.Write("MB10012", v3);
+						if (!wr.IsSuccess)
+							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"Modbus MB10012 写入失败! {wr.Message}"); } catch { }
 					},
 					() =>
 					{
 						var wr = modbusTcp.Write("MB10014", ok);
 						if (!wr.IsSuccess)
 							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"Modbus MB10014 写入失败! {wr.Message}"); } catch { }
-						try
-						{
-							short r = modbusTcp.ReadInt16("MB10014").Content;
-							if (r != ok)
-								try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"Modbus MB10014 回读不一致! 写:{ok} 读:{r}"); } catch { }
-						}
-						catch { }
 					}
 				);
 

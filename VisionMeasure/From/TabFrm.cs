@@ -24,7 +24,11 @@ namespace VisionMeasure.From
 		{
 			InitializeComponent();
 		}
-		MainFrm mainFrm = new MainFrm();
+		// 【P0修复】禁止字段初始化器 new MainFrm()——每次 TabFrm 实例化都会
+		// 构造一整套 ImageProcessor×5＋HighSpeedSaver×5＋_performanceTimer＋内存池
+		// 然后立即被上面的构造器赋值覆盖，幽灵实例永不释放，是 15:4x 段每分钟5份性能报告
+		// 和内存冲高的主因。实时传递已在 TabFrm(Point,Form) 中由 mainFrm = (MainFrm)form 完成
+		MainFrm mainFrm;
 		XLToolClass toolClass = new XLToolClass();
 
 		// RecordsFrm 独立 UI 线程 —— 避免和 MainFrm 争抢 UI 线程

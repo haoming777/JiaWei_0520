@@ -12,8 +12,7 @@ namespace VisionMeasure
 		/// 应用程序的主入口点。
 		/// </summary>
 		[STAThread]
-		static void Main()
-		{
+		static void Main()		{
 			bool isAppRunning = false;
 			Mutex appMutex = new Mutex(true, Application.ProductName, out isAppRunning);
 			if (!isAppRunning)
@@ -30,6 +29,9 @@ namespace VisionMeasure
 			FastLogger.Instance.Info("应用程序启动");
 			FastLogger.Instance.Info("版本: " + Application.ProductVersion);
 			FastLogger.Instance.Info("══════════════════════════════════════");
+
+			// ──── 会话标记：检测上次是否正常退出（崩溃/强杀/断电 事后可从日志确认）────
+			SessionMarker.CheckPreviousAndCreate();
 
 			// ──── 全局异常捕获（阻止闪退，记日志）────
 			Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
@@ -86,6 +88,48 @@ namespace VisionMeasure
 				FastLogger.Instance.Info("应用程序关闭");
 				try { FastLogger.Instance.Flush(3000); FastLogger.Instance.Dispose(); } catch { }
 			}
+		}
+	}
+
+	/// <summary>
+	/// 会话生命周期标记：启动时落一个 session.lock（含启动时间与PID），正常关闭流程末尾删除。
+	/// 下次启动若发现文件仍在，说明上次进程未走完正常关闭（崩溃/任务管理器强杀/断电），
+	/// 输出 Warn 日志供事后排查“到底是不是人为关闭”。
+	/// </summary>
+	internal static class SessionMarker
+	{
+		private static readonly string MarkerPath = Path.Combine(Application.StartupPath, "session.lock");
+
+		/// <summary>启动时调用：检查上次会话残留标记并写入本次标记</summary>
+		public static void CheckPreviousAndCreate()
+		{
+			try
+			{
+				if (File.Exists(MarkerPath))
+				{
+					string lastInfo = "";
+					try { lastInfo = File.ReadAllText(MarkerPath).Trim(); } catch { }
+					FastLogger.Instance.Warn(string.Format(
+						"[会话] 上次会话未正常退出(疑似崩溃/强杀/断电)! 上次启动信息: {0}", lastInfo));
+				}
+				else
+				{
+					FastLogger.Instance.Info("[会话] 上次会话正常退出");
+				}
+				File.WriteAllText(MarkerPath, string.Format("启动时间={0} PID={1}",
+					DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+					System.Diagnostics.Process.GetCurrentProcess().Id));
+			}
+			catch (Exception ex)
+			{
+				try { FastLogger.Instance.Error("[会话] 标记文件处理异常: " + ex.Message); } catch { }
+			}
+		}
+
+		/// <summary>正常关闭流程完成后调用：删除标记，表示本次为干净退出</summary>
+		public static void MarkCleanExit()
+		{
+			try { if (File.Exists(MarkerPath)) File.Delete(MarkerPath); } catch { }
 		}
 	}
 }
