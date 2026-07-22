@@ -329,16 +329,16 @@ namespace VisionMeasure
 			try { FastLogger.Instance.Info("工位启用状态: " + string.Join(" ", _cameraEnabled.Select((b, i) => "Cam" + (i + 1) + "=" + b)) + " (" + _cameraEnabled.Count(e => e) + "/5 启用)"); } catch { }
 			if (IFSaveLog) FastLogger.Instance.Info("[CamCfg] 工位启用状态: Cam1=" + _cameraEnabled[0] + " Cam2=" + _cameraEnabled[1] + " Cam3=" + _cameraEnabled[2] + " Cam4=" + _cameraEnabled[3] + " Cam5=" + _cameraEnabled[4] + " (启用" + _cameraEnabled.Count(e => e) + "路)");
 
-			// 【内存优化】Interactive模式允许后台并发GC，避免Batch模式下LOH碎片化导致OOM
-			// Batch模式禁用后台GC → Gen2/LOH只在分配失败时回收 → 碎片化后即使总空闲足够也无法分配大块
-			System.Runtime.GCSettings.LatencyMode = System.Runtime.GCLatencyMode.Interactive;
-			// 提示GC当前是大内存场景，避免频繁触发Gen0/Gen1
-			System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
-			try { FastLogger.Instance.Info("[内存] ServerGC=" + System.Runtime.GCSettings.IsServerGC + ", GC模式=" + System.Runtime.GCSettings.LatencyMode + ", LOH压缩=CompactOnce"); } catch { }
+			// 【内存】Server GC (每核独立堆并行回收) + 后台并发 GC 已在 App.config 中通过
+			// <gcServer enabled="true"/> + <gcConcurrent enabled="true"/> 配置。
+			// 运行时不再干预 GC 策略——曾设过 LatencyMode=Interactive + CompactOnce，但该组合
+			// 在 .NET Framework 4.7.2 Server GC 下导致托管堆被压到 ~3MB 并触发每秒 6+ 次
+			// 全代回收死循环（Gen0≈Gen1≈Gen2≈2400/8分钟）。不干预时 Server GC 会自动选择
+			// 最佳的代预算和回收频率。
+			try { FastLogger.Instance.Info("[内存] ServerGC=" + System.Runtime.GCSettings.IsServerGC + " (由App.config控制,运行时不再干预GC策略)"); } catch { }
 			// 【新增优化】提升当前进程在操作系统中的优先级，确保多线程调度更稳定
 			Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.High;
-			// 【内存】锁定工作集防OS换出（避免检测时硬缺页）
-			try { SetProcessWorkingSetSize(Process.GetCurrentProcess().Handle, -1, -1); } catch { }
+			// 注意：SetProcessWorkingSetSize(h, -1, -1) 是裁剪工作集而非锁定，已移除
 			System.Threading.ThreadPool.SetMinThreads(30, 30);
 
 			_cts = new CancellationTokenSource();
@@ -643,6 +643,10 @@ namespace VisionMeasure
 		private MinuteSnapshot _prevMetrics; // 上一分钟的指标快照（趋势对比用）
 		private bool _wasActive;              // 上一分钟是否有生产活动（切换时记一笔）
 		private bool _hasEverReported;        // 是否已输出过至少一份报告（首份闲置不拦截以确认存活）
+		private int _hourlyCounter;            // 报告计数(每60份≈每小时), 输出累计快照
+		private long _startupWorkingSet;       // 首次报告的 WorkingSet 基线
+		private int _startupThreadCount;       // 首次报告的线程数基线
+		private int _startupHandleCount;       // 首次报告的句柄数基线
 
 		private void InitializePerformanceMonitoring()
 		{
@@ -730,7 +734,7 @@ namespace VisionMeasure
 				long sysCpuTicks = Process.GetCurrentProcess().TotalProcessorTime.Ticks;
 				double cpuPct = 0;
 				if (_lastSysCpuTicks > 0 && sysTicks > _lastSysCpuTicks)
-					cpuPct = (double)(sysCpuTicks - _lastSysCpuTimeTicks) / (sysTicks - _lastSysCpuTicks) * 100.0;
+					cpuPct = (double)(sysCpuTicks - _lastSysCpuTimeTicks) / (sysTicks - _lastSysCpuTicks) * 100.0 / Environment.ProcessorCount;
 				_lastSysCpuTicks = sysTicks; _lastSysCpuTimeTicks = sysCpuTicks;
 				QueryGpuInfo();
 				long gMem = Interlocked.Read(ref _gpuMemoryMb);
@@ -742,9 +746,11 @@ namespace VisionMeasure
 					long ws = sysProc.WorkingSet64 / 1024 / 1024;
 					long pm = sysProc.PrivateMemorySize64 / 1024 / 1024;
 					long gcHeap = GC.GetTotalMemory(false) / 1024 / 1024;
+					int thrCnt = sysProc.Threads.Count;
+					int hdlCnt = sysProc.HandleCount;
 					string gpuPart = (gMem > 0 || gUtil > 0) ? string.Format("GPU显存:{0}MB 利用率:{1}% | ", gMem, gUtil) : "";
-					string sysLine = string.Format("[系统资源] CPU:{0:F1}% | {1}WorkingSet:{2}MB Private:{3}MB | GC:0代={4} 1代={5} 2代={6} Heap:{7}MB",
-						cpuPct, gpuPart, ws, pm, gc0, gc1, gc2, gcHeap);
+					string sysLine = string.Format("[系统资源] CPU:{0:F1}% | {1}WorkingSet:{2}MB Private:{3}MB | GC:0={4} 1={5} 2={6} Heap:{7}MB | 线程:{8} 句柄:{9}",
+						cpuPct, gpuPart, ws, pm, gc0, gc1, gc2, gcHeap, thrCnt, hdlCnt);
 
 					if (!anyFrames)
 					{
@@ -884,6 +890,23 @@ namespace VisionMeasure
 								Gc2Count = gc2
 							};
 
+							// ──── 整点累计快照（每60份报告≈1小时），追踪长周期趋势 ────
+							if (++_hourlyCounter >= 60)
+							{
+								_hourlyCounter = 0;
+								if (_startupWorkingSet == 0) { _startupWorkingSet = ws; _startupThreadCount = thrCnt; _startupHandleCount = hdlCnt; }
+								long wsDelta = ws - _startupWorkingSet;
+								int thrDelta = thrCnt - _startupThreadCount;
+								int hdlDelta = hdlCnt - _startupHandleCount;
+								// 汇总本小时各相机帧数
+								var camFrames = processors.Where(p => p != null)
+									.Select(p => $"{p.CameraName}:{GetTotalFrames(p.CameraName)}").ToArray();
+								sb.AppendLine($"══ 整点累计快照(距启动约{_hourlyCounter*60 + (_startupWorkingSet > 0 ? 60 : 0)}分钟) ══");
+								sb.AppendLine($"  累计帧数: {string.Join(" ", camFrames)}");
+								sb.AppendLine($"  资源变化(自首次报告): WS{wsDelta:+0;-0}MB 线程{thrDelta:+0;-0} 句柄{hdlDelta:+0;-0} | 当前: WS={ws}MB 线程={thrCnt} 句柄={hdlCnt}");
+								sb.AppendLine($"  GC累计: 0代={gc0} 1代={gc1} 2代={gc2} | 缓存驱逐累计={_cacheEvictCount}");
+							}
+
 							string trendLine = trends.Count > 0 ? "══ 趋势(vs上一分钟): " + string.Join(" | ", trends) : "";
 							if (trendLine.Length > 0) sb.AppendLine(trendLine + (alerts.Count > 0 ? " " + string.Join(" ", alerts) : ""));
 							sb.Append("══════════════════════════════════");
@@ -909,6 +932,20 @@ namespace VisionMeasure
 			catch (Exception ex)
 			{
 				try { if (FastLogger.IsInitialized) FastLogger.Instance.Error("[Brief] " + ex.Message); } catch { }
+			}
+		}
+
+		/// <summary>获取相机累计处理帧数（整点快照用）</summary>
+		private long GetTotalFrames(string cameraName)
+		{
+			switch (cameraName)
+			{
+				case "Camera1": return Interlocked.CompareExchange(ref resultCount1, 0, 0);
+				case "Camera2": return Interlocked.CompareExchange(ref resultCount2, 0, 0);
+				case "Camera3": return Interlocked.CompareExchange(ref resultCount3, 0, 0);
+				case "Camera4": return Interlocked.CompareExchange(ref resultCount4, 0, 0);
+				case "Camera5": return Interlocked.CompareExchange(ref resultCount5, 0, 0);
+				default: return 0;
 			}
 		}
 
@@ -4660,8 +4697,9 @@ namespace VisionMeasure
 					}
 				}
 
-				GC.Collect();
-
+				// Server GC 会在空闲时自动回收，关闭路径上正常 Dispose 已足够，
+				// 无需手动 GC.Collect()——这会强制全代回收，在大量 Mat 等非托管资源
+				// 仍在使用时可能造成长时间卡顿甚至死锁
 				FastLogger.Instance.Info("资源清理完成");
 			}
 			catch (Exception ex)
