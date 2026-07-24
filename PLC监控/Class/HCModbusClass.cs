@@ -192,7 +192,9 @@ namespace PLC调试.Class
 					{
 						//toolClass.SaveLog($"进来了: {modbusState}");
 						//心跳
-						var hbWr = modbusTcp.Write(_Config.keepAlive.ToString(), (short)1); if (!hbWr.IsSuccess) try { CommonLib.FastLogger.Instance.Warn("HC心跳写失败: " + hbWr.Message); } catch { }
+						var hbWr = modbusTcp.Write(_Config.keepAlive.ToString(), (short)1);
+						if (!hbWr.IsSuccess)
+							try { CommonLib.FastLogger.Instance.Warn("HC心跳写失败: " + hbWr.Message); } catch { }
 
 					}
 				}
@@ -341,27 +343,55 @@ namespace PLC调试.Class
 				System.Threading.Tasks.Parallel.Invoke(
 					() =>
 					{
-						var wr = modbusTcp.Write("MB10008", v1);
-						if (!wr.IsSuccess)
-							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"Modbus MB10008 写入失败! {wr.Message}"); } catch { }
+						try
+						{
+							var wr = modbusTcp.Write("MB10008", v1);
+							if (!wr.IsSuccess)
+								try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"Modbus MB10008 写入失败! {wr.Message}"); } catch { }
+						}
+						catch (Exception ex)
+						{
+							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Error($"Modbus MB10008 写入异常: {ex.Message}"); } catch { }
+						}
 					},
 					() =>
 					{
-						var wr = modbusTcp.Write("MB10010", v2);
-						if (!wr.IsSuccess)
-							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"Modbus MB10010 写入失败! {wr.Message}"); } catch { }
+						try
+						{
+							var wr = modbusTcp.Write("MB10010", v2);
+							if (!wr.IsSuccess)
+								try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"Modbus MB10010 写入失败! {wr.Message}"); } catch { }
+						}
+						catch (Exception ex)
+						{
+							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Error($"Modbus MB10010 写入异常: {ex.Message}"); } catch { }
+						}
 					},
 					() =>
 					{
-						var wr = modbusTcp.Write("MB10012", v3);
-						if (!wr.IsSuccess)
-							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"Modbus MB10012 写入失败! {wr.Message}"); } catch { }
+						try
+						{
+							var wr = modbusTcp.Write("MB10012", v3);
+							if (!wr.IsSuccess)
+								try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"Modbus MB10012 写入失败! {wr.Message}"); } catch { }
+						}
+						catch (Exception ex)
+						{
+							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Error($"Modbus MB10012 写入异常: {ex.Message}"); } catch { }
+						}
 					},
 					() =>
 					{
-						var wr = modbusTcp.Write("MB10014", ok);
-						if (!wr.IsSuccess)
-							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"Modbus MB10014 写入失败! {wr.Message}"); } catch { }
+						try
+						{
+							var wr = modbusTcp.Write("MB10014", ok);
+							if (!wr.IsSuccess)
+								try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"Modbus MB10014 写入失败! {wr.Message}"); } catch { }
+						}
+						catch (Exception ex)
+						{
+							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Error($"Modbus MB10014 写入异常: {ex.Message}"); } catch { }
+						}
 					}
 				);
 
@@ -376,7 +406,14 @@ namespace PLC调试.Class
 						try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Debug($"发送间隔统计（每10次）: {stats}"); } catch { }
 					}
 				}
-				try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Debug($"写入结果完成，耗时：{sw.ElapsedMilliseconds}ms，结果：result1：{(result1 ? ok : ng)}、result2：{(result2 ? ok : ng)}、result3：{(result3 ? ok : ng)}"); } catch { }
+				try
+			{
+				if (CommonLib.FastLogger.IsInitialized)
+					CommonLib.FastLogger.Instance.Debug(string.Format(
+						"写入结果完成，耗时：{0}ms，MB10008={1} MB10010={2} MB10012={3} MB10014={4}",
+						sw.ElapsedMilliseconds, v1, v2, v3, ok));
+			}
+			catch { }
 				if (sw.ElapsedMilliseconds > 50) { try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Debug("Modbus写入耗时偏高: " + sw.ElapsedMilliseconds + "ms"); } catch { } }
 				return true;
 			}
