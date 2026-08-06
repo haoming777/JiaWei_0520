@@ -4220,6 +4220,32 @@ namespace VisionMeasure
 								Result = finalResult,
 								Timestamp = DateTime.Now
 							});
+
+							// Debug 日志：NG 原因详情（仅当有 NG 且 DebugEnabled 时输出，正常生产关闭）
+							if (!finalResult && FastLogger.DebugEnabled)
+							{
+								try
+								{
+									var ngCams = new List<string>();
+									if (!r0) ngCams.Add("Cam1(底部异物)");
+									if (!r1) ngCams.Add("Cam2(瓶盖有无)");
+									if (!r2) ngCams.Add("Cam3(管口圆度)");
+									if (!r3) ngCams.Add("Cam4(夹尾正面字符)");
+									if (!r4)
+									{
+										var cam5Reasons = new List<string>();
+										if (results[4].Cam5_CharResult == 0) cam5Reasons.Add("背面工号缺失");
+										if (results[4].Cam5_PCodeResult == 0) cam5Reasons.Add("P-Code");
+										if (results[4].Cam5_SebiaoResult == 0) cam5Reasons.Add("色标对中");
+										if (results[4].Cam5_BaoguanResult == 0) cam5Reasons.Add("爆管");
+										if (results[4].Cam5_XiekouResult == 0) cam5Reasons.Add("斜口");
+										if (results[4].Cam5_WeijianduanResult == 0) cam5Reasons.Add("未剪断");
+										ngCams.Add("Cam5(夹尾反面):" + (cam5Reasons.Count > 0 ? string.Join(",", cam5Reasons) : "未知"));
+									}
+									FastLogger.Instance.Debug($"[NG原因] UnifiedId={unifiedId} Final=NG → {string.Join(" | ", ngCams)}");
+								}
+								catch { }
+							}
 						}
 						if (RunLogEnabled) try { if (FastLogger.IsInitialized) FastLogger.Instance.Info($"time[{DateTime.Now:HH:mm:ss:fff}]结果匹配成功 ID: {unifiedId} Result: {finalResult}"); } catch { }
 					}
@@ -5111,10 +5137,15 @@ namespace VisionMeasure
 						QueueResultItem station1 = null, station2 = null, station3 = null;
 						lock (SendResultList)
 						{
-							// 首次初始化：用列表中实际最小 SequenceId 作为起点（兼容 offset>0 等非 1 起始场景）
+							// 首次初始化：丢弃负 ID 条目（offset 过渡期），从 1 开始发送
 							if (startIndex < 0 && SendResultList.Count > 0)
 							{
-								startIndex = (int)SendResultList.Min(item => item.SequenceId);
+								int removed = SendResultList.RemoveAll(item => item.SequenceId < 1);
+								if (removed > 0)
+									try { FastLogger.Instance.Info($"[PLC] 丢弃{removed}条负ID条目, offset过渡期不发送"); } catch { }
+								startIndex = SendResultList.Count > 0
+									? (int)Math.Max(1, SendResultList.Min(item => item.SequenceId))
+									: 1;
 								FastLogger.Instance.Debug($"[PLC] startIndex 初始化为 {startIndex}");
 							}
 
@@ -5175,10 +5206,17 @@ namespace VisionMeasure
 										FastLogger.Instance.Info("PLC发送[" + _plcSendCount + "]: ID=" + startIndex + "-" + (startIndex + 2)
 											+ " R1=" + result1 + " R2=" + result2 + " R3=" + result3
 											+ " 成功=" + writeSuccess + " 写耗时=" + _plcMs + "ms"
-											+ (_ivMs >= 0 ? " 距上次=" + _ivMs + "ms" : ""));
-									}
-									catch { }
-									// 调试日志：周期输出PLC发送统计
+										+ (_ivMs >= 0 ? " 距上次=" + _ivMs + "ms" : ""));
+								}
+								catch { }
+								// Debug: NG概要（搜 [NG原因 UnifiedId=xxx] 看相机级详情）
+								if (FastLogger.DebugEnabled && (!result1 || !result2 || !result3))
+								{
+									int ngCnt = (result1 ? 0 : 1) + (result2 ? 0 : 1) + (result3 ? 0 : 1);
+									FastLogger.Instance.Debug(string.Format("[NG概要] PLC发送#{0} ID={1}-{2} NG={3}/3",
+										_plcSendCount, startIndex, startIndex + 2, ngCnt));
+								}
+								// 调试日志：周期输出PLC发送统计
 									if (RunLogEnabled)
 									{
 										long debugCount = Interlocked.Increment(ref _debugPlcSendCount);
@@ -5856,13 +5894,37 @@ namespace VisionMeasure
 				Interlocked.Increment(ref _expectedSequence);
 				return item;
 			}
+			// Key 不存在 → 跳过空洞，自动跳到下一个可用 key（相机错位安装导致首帧 key≠1）
+			if (!_items.IsEmpty)
+			{
+				long minKey = long.MaxValue;
+				foreach (var k in _items.Keys) { if (k < minKey) minKey = k; }
+				if (minKey > _expectedSequence)
+				{
+					_expectedSequence = minKey;
+					if (_items.TryRemove(_expectedSequence, out T item2))
+					{
+						Interlocked.Increment(ref _expectedSequence);
+						return item2;
+					}
+				}
+			}
 			return null;
 		}
 
 		public T PeekExpected()
 		{
 			if (_disposed) return null;
-			return _items.TryGetValue(_expectedSequence, out T item) ? item : null;
+			if (_items.TryGetValue(_expectedSequence, out T item)) return item;
+			// Key 不存在 → 跳过空洞到下一个可用 key（否则 MatchingWorker.PeekNextResult 永远返回 null）
+			if (!_items.IsEmpty)
+			{
+				long minKey = long.MaxValue;
+				foreach (var k in _items.Keys) { if (k < minKey) minKey = k; }
+				if (minKey > _expectedSequence)
+					_expectedSequence = minKey;
+			}
+			return _items.TryGetValue(_expectedSequence, out T item2) ? item2 : null;
 		}
 
 		public T DequeueOldest()
@@ -6271,7 +6333,7 @@ namespace VisionMeasure
 						EmitGapFiller(gapId, "AnchorGap(lastEmitted=" + _lastEmittedId + "->target=" + targetSequenceId + ")");
 				}
 
-				if (MainFrm.RunLogEnabled) try { if (FastLogger.IsInitialized) FastLogger.Instance.Info(string.Format("[ResultMatch] anchor={0} RawSeq={1} Offset={2} Target={3}", anchorCamName, anchorResult.SequenceId, anchorResult.Offset, targetSequenceId)); } catch { }
+				// 锚点日志仅在调试时输出（Info常开=190条/秒=拖慢Highest优先级匹配线程=导致错位）
 
 				var matchedResults = new QueueResultItem[_processors.Length];
 				for (int i = 0; i < _processors.Length; i++)
@@ -6304,16 +6366,26 @@ namespace VisionMeasure
 					for (int i = 0; i < matchedResults.Length; i++)
 						if (matchedResults[i] == null) matchedResults[i] = CreateVirtualOkResult(targetSequenceId);
 
-					if (MainFrm.RunLogEnabled)
+					// 匹配成功日志（Info 级，每产品一行，含各相机原始Seq+Offset+统一ID+结果）
+					try
 					{
-						string s = "";
-						for (int ri = 0; ri < matchedResults.Length; ri++)
+						if (FastLogger.IsInitialized)
 						{
-							long rid = matchedResults[ri].SequenceId - matchedResults[ri].Offset;
-							s += "Cam" + (ri + 1) + "=" + rid + "(" + (matchedResults[ri].Result ? "OK" : "NG") + ") ";
+							var sb = new StringBuilder();
+							sb.Append("[Match-OK] UnifiedId=").Append(targetSequenceId).Append(" ");
+							for (int ri = 0; ri < matchedResults.Length; ri++)
+							{
+								var mr = matchedResults[ri];
+								if (mr == null) { sb.Append("Cam").Append(ri + 1).Append("=null "); continue; }
+								long u = mr.SequenceId - mr.Offset;
+								sb.Append("Cam").Append(ri + 1).Append(":Seq=").Append(mr.SequenceId)
+								  .Append("/Off=").Append(mr.Offset).Append("/UId=").Append(u)
+								  .Append("/").Append(mr.Result ? "OK" : "NG").Append(" ");
+							}
+							FastLogger.Instance.Info(sb.ToString());
 						}
-						try { if (FastLogger.IsInitialized) FastLogger.Instance.Info("[ResultMatch] ID:" + targetSequenceId + " matched -> " + s); } catch { }
 					}
+					catch { }
 
 					_debugFrameCount++;
 					if (_debugFrameCount % 200 == 0)

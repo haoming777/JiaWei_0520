@@ -25,9 +25,13 @@ namespace VisionMeasure
 			// ──── 初始化关键日志系统（最早调用）────
 			string logDir = Path.Combine(Application.StartupPath, "Logs");
 			try { FastLogger.Init(logDir); } catch { }
+			// ──── 版本标识（每次改动后手动递增 BUILD_TAG，编译时间自动取 exe 时间戳）────
+			const string BUILD_TAG = "2026-07-24-v4"; // ← 改代码后记得改这个
+			string buildTime = "未知";
+			try { buildTime = System.IO.File.GetLastWriteTime(typeof(Program).Assembly.Location).ToString("yyyy-MM-dd HH:mm:ss"); } catch { }
 			FastLogger.Instance.Info("══════════════════════════════════════");
 			FastLogger.Instance.Info("应用程序启动");
-			FastLogger.Instance.Info("版本: " + Application.ProductVersion);
+			FastLogger.Instance.Info("版本: " + Application.ProductVersion + " | 构建标识: " + BUILD_TAG + " | 编译时间: " + buildTime);
 			FastLogger.Instance.Info("══════════════════════════════════════");
 
 			// ──── 会话标记：检测上次是否正常退出（崩溃/强杀/断电 事后可从日志确认）────

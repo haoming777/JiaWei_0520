@@ -324,55 +324,28 @@ namespace PLC调试.Class
 					return false;
 				}
 
-				short ok = 1;
-				short ng = 2;
-				short v1 = result1 ? ok : ng;
-				short v2 = result2 ? ok : ng;
-				short v3 = result3 ? ok : ng;
+				ushort ok = 1;
+				ushort ng = 2;
+				ushort v1 = result1 ? ok : ng;
+				ushort v2 = result2 ? ok : ng;
+				ushort v3 = result3 ? ok : ng;
 				try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Debug($"S7-1200 → DBW80={v1} DBW82={v2} DBW84={v3} DBW86={ok}"); } catch { }
 				var sw = Stopwatch.StartNew();
 
-				// 4路信号并行写入，每路独立校验 IsSuccess（S7 TCP 协议级应答）
-				// 【修复】原来的 4 路 Write 完全没有错误检查，写入失败也返回 true——静默数据损坏
 				int writeErrors = 0;
-				System.Threading.Tasks.Parallel.Invoke(
-					() =>
-					{
-						var wr = plc.Write("DB1000.DBW80", v1);
-						if (!wr.IsSuccess)
-						{
-							Interlocked.Increment(ref writeErrors);
-							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"S7-1200 DBW80 写入失败! {wr.Message}"); } catch { }
-						}
-					},
-					() =>
-					{
-						var wr = plc.Write("DB1000.DBW82", v2);
-						if (!wr.IsSuccess)
-						{
-							Interlocked.Increment(ref writeErrors);
-							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"S7-1200 DBW82 写入失败! {wr.Message}"); } catch { }
-						}
-					},
-					() =>
-					{
-						var wr = plc.Write("DB1000.DBW84", v3);
-						if (!wr.IsSuccess)
-						{
-							Interlocked.Increment(ref writeErrors);
-							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"S7-1200 DBW84 写入失败! {wr.Message}"); } catch { }
-						}
-					},
-					() =>
-					{
-						var wr = plc.Write("DB1000.DBW86", ok);
-						if (!wr.IsSuccess)
-						{
-							Interlocked.Increment(ref writeErrors);
-							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"S7-1200 DBW86 写入失败! {wr.Message}"); } catch { }
-						}
-					}
-				);
+				var wr1 = plc.Write("DB1000.DBW80", new ushort[] { v1, v2, v3 });
+				if (!wr1.IsSuccess)
+				{
+					writeErrors++;
+					try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"S7-1200 批量写入 DBW80-84 失败! {wr1.Message}"); } catch { }
+				}
+
+				var wr2 = plc.Write("DB1000.DBW86", ok);
+				if (!wr2.IsSuccess)
+				{
+					writeErrors++;
+					try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"S7-1200 DBW86 写入失败! {wr2.Message}"); } catch { }
+				}
 
 				long interval = _plcSendStatistics.RecordSend();
 				if (interval > 0)
