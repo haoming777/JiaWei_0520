@@ -66,6 +66,9 @@ namespace VisionMeasure
 
 		// 工位启用状态（程序启动时读一次 INI，运行期不变）
 		private bool[] _cameraEnabled; // [0]=Cam1, [1]=Cam2, ...
+		// 相机图像翻转模式（程序启动时读一次 INI，运行期不变）
+		// 0=无翻转, 1=水平镜像, 2=垂直镜像, 3=旋转180°
+		private int[] _cameraFlipModes;
 
 		public Vision vision = new Vision();
 		public IPlcCommunication modbusClass; // 运行时根据配置选择 S7-1200 或 HCModbus
@@ -329,6 +332,16 @@ namespace VisionMeasure
 			try { FastLogger.Instance.Info("工位启用状态: " + string.Join(" ", _cameraEnabled.Select((b, i) => "Cam" + (i + 1) + "=" + b)) + " (" + _cameraEnabled.Count(e => e) + "/5 启用)"); } catch { }
 			if (IFSaveLog) FastLogger.Instance.Info("[CamCfg] 工位启用状态: Cam1=" + _cameraEnabled[0] + " Cam2=" + _cameraEnabled[1] + " Cam3=" + _cameraEnabled[2] + " Cam4=" + _cameraEnabled[3] + " Cam5=" + _cameraEnabled[4] + " (启用" + _cameraEnabled.Count(e => e) + "路)");
 
+			// 相机图像翻转模式缓存（程序启动时读一次，运行期不变）
+			// 0=无翻转, 1=水平镜像, 2=垂直镜像, 3=旋转180°
+			_cameraFlipModes = new int[5];
+			_cameraFlipModes[0] = _Config.Camera1FlipMode;
+			_cameraFlipModes[1] = _Config.Camera2FlipMode;
+			_cameraFlipModes[2] = _Config.Camera3FlipMode;
+			_cameraFlipModes[3] = _Config.Camera4FlipMode;
+			_cameraFlipModes[4] = _Config.Camera5FlipMode;
+			try { FastLogger.Instance.Info("相机翻转模式: " + string.Join(" ", _cameraFlipModes.Select((m, i) => "Cam" + (i + 1) + "=" + m))); } catch { }
+
 			// 【内存】Server GC (每核独立堆并行回收) + 后台并发 GC 已在 App.config 中通过
 			// <gcServer enabled="true"/> + <gcConcurrent enabled="true"/> 配置。
 			// 运行时不再干预 GC 策略——曾设过 LatencyMode=Interactive + CompactOnce，但该组合
@@ -458,7 +471,8 @@ namespace VisionMeasure
 				_dbRecorder.OnRecordCommitted = (unifiedId) => OnDbRecordCommitted(unifiedId);
 				_dbRecorder.OnBurstExcluded = () =>
 				{
-					// 同步计数已由ResultCountMethod处理，此处不再累加
+					// DB层已确认为连续3支爆管，每次回调+3（一组连续爆管=3支）
+					_Config.burstExcludeCount += 3;
 					this.BeginInvoke(new Action(() =>
 						{
 							if (BaoGuanNGTxt != null) BaoGuanNGTxt.Text = _Config.burstExcludeCount.ToString();
@@ -2069,6 +2083,21 @@ namespace VisionMeasure
 		#endregion
 
 		#region 图像处理方法（优化版）- 保留原有逻辑，添加关闭检查
+		/// <summary>根据配置的翻转模式对Mat做原地翻转（0=无, 1=水平, 2=垂直, 3=旋转180°）</summary>
+		private static void ApplyCameraFlip(Mat mat, int flipMode)
+		{
+			if (mat == null || flipMode == 0) return;
+			OpenCvSharp.FlipMode cvMode;
+			switch (flipMode)
+			{
+				case 1: cvMode = OpenCvSharp.FlipMode.Y; break;   // 水平镜像
+				case 2: cvMode = OpenCvSharp.FlipMode.X; break;   // 垂直镜像
+				case 3: cvMode = OpenCvSharp.FlipMode.XY; break;  // 旋转180°
+				default: return;
+			}
+			Cv2.Flip(mat, mat, cvMode);
+		}
+
 		private void ProcessCamera1Image(ImageProcessingContext context)
 		{
 			if (_isClosing) return;
@@ -2098,6 +2127,7 @@ namespace VisionMeasure
 				double totalArea = 0;
 
 				sourceMat = BitmapConverter.ToMat(bitmap);
+				ApplyCameraFlip(sourceMat, _cameraFlipModes[0]);
 				bool isGrayscale = sourceMat.Type() == MatType.CV_8UC1;
 
 				if (pool != null)
@@ -2292,6 +2322,7 @@ namespace VisionMeasure
 				bool result = false;
 
 				sourceMat = BitmapConverter.ToMat(bitmap);
+				ApplyCameraFlip(sourceMat, _cameraFlipModes[1]);
 				bool isGrayscale = sourceMat.Type() == MatType.CV_8UC1;
 
 				if (pool != null)
@@ -2454,6 +2485,7 @@ namespace VisionMeasure
 				double longEdge = 0;
 
 				sourceMat = BitmapConverter.ToMat(bitmap);
+				ApplyCameraFlip(sourceMat, _cameraFlipModes[2]);
 				bool isGrayscale = sourceMat.Type() == MatType.CV_8UC1;
 
 				if (pool != null)
@@ -2612,6 +2644,7 @@ namespace VisionMeasure
 				int camera4StandChar = _Config.Camera1StandChar;
 
 				sourceMat = BitmapConverter.ToMat(bitmap);
+				ApplyCameraFlip(sourceMat, _cameraFlipModes[3]);
 				bool isGrayscale = sourceMat.Type() == MatType.CV_8UC1;
 
 				if (pool != null)
@@ -2876,6 +2909,7 @@ namespace VisionMeasure
 				string label_str = "";
 
 				sourceMat = BitmapConverter.ToMat(bitmap);
+				ApplyCameraFlip(sourceMat, _cameraFlipModes[4]);
 				bool isGrayscale = sourceMat.Type() == MatType.CV_8UC1;
 
 				if (pool != null)
@@ -3225,7 +3259,8 @@ namespace VisionMeasure
 					Cam5_BaoguanResult = result_class.Contains("爆管") ? 0 : 1,
 					Cam5_XiekouResult = result_class.Contains("斜口") ? 0 : 1,
 					Cam5_WeijianduanResult = result_class.Contains("未剪断") ? 0 : 1,
-					IsEmptyCup = isEmptyCup
+					IsEmptyCup = isEmptyCup,
+					Cam5_RawClassLabel = result_class  // 原始AI标签，兜底用
 				};
 
 				if (!result && result_flaw == false &&
@@ -3463,11 +3498,40 @@ namespace VisionMeasure
 		}
 
 		/// <summary>
+		/// 缺陷优先级排序：爆管 > 工号缺失(正面/背面) > 未剪断 > 色标对中 > 斜口 > P-Code > 管内异物 > 管盖有无 > 管口圆度
+		/// 多个缺陷共存时，返回优先级最高的缺陷名称
+		/// </summary>
+		private static readonly Dictionary<string, int> DefectPriority = new Dictionary<string, int>
+		{
+			{ "爆管", 1 },
+			{ "正面工号缺失", 2 },
+			{ "背面工号缺失", 2 },
+			{ "未剪断", 3 },
+			{ "色标对中", 4 },
+			{ "斜口", 5 },
+			{ "P-Code", 6 },
+			{ "管内异物", 7 },
+			{ "管盖有无", 8 },
+			{ "管口圆度", 9 },
+		};
+
+		/// <summary>
+		/// 从缺陷列表中按优先级返回主缺陷名称
+		/// </summary>
+		private static string GetPrimaryDefectType(List<string> defects)
+		{
+			if (defects == null || defects.Count == 0) return "OK";
+			if (defects.Count == 1) return defects[0];
+			// 多个缺陷时按优先级取最高者
+			return defects.OrderBy(d => DefectPriority.ContainsKey(d) ? DefectPriority[d] : 99).First();
+		}
+
+		/// <summary>
 		/// 根据检测结果获取缺陷类型文件夹名称
 		/// 规则：
 		/// 1. OK -> OK
 		/// 2. Camera1~4：NG就固定存为对应缺陷名称
-		/// 3. Camera5：如果缺陷种类>=2就为混合缺陷，否则存为对应缺陷名称
+		/// 3. Camera5：多缺陷时按优先级（爆管>工号缺失>未剪断>色标对中>斜口）归类
 		/// </summary>
 		private string GetDefectTypeFolder(QueueResultItem[] results)
 		{
@@ -3489,12 +3553,7 @@ namespace VisionMeasure
 			if (results[4].Cam5_PCodeResult == 0) defects.Add("P-Code");
 			if (results[4].Cam5_SebiaoResult == 0) defects.Add("色标对中");
 
-			if (defects.Count == 0)
-				return "OK";
-			else if (defects.Count >= 2)
-				return "混合缺陷";
-			else
-				return defects[0];
+			return GetPrimaryDefectType(defects);
 		}
 
 		/// <summary>
@@ -3574,41 +3633,41 @@ namespace VisionMeasure
 				{
 					string overallDefect = GetDefectTypeFolder(results);
 
-					KeyValuePair<string, Mat>[] snap;
-					lock (originalImages) { snap = originalImages.ToArray(); }
-					foreach (var kvp in snap)
+					// 获取快照（线程安全）
+					KeyValuePair<string, Mat>[] origSnap, rstSnap;
+					lock (originalImages) { origSnap = originalImages.ToArray(); }
+					lock (resultImages) { rstSnap = resultImages.ToArray(); }
+
+					// 【性能优化】多相机并行JPEG编码，将串行编码耗时压到最低
+					Parallel.ForEach(origSnap, kvp =>
 					{
 						string cameraName = kvp.Key;
 						Mat original = kvp.Value;
 						Mat result = null;
-						lock (resultImages) { resultImages.TryGetValue(cameraName, out result); }
+						for (int i = 0; i < rstSnap.Length; i++)
+							if (rstSnap[i].Key == cameraName) { result = rstSnap[i].Value; break; }
 
-						bool isCameraNg = IsCameraNg(cameraName, results);
-						string defectFolder = GetDefectTypeForCamera(cameraName, results);
-						bool isOk = defectFolder == "OK";
+						bool isOk = !IsCameraNg(cameraName, results);
 
-						if (overallDefect == "混合缺陷" && !isOk)
-							defectFolder = "混合缺陷";
-
-						if (!IFSaveOKImage && !IFSaveOKRawImage && isOk)
-							continue;
+						if (!IFSaveOKImage && !IFSaveOKRawImage && isOk) return;
 
 						var saver = GetHighSpeedSaver(cameraName);
-						if (saver == null) continue;
+						if (saver == null) return;
 
+						string defectFolder = GetDefectTypeForCamera(cameraName, results);
 						string resultFolder = isOk ? "OK" : "NG";
 						string basePath = Path.Combine(_Config.ImagePath, dateFolder, shiftFolder, skuFolder, resultFolder, cameraName, hourFolder);
 						if (!isOk)
 							basePath = Path.Combine(basePath, defectFolder);
 
-						// 【竞态修复核心】锁内立即编码为 byte[]，之后 Mat 被 Dispose 也不影响
+						// 并行编码：每个相机独立编码，互不阻塞
 						byte[] origJpg = null, rstJpg = null;
 						if (original != null && ((isOk && IFSaveOKRawImage) || (!isOk && IFSaveNGRawImage)))
 							origJpg = BitmapFastConverter.ToJpegBytesViaOpenCv(original, IMAGE_JPEG_QUALITY);
 						if (result != null && ((isOk && IFSaveOKImage) || (!isOk && IFSaveNGImage)))
 							rstJpg = BitmapFastConverter.ToJpegBytesViaOpenCv(result, IMAGE_JPEG_QUALITY);
 
-						// Mat 已编码完成，后续只用 byte[] 入队，不再访问 Mat
+						// 入队（HighSpeedImageSaver 内部 ConcurrentQueue，线程安全）
 						if (origJpg != null && origJpg.Length > 0)
 						{
 							string yFileName = $"{dtFormat}_Y_ID{sequenceId - (results[0]?.Offset ?? 0)}_SequenceId{sequenceId}_Offset0_result-{isOk}-{(isOk ? "OK" : "NG")}.jpg";
@@ -3619,7 +3678,7 @@ namespace VisionMeasure
 							string rFileName = $"{dtFormat}_R_ID{sequenceId - (results[0]?.Offset ?? 0)}_SequenceId{sequenceId}_Offset0_result-{isOk}-{(isOk ? "OK" : "NG")}.jpg";
 							saver.AddSaveTask(Path.Combine(basePath, rFileName), rstJpg, true, IMAGE_JPEG_QUALITY);
 						}
-					}
+					});
 
 					// 编码完成后安全清理缓存
 					ClearImageCache(sequenceId);
@@ -3725,28 +3784,34 @@ namespace VisionMeasure
 					return results[3]?.Result == false ? "正面工号缺失" : "OK";
 				case "Camera5":
 					if (results[4]?.Result != false) return "OK";
-					// 统计Camera5的缺陷种类数
-					int defectCount = 0;
-					if (results[4].Cam5_BaoguanResult == 0) defectCount++;
-					if (results[4].Cam5_XiekouResult == 0) defectCount++;
-					if (results[4].Cam5_WeijianduanResult == 0) defectCount++;
-					if (results[4].Cam5_CharResult == 0) defectCount++;
-					if (results[4].Cam5_PCodeResult == 0) defectCount++;
-					if (results[4].Cam5_SebiaoResult == 0) defectCount++;
-					// 2种及以上缺陷 → 混合缺陷
-					if (defectCount >= 2) return "混合缺陷";
-					// 单一缺陷按优先级返回
-					if (defectCount == 0)
+					// 收集Camera5的所有缺陷
+					var cam5Defects = new List<string>();
+					if (results[4].Cam5_BaoguanResult == 0) cam5Defects.Add("爆管");
+					if (results[4].Cam5_CharResult == 0) cam5Defects.Add("背面工号缺失");
+					if (results[4].Cam5_WeijianduanResult == 0) cam5Defects.Add("未剪断");
+					if (results[4].Cam5_SebiaoResult == 0) cam5Defects.Add("色标对中");
+					if (results[4].Cam5_XiekouResult == 0) cam5Defects.Add("斜口");
+					if (results[4].Cam5_PCodeResult == 0) cam5Defects.Add("P-Code");
+					if (cam5Defects.Count == 0)
 					{
-						FastLogger.Instance.Debug($"[存图] Camera5 NG但defectCount=0! Seq={results[4].SequenceId}, Baoguan={results[4].Cam5_BaoguanResult}, Xiekou={results[4].Cam5_XiekouResult}, Weijianduan={results[4].Cam5_WeijianduanResult}, Char={results[4].Cam5_CharResult}, PCode={results[4].Cam5_PCodeResult}, Sebiao={results[4].Cam5_SebiaoResult}, ConfigBaoGuan={_Config.Camera5IFBaoGuan}, Result={results[4].Result}");
-						return "无分类";
+						// 细分标志位全OK但整体NG：尝试从AI原始标签字符串中提取缺陷名
+						string rawLabel = results[4].Cam5_RawClassLabel;
+						if (!string.IsNullOrEmpty(rawLabel))
+						{
+							// 原始标签可能包含多个缺陷（分号分隔），按优先级匹配
+							if (rawLabel.Contains("爆管")) cam5Defects.Add("爆管");
+							if (rawLabel.Contains("未剪断")) cam5Defects.Add("未剪断");
+							if (rawLabel.Contains("斜口")) cam5Defects.Add("斜口");
+							if (rawLabel.Contains("色标")) cam5Defects.Add("色标对中");
+						}
+						if (cam5Defects.Count == 0)
+						{
+							FastLogger.Instance.Warn($"[存图] Camera5 NG但无法确定缺陷类型! Seq={results[4].SequenceId}, 细分标志全OK, 原始标签='{rawLabel ?? "(空)"}', 配置: BaoGuan={_Config.Camera5IFBaoGuan}, XieKou={_Config.Camera5IFXieKou}, WeiJianDuan={_Config.Camera5IFWeiJianDuan}, SeBiao={_Config.Camera5IFSeBiao}, Ocr={_Config.Camera5IFOcr}, PCode={_Config.Camera5IFPCode}");
+							return "未分类";
+						}
 					}
-					return results[4].Cam5_BaoguanResult == 0 ? "爆管" :
-						results[4].Cam5_XiekouResult == 0 ? "斜口" :
-						results[4].Cam5_WeijianduanResult == 0 ? "未剪断" :
-						results[4].Cam5_CharResult == 0 ? "背面工号缺失" :
-						results[4].Cam5_PCodeResult == 0 ? "P-Code" :
-						results[4].Cam5_SebiaoResult == 0 ? "色标对中" : "无分类";
+					// 多缺陷时按优先级返回最高者
+					return GetPrimaryDefectType(cam5Defects);
 				default:
 					return "OK";
 			}
@@ -4408,20 +4473,12 @@ namespace VisionMeasure
 				if (!result5) _Config.ng_cam5++;
 				if (result1 && result2 && result3 && result4 && result5) _Config.ok++;
 
-				// 同步爆管计数：每3支连续Camera5 NG → burstExcludeCount+3
+				// 连续爆管追踪：仅记录连续Camera5 NG状态，实际计数由DB层的连续爆管判定驱动
+				// （DB层精确校验连续3支均为爆管，而非此处所有Camera5 NG的简单计数）
 				if (!result5)
-				{
 					_consecutiveC5NG++;
-					if (_consecutiveC5NG >= 3)
-					{
-						_Config.burstExcludeCount += 3;
-						_consecutiveC5NG = 0;
-					}
-				}
 				else
-				{
 					_consecutiveC5NG = 0;
-				}
 
 				this.BeginInvoke(new Action(() =>
 				{
@@ -4582,8 +4639,8 @@ namespace VisionMeasure
 			{
 				_closeWaitHandle?.Dispose();
 				_cts?.Dispose();
-				// 等待日志刷完，强制退出（防止后台线程残留导致进程不结束）
-				System.Threading.Thread.Sleep(500);
+				// 快速退出（200ms足够FastLogger刷写残留队列）
+				System.Threading.Thread.Sleep(200);
 				Environment.Exit(0);
 			}
 		}
@@ -4593,20 +4650,24 @@ namespace VisionMeasure
 			try
 			{
 				const int CAM_TIMEOUT = 2000;
-				// 每个相机操作加超时，防止SDK内部卡死拖住UI线程
+				// 【性能优化】并行停止所有相机采图，总耗时=最慢单相机而非累加
 				var cameras = new[] { camera1SDK, camera2SDK, camera3SDK, camera4SDK, camera5SDK };
 				string[] names = { "Cam1", "Cam2", "Cam3", "Cam4", "Cam5" };
+				var stopTasks = new List<Task>();
 				for (int i = 0; i < cameras.Length; i++)
 				{
-					var cam = cameras[i];
+					var cam = cameras[i]; var idx = i;
 					if (cam == null) continue;
-					try
+					stopTasks.Add(Task.Run(() =>
 					{
-						var task = Task.Run(() => cam.StopStreamGrabber());
-						if (!task.Wait(CAM_TIMEOUT))
-							FastLogger.Instance.Info($"⚠ {names[i]} StopStreamGrabber 超时({CAM_TIMEOUT}ms)，跳过");
-					}
-					catch (Exception ex) { FastLogger.Instance.Error($"{names[i]} StopStreamGrabber 异常: {ex.Message}"); }
+						try { cam.StopStreamGrabber(); }
+						catch (Exception ex) { FastLogger.Instance.Error($"{names[idx]} StopStreamGrabber 异常: {ex.Message}"); }
+					}));
+				}
+				if (stopTasks.Count > 0)
+				{
+					if (!Task.WaitAll(stopTasks.ToArray(), CAM_TIMEOUT))
+						FastLogger.Instance.Info($"⚠ 部分相机 StopStreamGrabber 超时({CAM_TIMEOUT}ms)");
 				}
 				FastLogger.Instance.Info("相机采图已停止");
 			}
@@ -5719,6 +5780,7 @@ namespace VisionMeasure
 			Cam5_WeijianduanResult = 1;
 			IsEmptyCup = false;
 			IsPureBurst = false;
+			Cam5_RawClassLabel = null;
 			StageTimes?.Clear();
 		}
 
@@ -5742,6 +5804,8 @@ namespace VisionMeasure
 
 		// 是否纯爆管（用于连续异常判定）
 		public bool IsPureBurst { get; set; }
+		// Camera5 AI分类模型原始标签字符串（用于兜底，当细分标志位全OK但整体NG时从中提取缺陷名）
+		public string Cam5_RawClassLabel { get; set; }
 
 		public QueueResultItem() { StageTimes = new Dictionary<string, long>(); }
 

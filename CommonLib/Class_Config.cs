@@ -2176,6 +2176,35 @@ namespace CommonLib
 		}
 		#endregion
 
+		#region 相机图像方向调整（程序启动时读一次，运行期不变）
+		/// <summary>翻转模式: 0=无翻转, 1=水平镜像, 2=垂直镜像, 3=旋转180°</summary>
+		public int Camera1FlipMode
+		{
+			get { return GetPrivateProfileInt("camera_flip", "cam1", 0, _iniPath); }
+			set { SetCachedValue("camera_flip", "cam1", value.ToString()); }
+		}
+		public int Camera2FlipMode
+		{
+			get { return GetPrivateProfileInt("camera_flip", "cam2", 0, _iniPath); }
+			set { SetCachedValue("camera_flip", "cam2", value.ToString()); }
+		}
+		public int Camera3FlipMode
+		{
+			get { return GetPrivateProfileInt("camera_flip", "cam3", 0, _iniPath); }
+			set { SetCachedValue("camera_flip", "cam3", value.ToString()); }
+		}
+		public int Camera4FlipMode
+		{
+			get { return GetPrivateProfileInt("camera_flip", "cam4", 0, _iniPath); }
+			set { SetCachedValue("camera_flip", "cam4", value.ToString()); }
+		}
+		public int Camera5FlipMode
+		{
+			get { return GetPrivateProfileInt("camera_flip", "cam5", 0, _iniPath); }
+			set { SetCachedValue("camera_flip", "cam5", value.ToString()); }
+		}
+		#endregion
+
 		public bool IFGroup
 		{
 			get
