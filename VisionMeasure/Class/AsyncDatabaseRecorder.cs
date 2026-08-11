@@ -307,159 +307,96 @@ namespace VisionMeasure
 		/// 计算缺陷分类
 		/// 记录所有NG项详情到defect_detail字段
 		/// 规则：
-		/// 1. 缺陷数>=2：归为"混合缺陷"，同时记录所有缺陷详情
+		/// 1. 缺陷数>=2：按优先级取最高者（爆管>工号缺失>未剪断>色标对中>斜口），详情仍保留所有缺陷
 		/// 2. 缺陷数==1：记录具体缺陷名称
 		/// 3. 连续爆管剔除优先级最高（后续由CheckConsecutiveBurstExclusion处理）
 		/// </summary>
+		private static readonly Dictionary<string, int> _defectPriority = new Dictionary<string, int>
+		{
+			{ "爆管", 1 },
+			{ "正面工号缺失", 2 },
+			{ "背面工号缺失", 2 },
+			{ "未剪断", 3 },
+			{ "色标对中", 4 },
+			{ "斜口", 5 },
+			{ "P-Code", 6 },
+			{ "管内异物", 7 },
+			{ "管盖有无", 8 },
+			{ "管口圆度", 9 },
+		};
+
 		private void ComputeDefectCategories(ProductionRecord record)
 		{
+			// 先全部清零
+			record.Ng_异物 = 0;
+			record.Ng_管盖有无 = 0;
+			record.Ng_管口圆度 = 0;
+			record.Ng_正面工号缺失 = 0;
+			record.Ng_背面工号缺失 = 0;
+			record.Ng_PCode = 0;
+			record.Ng_色标对中 = 0;
+			record.Ng_爆管 = 0;
+			record.Ng_斜口 = 0;
+			record.Ng_未剪断 = 0;
+
 			if (record.FinalResult == "OK")
 			{
 				record.DefectCount = 0;
 				record.DefectDetail = "";
-				// 清空所有细分NG
-				record.Ng_异物 = 0;
-				record.Ng_管盖有无 = 0;
-				record.Ng_管口圆度 = 0;
-				record.Ng_正面工号缺失 = 0;
-				record.Ng_背面工号缺失 = 0;
-				record.Ng_PCode = 0;
-				record.Ng_色标对中 = 0;
-				record.Ng_爆管 = 0;
-				record.Ng_斜口 = 0;
-				record.Ng_未剪断 = 0;
 				return;
 			}
 
 			var defects = new List<string>();
 
 			// 相机1 - 管内异物
-			if (record.Cam1Result == 0)
-			{
-				record.Ng_异物 = 1;
-				defects.Add("管内异物");
-			}
-			else
-			{
-				record.Ng_异物 = 0;
-			}
-
+			if (record.Cam1Result == 0) defects.Add("管内异物");
 			// 相机2 - 管盖有无
-			if (record.Cam2Result == 0)
-			{
-				record.Ng_管盖有无 = 1;
-				defects.Add("管盖有无");
-			}
-			else
-			{
-				record.Ng_管盖有无 = 0;
-			}
-
+			if (record.Cam2Result == 0) defects.Add("管盖有无");
 			// 相机3 - 管口圆度
-			if (record.Cam3Result == 0)
-			{
-				record.Ng_管口圆度 = 1;
-				defects.Add("管口圆度");
-			}
-			else
-			{
-				record.Ng_管口圆度 = 0;
-			}
-
+			if (record.Cam3Result == 0) defects.Add("管口圆度");
 			// 相机4 - 正面工号缺失
-			if (record.Cam4Result == 0)
-			{
-				record.Ng_正面工号缺失 = 1;
-				defects.Add("正面工号缺失");
-			}
-			else
-			{
-				record.Ng_正面工号缺失 = 0;
-			}
-
+			if (record.Cam4Result == 0) defects.Add("正面工号缺失");
 			// 相机5 - 细分缺陷
-			// 背面工号缺失
-			if (record.Cam5_CharResult == 0)
-			{
-				record.Ng_背面工号缺失 = 1;
-				defects.Add("背面工号缺失");
-			}
-			else
-			{
-				record.Ng_背面工号缺失 = 0;
-			}
-
-			// P-Code
-			if (record.Cam5_PCodeResult == 0)
-			{
-				record.Ng_PCode = 1;
-				defects.Add("P-Code");
-			}
-			else
-			{
-				record.Ng_PCode = 0;
-			}
-
-			// 色标对中
-			if (record.Cam5_SebiaoResult == 0)
-			{
-				record.Ng_色标对中 = 1;
-				defects.Add("色标对中");
-			}
-			else
-			{
-				record.Ng_色标对中 = 0;
-			}
-
-			// 爆管
-			if (record.Cam5_BaoguanResult == 0)
-			{
-				record.Ng_爆管 = 1;
-				defects.Add("爆管");
-			}
-			else
-			{
-				record.Ng_爆管 = 0;
-			}
-
-			// 斜口
-			if (record.Cam5_XiekouResult == 0)
-			{
-				record.Ng_斜口 = 1;
-				defects.Add("斜口");
-			}
-			else
-			{
-				record.Ng_斜口 = 0;
-			}
-
-			// 未剪断
-			if (record.Cam5_WeijianduanResult == 0)
-			{
-				record.Ng_未剪断 = 1;
-				defects.Add("未剪断");
-			}
-			else
-			{
-				record.Ng_未剪断 = 0;
-			}
+			if (record.Cam5_CharResult == 0) defects.Add("背面工号缺失");
+			if (record.Cam5_PCodeResult == 0) defects.Add("P-Code");
+			if (record.Cam5_SebiaoResult == 0) defects.Add("色标对中");
+			if (record.Cam5_BaoguanResult == 0) defects.Add("爆管");
+			if (record.Cam5_XiekouResult == 0) defects.Add("斜口");
+			if (record.Cam5_WeijianduanResult == 0) defects.Add("未剪断");
 
 			record.DefectCount = defects.Count;
 
-			// 判断缺陷类型并记录详情
-			if (defects.Count >= 2)
-			{
-				// 2种或以上缺陷：归为"混合缺陷"，同时记录所有缺陷详情
-				record.DefectDetail = "混合缺陷(" + string.Join(", ", defects) + ")";
-			}
-			else if (defects.Count == 1)
-			{
-				// 只有1种缺陷类型：记录具体缺陷名称
-				record.DefectDetail = defects[0];
-			}
-			else
+			if (defects.Count == 0)
 			{
 				record.DefectDetail = "";
+				return;
+			}
+
+			// 按优先级取最高者作为主缺陷，详情中保留所有缺陷
+			string primary = defects.OrderBy(d => _defectPriority.ContainsKey(d) ? _defectPriority[d] : 99).First();
+			record.DefectDetail = defects.Count >= 2
+				? primary + "(" + string.Join(", ", defects) + ")"
+				: primary;
+
+			// ★ 只设置最高优先级缺陷的 Ng_* = 1，确保各缺陷计数之和 = NG总数
+			SetPrimaryNgFlag(record, primary);
+		}
+
+		/// <summary>仅设置最高优先级缺陷的 Ng_* 字段为1，其余保持0</summary>
+		private void SetPrimaryNgFlag(ProductionRecord record, string primaryDefect)
+		{
+			switch (primaryDefect)
+			{
+				case "管内异物": record.Ng_异物 = 1; break;
+				case "管盖有无": record.Ng_管盖有无 = 1; break;
+				case "管口圆度": record.Ng_管口圆度 = 1; break;
+				case "正面工号缺失": record.Ng_正面工号缺失 = 1; break;
+				case "背面工号缺失": record.Ng_背面工号缺失 = 1; break;
+				case "P-Code": record.Ng_PCode = 1; break;
+				case "色标对中": record.Ng_色标对中 = 1; break;
+				case "爆管": record.Ng_爆管 = 1; break;
+				case "斜口": record.Ng_斜口 = 1; break;
+				case "未剪断": record.Ng_未剪断 = 1; break;
 			}
 		}
 
