@@ -348,6 +348,8 @@ namespace VisionMeasure
 			this.panel58 = new System.Windows.Forms.Panel();
 			this.ResultPanel = new Sunny.UI.UIPanel();
 			this.bindingSource1 = new System.Windows.Forms.BindingSource(this.components);
+			this.panel83 = new System.Windows.Forms.Panel();
+			this.SKU_Btn = new Sunny.UI.UIButton();
 			this.tableLayoutPanel1.SuspendLayout();
 			this.panel1.SuspendLayout();
 			this.panel2.SuspendLayout();
@@ -498,6 +500,7 @@ namespace VisionMeasure
 			this.panel55.SuspendLayout();
 			this.panel58.SuspendLayout();
 			((System.ComponentModel.ISupportInitialize)(this.bindingSource1)).BeginInit();
+			this.panel83.SuspendLayout();
 			this.SuspendLayout();
 			// 
 			// timer1
@@ -4807,14 +4810,17 @@ namespace VisionMeasure
 			this.tableLayoutPanel59.ColumnCount = 1;
 			this.tableLayoutPanel59.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
 			this.tableLayoutPanel59.Controls.Add(this.uiPanel1, 0, 1);
-			this.tableLayoutPanel59.Controls.Add(this.panel75, 0, 3);
+			this.tableLayoutPanel59.Controls.Add(this.panel75, 0, 5);
+			this.tableLayoutPanel59.Controls.Add(this.panel83, 0, 3);
 			this.tableLayoutPanel59.Dock = System.Windows.Forms.DockStyle.Fill;
 			this.tableLayoutPanel59.Location = new System.Drawing.Point(0, 0);
 			this.tableLayoutPanel59.Margin = new System.Windows.Forms.Padding(0);
 			this.tableLayoutPanel59.Name = "tableLayoutPanel59";
-			this.tableLayoutPanel59.RowCount = 5;
+			this.tableLayoutPanel59.RowCount = 7;
 			this.tableLayoutPanel59.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 50F));
 			this.tableLayoutPanel59.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 100F));
+			this.tableLayoutPanel59.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 20F));
+			this.tableLayoutPanel59.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 30F));
 			this.tableLayoutPanel59.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 20F));
 			this.tableLayoutPanel59.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 45F));
 			this.tableLayoutPanel59.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 50F));
@@ -4827,7 +4833,7 @@ namespace VisionMeasure
 			this.uiPanel1.Dock = System.Windows.Forms.DockStyle.Fill;
 			this.uiPanel1.FillColor = System.Drawing.Color.White;
 			this.uiPanel1.Font = new System.Drawing.Font("宋体", 12F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-			this.uiPanel1.Location = new System.Drawing.Point(0, 24);
+			this.uiPanel1.Location = new System.Drawing.Point(0, 0);
 			this.uiPanel1.Margin = new System.Windows.Forms.Padding(0);
 			this.uiPanel1.MinimumSize = new System.Drawing.Size(1, 1);
 			this.uiPanel1.Name = "uiPanel1";
@@ -4905,13 +4911,13 @@ namespace VisionMeasure
 			this.SKU_Txt.TextAlignment = System.Drawing.ContentAlignment.MiddleCenter;
 			this.SKU_Txt.Watermark = "";
 			this.SKU_Txt.TextChanged += new System.EventHandler(this.SKU_Txt_TextChanged);
-			this.SKU_Txt.KeyDown += new System.Windows.Forms.KeyEventHandler(this.SKU_Txt_Enter);
+			this.SKU_Btn.Click += new System.EventHandler(this.SKU_Btn_Click);
 			// 
 			// panel75
 			// 
 			this.panel75.Controls.Add(this.exportBtn);
 			this.panel75.Dock = System.Windows.Forms.DockStyle.Fill;
-			this.panel75.Location = new System.Drawing.Point(0, 144);
+			this.panel75.Location = new System.Drawing.Point(0, 170);
 			this.panel75.Margin = new System.Windows.Forms.Padding(0);
 			this.panel75.Name = "panel75";
 			this.panel75.Size = new System.Drawing.Size(190, 45);
@@ -5096,6 +5102,42 @@ namespace VisionMeasure
 			this.ResultPanel.Text = "-";
 			this.ResultPanel.TextAlignment = System.Drawing.ContentAlignment.MiddleCenter;
 			// 
+			// panel83
+			// 
+			this.panel83.Controls.Add(this.SKU_Btn);
+			this.panel83.Dock = System.Windows.Forms.DockStyle.Fill;
+			this.panel83.Location = new System.Drawing.Point(0, 120);
+			this.panel83.Margin = new System.Windows.Forms.Padding(0);
+			this.panel83.Name = "panel83";
+			this.panel83.Size = new System.Drawing.Size(190, 30);
+			this.panel83.TabIndex = 2;
+			// 
+			// SKU_Btn
+			// 
+			this.SKU_Btn.Cursor = System.Windows.Forms.Cursors.Hand;
+			this.SKU_Btn.Dock = System.Windows.Forms.DockStyle.Fill;
+			this.SKU_Btn.FillColor = System.Drawing.Color.FromArgb(((int)(((byte)(220)))), ((int)(((byte)(155)))), ((int)(((byte)(40)))));
+			this.SKU_Btn.FillColor2 = System.Drawing.Color.FromArgb(((int)(((byte)(220)))), ((int)(((byte)(155)))), ((int)(((byte)(40)))));
+			this.SKU_Btn.FillHoverColor = System.Drawing.Color.FromArgb(((int)(((byte)(227)))), ((int)(((byte)(175)))), ((int)(((byte)(83)))));
+			this.SKU_Btn.FillPressColor = System.Drawing.Color.FromArgb(((int)(((byte)(176)))), ((int)(((byte)(124)))), ((int)(((byte)(32)))));
+			this.SKU_Btn.FillSelectedColor = System.Drawing.Color.FromArgb(((int)(((byte)(176)))), ((int)(((byte)(124)))), ((int)(((byte)(32)))));
+			this.SKU_Btn.Font = new System.Drawing.Font("微软雅黑", 9.5F, System.Drawing.FontStyle.Bold);
+			this.SKU_Btn.LightColor = System.Drawing.Color.FromArgb(((int)(((byte)(253)))), ((int)(((byte)(249)))), ((int)(((byte)(241)))));
+			this.SKU_Btn.Location = new System.Drawing.Point(0, 0);
+			this.SKU_Btn.Margin = new System.Windows.Forms.Padding(0);
+			this.SKU_Btn.MinimumSize = new System.Drawing.Size(1, 1);
+			this.SKU_Btn.Name = "SKU_Btn";
+			this.SKU_Btn.Radius = 10;
+			this.SKU_Btn.RectColor = System.Drawing.Color.FromArgb(((int)(((byte)(220)))), ((int)(((byte)(155)))), ((int)(((byte)(40)))));
+			this.SKU_Btn.RectHoverColor = System.Drawing.Color.FromArgb(((int)(((byte)(227)))), ((int)(((byte)(175)))), ((int)(((byte)(83)))));
+			this.SKU_Btn.RectPressColor = System.Drawing.Color.FromArgb(((int)(((byte)(176)))), ((int)(((byte)(124)))), ((int)(((byte)(32)))));
+			this.SKU_Btn.RectSelectedColor = System.Drawing.Color.FromArgb(((int)(((byte)(176)))), ((int)(((byte)(124)))), ((int)(((byte)(32)))));
+			this.SKU_Btn.Size = new System.Drawing.Size(190, 30);
+			this.SKU_Btn.Style = Sunny.UI.UIStyle.Custom;
+			this.SKU_Btn.TabIndex = 5;
+			this.SKU_Btn.Text = "保存并使用SKU";
+			this.SKU_Btn.TipsFont = new System.Drawing.Font("宋体", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
+			// 
 			// MainFrm
 			// 
 			this.AutoScaleDimensions = new System.Drawing.SizeF(11F, 24F);
@@ -5262,6 +5304,7 @@ namespace VisionMeasure
 			this.panel55.ResumeLayout(false);
 			this.panel58.ResumeLayout(false);
 			((System.ComponentModel.ISupportInitialize)(this.bindingSource1)).EndInit();
+			this.panel83.ResumeLayout(false);
 			this.ResumeLayout(false);
 
 		}
@@ -5589,6 +5632,8 @@ namespace VisionMeasure
 		private Sunny.UI.UILabel uiLabel7;
 		private System.Windows.Forms.Panel panel75;
 		private Sunny.UI.UIButton exportBtn;
+		private System.Windows.Forms.Panel panel83;
+		private Sunny.UI.UIButton SKU_Btn;
 		// private Sunny.UI.UITextBox Result2;
 	}
 }

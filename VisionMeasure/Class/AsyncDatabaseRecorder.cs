@@ -296,7 +296,7 @@ namespace VisionMeasure
 			else // 00:00 - 07:59
 			{
 				record.Shift = "夜班";
-				record.ShiftDate = dt.Date.AddDays(-1); // 归属前一天
+				record.ShiftDate = dt.Date; // 归属当天
 			}
 
 			record.ShiftDateStr = record.ShiftDate.ToString("yyyy-MM-dd");
@@ -620,7 +620,7 @@ namespace VisionMeasure
 				if (string.IsNullOrEmpty(sku)) return;
 				var now = DateTime.Now;
 				string shift = GetCurrentShift(now.Hour);
-				string date = shift == "夜班" && now.Hour < 8 ? now.AddDays(-1).ToString("yyyy-MM-dd") : now.ToString("yyyy-MM-dd");
+				string date = now.ToString("yyyy-MM-dd"); // 夜班归属当天
 				UpdateOrCreateSummary(date, shift, sku);
 				// 每 30 秒触发一次 WAL checkpoint，防止 WAL 文件无限增长
 				try { _dbHelper.ExecuteNonQuery("PRAGMA wal_checkpoint(PASSIVE);"); }

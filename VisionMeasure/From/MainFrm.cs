@@ -499,7 +499,7 @@ namespace VisionMeasure
 		private string GetCurrentSkuValue()
 		{
 			// 【P1】热路径优化：直接返回缓存值，不再同步 Invoke UI 线程
-			// _savedSku 是 Enter 确认后保存的权威值，运行期间 SKU 极少变化
+			// _savedSku 是按钮确认后保存的权威值，运行期间 SKU 极少变化
 			if (!string.IsNullOrEmpty(_savedSku))
 				return _savedSku;
 			// 兜底：SKU 未初始化时从控件读取（仅启动时）
@@ -508,64 +508,72 @@ namespace VisionMeasure
 		}
 
 		/// <summary>
-		/// SKU输入框Enter键处理 - 保存SKU并清空统计数据
+		/// SKU保存按钮点击处理 - 弹窗确认后保存SKU并清空统计数据
 		/// </summary>
-		private void SKU_Txt_Enter(object sender, KeyEventArgs e)
+		private void SKU_Btn_Click(object sender, EventArgs e)
 		{
-			if (e.KeyCode == Keys.Enter)
+			try
 			{
-				try
+				// 【修复】必须读控件当前文本，不能用 GetCurrentSkuValue()（它优先返回 _savedSku 缓存，
+				// 导致 _savedSku != currentSku 永远不成立，SKU 更新和统计清零功能失效）
+				string currentSku = SKU_Txt?.Text?.Trim() ?? "";
+
+				if (currentSku.Length < 6 || currentSku.Length > 10)
 				{
-					// 【修复】必须读控件当前文本，不能用 GetCurrentSkuValue()（它优先返回 _savedSku 缓存，
-					// 导致 _savedSku != currentSku 永远不成立，SKU 更新和统计清零功能失效）
-					string currentSku = SKU_Txt?.Text?.Trim() ?? "";
-
-					if (currentSku.Length < 6 || currentSku.Length > 10)
-					{
-						if (!string.IsNullOrEmpty(_savedSku) && SKU_Txt != null)
-							SKU_Txt.Text = _savedSku;
-						SetSkuTextBoxBorderColor(UIStyle.Red);
-						MessageBox.Show($"SKU长度必须为6~10位！当前为{currentSku.Length}位，请检查！\r\n已恢复为上次保存的SKU。");
-						return;
-					}
-
-
-					// 检查SKU是否发生变化
-					if (_savedSku != currentSku)
-					{
-						// 防抖：SKU没真正变化不重置
-						if (string.IsNullOrEmpty(_savedSku) && string.IsNullOrEmpty(currentSku))
-						{
-							e.SuppressKeyPress = true;
-							return;
-						}
-
-						// SKU切换：先自动保存上一个SKU的班次报表（仅汇总表）
-						if (!string.IsNullOrEmpty(_savedSku) && _dbRecorder != null)
-						{
-							_dbRecorder.ExportFullShiftReport(_currentShiftDate, _currentShift, skipDetailExport: true);
-							FastLogger.Instance.Debug($"SKU切换: {_savedSku} -> {currentSku}，已自动保存{_currentShift}班次汇总报表");
-						}
-
-						// SKU发生变化，清空统计数据
-						ClearStatisticsDisplay();
-						_savedSku = currentSku;
-						_skuModified = false;
-
-						// 保存到配置文件
-						_Config.LastSku = currentSku;
-
-						// 设置边框为绿色
-						SetSkuTextBoxBorderColor(UIStyle.Green);
-
-						FastLogger.Instance.Info($"SKU已更新: {currentSku}，统计数据已清空");
-					}
+					if (!string.IsNullOrEmpty(_savedSku) && SKU_Txt != null)
+						SKU_Txt.Text = _savedSku;
+					SetSkuTextBoxBorderColor(UIStyle.Red);
+					MessageBox.Show($"SKU长度必须为6~10位！当前为{currentSku.Length}位，请检查！\r\n已恢复为上次保存的SKU。");
+					return;
 				}
-				catch (Exception ex)
+
+				// SKU未变化则不处理
+				if (_savedSku == currentSku)
 				{
-					FastLogger.Instance.Error($"SKU保存异常: {ex.Message}");
+					SetSkuTextBoxBorderColor(UIStyle.Green);
+					return;
 				}
-				e.SuppressKeyPress = true;
+
+				// 确认弹窗：显示老SKU和新SKU，确认后才生效
+				string oldSku = string.IsNullOrEmpty(_savedSku) ? "（空）" : _savedSku;
+				DialogResult result = MessageBox.Show(
+					$"确认切换SKU？\r\n\r\n老SKU：{oldSku}\r\n新SKU：{currentSku}\r\n\r\n点击【确定】立即使用并保存新SKU，点击【取消】恢复原SKU。",
+					"SKU切换确认",
+					MessageBoxButtons.OKCancel,
+					MessageBoxIcon.Question);
+
+				if (result == DialogResult.Cancel)
+				{
+					// 取消：恢复之前的SKU（TextChanged 会自动把边框变回绿色/红色）
+					if (SKU_Txt != null)
+						SKU_Txt.Text = _savedSku;
+					FastLogger.Instance.Info($"SKU切换已取消，恢复为: {_savedSku}");
+					return;
+				}
+
+				// 确认：SKU切换，先自动保存上一个SKU的班次报表（仅汇总表）
+				if (!string.IsNullOrEmpty(_savedSku) && _dbRecorder != null)
+				{
+					_dbRecorder.ExportFullShiftReport(_currentShiftDate, _currentShift, skipDetailExport: true);
+					FastLogger.Instance.Debug($"SKU切换: {_savedSku} -> {currentSku}，已自动保存{_currentShift}班次汇总报表");
+				}
+
+				// SKU发生变化，清空统计数据
+				ClearStatisticsDisplay();
+				_savedSku = currentSku;
+				_skuModified = false;
+
+				// 保存到配置文件（本地），下次启动自动加载
+				_Config.LastSku = currentSku;
+
+				// 设置边框为绿色
+				SetSkuTextBoxBorderColor(UIStyle.Green);
+
+				FastLogger.Instance.Info($"SKU已更新: {currentSku}，统计数据已清空");
+			}
+			catch (Exception ex)
+			{
+				FastLogger.Instance.Error($"SKU保存异常: {ex.Message}");
 			}
 		}
 
@@ -580,7 +588,7 @@ namespace VisionMeasure
 		{
 			try
 			{
-				// 【修复】同 SKU_Txt_Enter：读控件当前文本做比较，用缓存值会导致永远"相同"、边框颜色提示失效
+				// 【修复】同 SKU_Btn_Click：读控件当前文本做比较，用缓存值会导致永远"相同"、边框颜色提示失效
 				string currentSku = SKU_Txt?.Text?.Trim() ?? "";
 
 				// 本地没有SKU时显示红色
@@ -4901,10 +4909,7 @@ namespace VisionMeasure
 		/// </summary>
 		private string GetShiftDate(DateTime time)
 		{
-			int hour = time.Hour;
-			if (hour >= 0 && hour <= 7)  // 夜班归属前一天
-				return time.AddDays(-1).ToString("yyyy-MM-dd");
-			return time.ToString("yyyy-MM-dd");
+			return time.ToString("yyyy-MM-dd"); // 夜班归属当天
 		}
 
 		/// <summary>
@@ -6148,13 +6153,23 @@ namespace VisionMeasure
 				}
 				catch (Exception ex)
 				{
-					FastLogger.Instance.Error($"{_cameraName} 处理异常: {ex.Message}");
-					var errorResult = QueueResultItem.Rent();
-					errorResult.SequenceId = context.SequenceId;
-					errorResult.Offset = context.Offset;
-					errorResult.Result = context.ProcessResult;
-					errorResult.Timestamp = DateTime.Now;
-					_resultQueue.Enqueue(context.SequenceId, errorResult);
+					FastLogger.Instance.Error($"{_cameraName} 处理异常: {ex.Message}\n{ex.StackTrace}");
+					// 【修复】异常常发生在 finally 归还Mat阶段，此时 context.Result 已包含完整的检测结果
+					// （细分缺陷标志、AI原始标签）。必须优先使用真实结果：否则空结果会丢光缺陷标签，
+					// 导致存图归入"未分类"、生产记录无具体缺陷项
+					if (context.Result != null)
+					{
+						_resultQueue.Enqueue(context.SequenceId, context.Result);
+					}
+					else
+					{
+						var errorResult = QueueResultItem.Rent();
+						errorResult.SequenceId = context.SequenceId;
+						errorResult.Offset = context.Offset;
+						errorResult.Result = context.ProcessResult;
+						errorResult.Timestamp = DateTime.Now;
+						_resultQueue.Enqueue(context.SequenceId, errorResult);
+					}
 				}
 				finally
 				{
@@ -6899,6 +6914,13 @@ namespace VisionMeasure
 		public void ReturnMat(Mat mat)
 		{
 			if (mat == null || _disposed) return;
+			// 【修复】第三方或异常路径可能已释放Mat：跳过归还，防止访问已释放对象抛异常
+			// 导致相机处理 finally 异常，空结果覆盖真实检测结果（缺陷标签丢失 → 存图"未分类"）
+			if (mat.IsDisposed)
+			{
+				FastLogger.Instance.Warn($"{PoolName} 归还时Mat已被外部释放(IsDisposed)，跳过归还");
+				return;
+			}
 			Interlocked.Increment(ref _returnCount);
 
 			if (mat.Width == _defaultWidth && mat.Height == _defaultHeight && _matPool.Count < _maxCapacity)
@@ -6909,8 +6931,13 @@ namespace VisionMeasure
 			}
 			else
 			{
+				// 【修复】先算尺寸再 Dispose：原顺序 Dispose 后再访问 Width/Height 会抛
+				// "无法访问已释放的对象"，从 finally 一路冒泡覆盖真实检测结果
+				if (FastLogger.DebugEnabled)
+					FastLogger.Instance.Debug($"{PoolName} 尺寸不匹配直接释放: 实际{mat.Width}x{mat.Height} vs 默认{_defaultWidth}x{_defaultHeight}");
+				long size = EstimateMatSize(mat);
 				mat.Dispose();
-				Interlocked.Add(ref _totalAllocatedMemory, -EstimateMatSize(mat));
+				Interlocked.Add(ref _totalAllocatedMemory, -size);
 			}
 		}
 
