@@ -35,11 +35,4 @@ namespace VisionMeasure.Class
 			return new PointF(Convert.ToSingle((X1 + X2 + X3 + X4) / 4), Convert.ToSingle((Y1 + Y2 + Y3 + Y4) / 4));
 		}
 	}
-
-	public struct VivoStruct
-	{
-		string Label;
-		double Score;
-		List<Point2f> Polygon;
-	}
 }

@@ -5317,10 +5317,8 @@ namespace VisionMeasure
 		private System.Windows.Forms.Panel panel2;
 		private Sunny.UI.UILight camera1State;
         private System.Windows.Forms.BindingSource bindingSource1;
-        private Sunny.UI.UITextBox Result2;
 		private Sunny.UI.UILight camera2State;
 		private System.Windows.Forms.Panel panel3;
-		private MyPictureBox.MyPictureBoxM myPictureBoxM1;
 		private System.Windows.Forms.Panel panel36;
 		private System.Windows.Forms.Panel panel62;
 		private Sunny.UI.UILabel versionNum;
@@ -5483,8 +5481,6 @@ namespace VisionMeasure
 		private System.Windows.Forms.Panel panel55;
 		private Sunny.UI.UILabel uiLabel20;
 		private System.Windows.Forms.Panel panel58;
-		private Sunny.UI.UIPanel burstExcludeCountTxt;
-		private Sunny.UI.UILabel uiLabelBurstExclude;
 		private Sunny.UI.UIPanel ResultPanel;
 		private System.Windows.Forms.TableLayoutPanel tableLayoutPanel40;
 		private System.Windows.Forms.TableLayoutPanel tableLayoutPanel52;

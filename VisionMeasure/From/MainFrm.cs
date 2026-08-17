@@ -83,7 +83,6 @@ namespace VisionMeasure
 		public static volatile bool RunLogEnabled = false;
 
 		public DaHuaSDK camera1SDK, camera2SDK, camera3SDK, camera4SDK, camera5SDK;
-		private ProgressBar progressBar1;
 		public static string _path = Directory.GetCurrentDirectory();
 
 		// 相机模型路径
@@ -137,7 +136,6 @@ namespace VisionMeasure
 
 		// SKU管理
 		private string _savedSku = "";  // 已保存的SKU
-		private bool _skuModified = false;  // SKU是否已修改但未保存
 
 
 		// 性能监控
@@ -157,12 +155,6 @@ namespace VisionMeasure
 		private const int IMAGE_JPEG_QUALITY = 85;
 
 		// 原有字段...
-		int temp_result1 = 0;
-		int temp_result2 = 0;
-		int temp_result = 0;
-		bool result_char_top = false;
-		bool result_char_btm = false;
-
 		int inputCount1 = 0;
 		int inputCount2 = 0;
 		int inputCount3 = 0;
@@ -188,7 +180,6 @@ namespace VisionMeasure
 		int offset_cam5 = 0;
 		int offset_send = 0;
 
-		int cameraModel = 0;
 		int writeNGCount = 0;
 		bool IFSaveLog = false;
 
@@ -214,13 +205,8 @@ namespace VisionMeasure
 
 		List<QueueResultItem> SendResultList = new List<QueueResultItem>();
 
-		int minArea = 500;
 		takephotoVm myZmcaux = new takephotoVm();
 		public IntPtr g_handle = (IntPtr)0;
-
-		public delegate void DelegatTriggerSignal(string timeStr);
-		public event DelegatTriggerSignal EventTriggerSignal1;
-		public event DelegatTriggerSignal EventTriggerSignal2;
 
 		private HighSpeedImageSaver _highSpeedSaver1;
 		private HighSpeedImageSaver _highSpeedSaver2;
@@ -244,12 +230,6 @@ namespace VisionMeasure
 		int input_cam4 = -1;
 		int input_cam5 = -1;
 
-		int output_cam1 = -1;
-		int output_cam2 = -1;
-		int output_cam3 = -1;
-		int output_cam4 = -1;
-		int output_cam5 = -1;
-
 		int output_delay_cam1 = -1;
 		int output_delay_cam2 = -1;
 		int output_delay_cam3 = -1;
@@ -267,16 +247,7 @@ namespace VisionMeasure
 		private readonly Task[] _cam5Tasks = new Task[5];
 		#endregion
 
-		#region 光电信号
-		uint IFCam1 = 100;
-		uint IFCam2 = 100;
-		uint IFCam3 = 100;
-		uint IFCam4 = 100;
-		uint IFCam5 = 100;
-		#endregion
-
 		#region 运控轴状态
-		uint IFAuto = 0;
 		int IFInit = 0;
 		#endregion
 
@@ -293,9 +264,6 @@ namespace VisionMeasure
 		private long _debugMatchCount = 0;     // 结果匹配周期计数
 		private long _debugPlcSendCount = 0;   // PLC发送周期计数
 
-		// 【AI可靠性】各相机 AI 模型返回 null 的连续次数计数器（检测模型偶发异常）
-		private long _aiNullCount_Cam1, _aiNullCount_Cam2, _aiNullCount_Cam4_Seg, _aiNullCount_Cam4_Ocr;
-		private long _aiNullCount_Cam5_Seg, _aiNullCount_Cam5_Ocr, _aiNullCount_Cam5_Color, _aiNullCount_Cam5_PCode, _aiNullCount_Cam5_Rests;
 		private const int AI_NULL_ALERT_THRESHOLD = 5; // 连续 null 超阈值记 Error 告警
 
 		/// <summary>AI模型返回null时的计数与告警（保持当前判OK不变，仅追加监控）</summary>
@@ -398,7 +366,6 @@ namespace VisionMeasure
 				if (!string.IsNullOrEmpty(savedSku))
 				{
 					_savedSku = savedSku?.Trim() ?? "";
-					_skuModified = false;
 					if (SKU_Txt != null)
 					{
 						SKU_Txt.Text = _savedSku;
@@ -561,7 +528,6 @@ namespace VisionMeasure
 				// SKU发生变化，清空统计数据
 				ClearStatisticsDisplay();
 				_savedSku = currentSku;
-				_skuModified = false;
 
 				// 保存到配置文件（本地），下次启动自动加载
 				_Config.LastSku = currentSku;
@@ -594,19 +560,16 @@ namespace VisionMeasure
 				// 本地没有SKU时显示红色
 				if (string.IsNullOrEmpty(_savedSku))
 				{
-					_skuModified = true;
 					SetSkuTextBoxBorderColor(UIStyle.Red);
 				}
 				// 输入框内容与本地SKU不同时显示黄色
 				else if (currentSku != _savedSku)
 				{
-					_skuModified = true;
 					SetSkuTextBoxBorderColor(UIStyle.Orange);
 				}
 				else
 				{
 					// 相同则显示绿色
-					_skuModified = false;
 					SetSkuTextBoxBorderColor(UIStyle.Green);
 				}
 			}
@@ -4984,7 +4947,6 @@ namespace VisionMeasure
 		bool testflag = true;
 		string imagePath1 = @"D:\bin\AI\Image\Camera1.bmp";
 		string imagePath2 = @"D:\bin\AI\Image\Camera2.bmp";
-		string imagePath2_1 = @"E:\公司-张皓茗\项目\高露洁\广州\夹尾正反面\广州高露洁牙膏字符测试\bin\AI\Cam2\Pic_2026_01_10_192517_1220.bmp";
 		string imagePath3 = @"D:\bin\AI\Image\Camera3-6.bmp";
 		string imagePath4 = @"D:\bin\AI\Image\Camera4.bmp";
 		string imagePath5 = @"D:\bin\AI\Image\camera5_3.bmp";    // Camera5 第1张
@@ -5408,7 +5370,7 @@ namespace VisionMeasure
 					resultCount5Txt.Text = resultCount5.ToString();
 				}));
 			}
-			catch (Exception ex) { throw; }
+			catch { throw; }
 		}
 
 		private void UpdateMethod()

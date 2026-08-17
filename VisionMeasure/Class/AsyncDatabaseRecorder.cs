@@ -24,14 +24,9 @@ namespace VisionMeasure
 		private bool _disposed = false;
 
 		// 连续爆管追踪
-		private long _lastSequenceId = 0;
-		private int _consecutiveBurstCount = 0;
-		private long _consecutiveStartId = 0;
 		private readonly object _burstLock = new object();
 
 		// 班次缓存
-		private string _cachedShift = "";
-		private string _cachedShiftDate = "";
 		private DateTime _lastShiftCheck = DateTime.MinValue;
 
 		// 汇总行缓存：记录已确认存在的 (date, shift, sku) 组合，避免每条记录都查 DB
