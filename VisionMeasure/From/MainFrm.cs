@@ -436,17 +436,22 @@ namespace VisionMeasure
 				// 设置获取当前SKU的委托
 				_dbRecorder.GetCurrentSku = () => GetCurrentSkuValue();
 				_dbRecorder.OnRecordCommitted = (unifiedId) => OnDbRecordCommitted(unifiedId);
-				_dbRecorder.OnBurstExcluded = () =>
+				_dbRecorder.OnBurstExcluded = (markedCount) =>
 				{
-					// DB层已确认为连续3支爆管，每次回调+3（一组连续爆管=3支）
-					_Config.burstExcludeCount += 3;
+					// DB层已确认一组连续爆管并完成标记，回调参数=实际成功标记的剔除记录数
+					// 【口径统一】连续剔除不计入NG总数；良率=OK/（总数-剔除数）
+					_Config.burstExcludeCount += markedCount;
 					this.BeginInvoke(new Action(() =>
 						{
+							if (ngTxt != null) ngTxt.Text = Math.Max(0, _Config.total - _Config.ok - _Config.burstExcludeCount).ToString();
 							if (BaoGuanNGTxt != null) BaoGuanNGTxt.Text = _Config.burstExcludeCount.ToString();
 							if (yieldTxt != null && _Config.total > 0)
 							{
 								double eff = _Config.total - _Config.burstExcludeCount;
 								double yr = eff > 0 ? Math.Min(100.0, Math.Max(0.0, (_Config.ok * 100.0) / eff)) : 0;
+								// 【防误导】存在真实NG时最高显示99.99，防止四舍五入显示成100.00
+								if (_Config.total - _Config.ok > _Config.burstExcludeCount)
+									yr = Math.Min(99.99, yr);
 								yieldTxt.Text = yr.ToString("F2") + "%";
 								yieldTxt.ForeColor = yr > 95 ? Color.Green : yr > 90 ? Color.Orange : Color.Red;
 							}
@@ -1656,17 +1661,18 @@ namespace VisionMeasure
 					{
 						if (totalTxt != null) totalTxt.Text = _Config.total.ToString();
 						if (okTxt != null) okTxt.Text = _Config.ok.ToString();
-						if (ngTxt != null) ngTxt.Text = (_Config.total - _Config.ok).ToString();
+						// 【口径统一】连续剔除不计入NG总数：NG = 总数 - OK - 连续剔除数
+						if (ngTxt != null) ngTxt.Text = Math.Max(0, _Config.total - _Config.ok - _Config.burstExcludeCount).ToString();
 						if (BaoGuanNGTxt != null) BaoGuanNGTxt.Text = _Config.burstExcludeCount.ToString();
 
 						if (yieldTxt != null && _Config.total > 0)
 						{
-							// 防呆：burstExcludeCount不能超过total NG（防止良率>100%）
-							if (_Config.burstExcludeCount > _Config.total - _Config.ok)
-								_Config.burstExcludeCount = _Config.total - _Config.ok;
-							// 良率 = OK合格数 ÷（总检测数 - 被剔除的连续爆管异常数量）
+							// 良率 = OK合格数 ÷（总检测数 - 连续剔除数）
 							double effectiveCount = _Config.total - _Config.burstExcludeCount;
 							double yieldRate = effectiveCount > 0 ? Math.Min(100.0, Math.Max(0.0, (_Config.ok * 100.0) / effectiveCount)) : 0;
+							// 【防误导】存在真实NG时最高显示99.99，防止99.995%被两位小数四舍五入成100.00
+							if (_Config.total - _Config.ok > _Config.burstExcludeCount)
+								yieldRate = Math.Min(99.99, yieldRate);
 							yieldTxt.Text = yieldRate.ToString("F2") + "%";
 							yieldTxt.ForeColor = yieldRate > 95 ? Color.Green : yieldRate > 90 ? Color.Orange : Color.Red;
 						}
@@ -4458,14 +4464,18 @@ namespace VisionMeasure
 					{
 						if (totalTxt != null) totalTxt.Text = _Config.total.ToString();
 						if (okTxt != null) okTxt.Text = _Config.ok.ToString();
-						if (ngTxt != null) ngTxt.Text = (_Config.total - _Config.ok).ToString();
+						// 【口径统一】连续剔除不计入NG总数：NG = 总数 - OK - 连续剔除数
+						if (ngTxt != null) ngTxt.Text = Math.Max(0, _Config.total - _Config.ok - _Config.burstExcludeCount).ToString();
 						if (BaoGuanNGTxt != null) BaoGuanNGTxt.Text = _Config.burstExcludeCount.ToString();
 
 						if (yieldTxt != null && _Config.total > 0)
 						{
-							// 良率 = OK合格数 ÷（总检测数 - 被剔除的连续爆管异常数量）
+							// 良率 = OK合格数 ÷（总检测数 - 连续剔除数）
 							double effectiveCount = _Config.total - _Config.burstExcludeCount;
 							double yieldRate = effectiveCount > 0 ? Math.Min(100.0, Math.Max(0.0, (_Config.ok * 100.0) / effectiveCount)) : 0;
+							// 【防误导】存在真实NG时最高显示99.99，防止99.995%被两位小数四舍五入成100.00
+							if (_Config.total - _Config.ok > _Config.burstExcludeCount)
+								yieldRate = Math.Min(99.99, yieldRate);
 							yieldTxt.Text = yieldRate.ToString("F2") + "%";
 							yieldTxt.ForeColor = yieldRate > 95 ? Color.Green : yieldRate > 90 ? Color.Orange : Color.Red;
 						}
@@ -5001,10 +5011,14 @@ namespace VisionMeasure
 			{
 				Class_Config.ResetAllCounters();
 
+				// 【修复】SKU切换/手动清零时同步重置PLC写入NG累计数，防止历史NG残留显示
+				writeNGCount = 0;
+
 				if (totalTxt != null) totalTxt.Text = "0";
 				if (okTxt != null) okTxt.Text = "0";
 				if (ngTxt != null) ngTxt.Text = "0";
 				if (BaoGuanNGTxt != null) BaoGuanNGTxt.Text = "0";
+				if (WriteCountTxt != null) WriteCountTxt.Text = "0";
 				if (yieldTxt != null)
 				{
 					yieldTxt.Text = "0.00%";

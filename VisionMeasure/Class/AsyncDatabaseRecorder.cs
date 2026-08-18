@@ -20,6 +20,8 @@ namespace VisionMeasure
 		private readonly Thread _workerThread;
 		private readonly string _databasePath;
 		private readonly SQLiteHelper _dbHelper;
+		// 本次程序运行会话ID：sequence_id 重启后会从头重复，连续爆管的判定和标记都必须限定在本会话内
+		private readonly string _runId;
 		private volatile bool _isRunning = true;
 		private bool _disposed = false;
 
@@ -44,6 +46,7 @@ namespace VisionMeasure
 				databasePath = Path.Combine(Directory.GetCurrentDirectory(), "data", "production.db");
 			}
 			_databasePath = databasePath;
+			_runId = Guid.NewGuid().ToString("N");
 
 			// 确保目录存在
 			string directory = Path.GetDirectoryName(_databasePath);
@@ -86,6 +89,7 @@ namespace VisionMeasure
                         p_shift_date TEXT NOT NULL,
                         sku TEXT NOT NULL,
                         sequence_id INTEGER,
+                        run_id TEXT DEFAULT '',
                         final_result TEXT NOT NULL,
                         cam1_result INTEGER,
                         cam2_result INTEGER,
@@ -137,6 +141,14 @@ namespace VisionMeasure
                     )";
 
 				_dbHelper.ExecuteNonQuery(createDetailTable);
+				// 【根治】迁移：旧库补建 run_id 列（标识本次程序运行会话，防止重启后 sequence_id 重复导致连续爆管误判/误标）
+				string checkRunIdSql = "SELECT COUNT(*) FROM pragma_table_info('production_records_detail') WHERE name='run_id'";
+				var runIdCheck = _dbHelper.ExecuteQuery(checkRunIdSql);
+				if (!(runIdCheck != null && runIdCheck.Rows.Count > 0 && Convert.ToInt32(runIdCheck.Rows[0][0]) > 0))
+				{
+					_dbHelper.ExecuteNonQuery("ALTER TABLE production_records_detail ADD COLUMN run_id TEXT DEFAULT ''");
+					FastLogger.Instance.Info("DB迁移: 已添加列 run_id");
+				}
 				// 【性能】关键索引：大幅加速大表查询（幂等：IF NOT EXISTS 防重复）
 				// sequence_id 索引 → IsConsecutiveBurstExcluded / RetroactiveUpdate
 				// p_shift_date 索引 → UpdateOrCreateSummary / 报表导出
@@ -185,14 +197,16 @@ namespace VisionMeasure
 		/// 保留原缺陷详情，仅将defect_detail改为"连续爆管剔除(原缺陷)"格式
 		/// 存图仍按实际缺陷类型
 		/// </summary>
-		private void RetroactiveUpdateExcludedRecords(long currentSequenceId, string sku)
+		/// <summary>回溯标记前两条为连续爆管剔除，返回成功标记的记录数</summary>
+		private int RetroactiveUpdateExcludedRecords(long currentSequenceId, string sku)
 		{
+			int markedCount = 0;
 			try
 			{
 				string currentSku = sku;
 
-				// 更新连续爆管组的三条记录（当前记录和前两条）
-				for (int i = 0; i <= 2; i++)
+				// 更新连续爆管组的前两条记录（当前记录已由上层 UPDATE 标记，从 i=1 开始防止重复计数）
+				for (int i = 1; i <= 2; i++)
 				{
 					long targetId = currentSequenceId - i;
 					// 【防误伤】必须同时满足ng_爆管=1，防止程序重启后ID复用误伤OK品
@@ -202,11 +216,13 @@ namespace VisionMeasure
 						SET is_excluded = 1,
 							excluded_reason = '连续爆管剔除',
 							defect_detail = '连续爆管剔除(' || defect_detail || ')'
-						WHERE sequence_id = @sequence_id AND sku = @sku AND ng_爆管 = 1 AND is_excluded = 0";
+						WHERE sequence_id = @sequence_id AND sku = @sku AND run_id = @run_id AND ng_爆管 = 1 AND is_excluded = 0";
 
-					_dbHelper.ExecuteNonQuery(updateSql,
+					if (_dbHelper.ExecuteNonQuery(updateSql,
 						new SQLiteParameter("@sequence_id", targetId),
-						new SQLiteParameter("@sku", currentSku));
+						new SQLiteParameter("@sku", currentSku),
+						new SQLiteParameter("@run_id", _runId)))
+						markedCount++;
 				}
 
 				FastLogger.Instance.Debug($"连续爆管回溯: {currentSequenceId-2}, {currentSequenceId-1}, {currentSequenceId}");
@@ -215,6 +231,7 @@ namespace VisionMeasure
 			{
 				FastLogger.Instance.Error($"连续爆管回溯失败: {ex.Message}");
 			}
+			return markedCount;
 		}
 
 		/// <summary>
@@ -229,7 +246,7 @@ namespace VisionMeasure
 			// 只要有爆管（不管是否有其他缺陷），且是连续爆管，则标记为剔除
 			if (record.Cam5_BaoguanResult == 0)
 			{
-				if (IsConsecutiveBurstExcluded(record.SequenceId))
+				if (IsConsecutiveBurstExcluded(record.SequenceId, record.Sku))
 				{
 					record.IsExcluded = true;
 					record.ExcludedReason = "连续爆管剔除";
@@ -263,8 +280,8 @@ namespace VisionMeasure
 
 			// 记录提交回调：DB INSERT成功后触发，用于存图
 			public Action<long> OnRecordCommitted { get; set; }
-			// 连续爆管剔除回调：通知主界面更新计数
-			public Action OnBurstExcluded { get; set; }
+			// 连续爆管剔除回调：通知主界面更新计数（参数=实际成功标记的剔除记录数，防止DB标记失败时主界面虚高）
+			public Action<int> OnBurstExcluded { get; set; }
 			// 汇总刷新回调：通知主界面同步良率数据
 			public Action<int, int, int> OnSummaryRefreshed { get; set; }
 
@@ -433,18 +450,20 @@ namespace VisionMeasure
 		/// 错误示例：
 		///   [爆管，斜口，爆管] -> 不算（中间有非爆管）
 		/// </summary>
-						public bool IsConsecutiveBurstExcluded(long sequenceId)
+						public bool IsConsecutiveBurstExcluded(long sequenceId, string sku)
 		{
 			// 查 DB：sequence_id-1 和 sequence_id-2 是否都 cam5_result=0（连续爆管）
 			// 当前记录已在 DB 中，所以查前两条即可凑齐3条连续
+			// 【修复】必须校验 sku 一致，防止 SKU 切换后与旧 SKU 的爆管记录误判成"连续"
+			// 【根治】必须校验 run_id 一致，防止重启后 sequence_id 重复与历史记录误判成"连续"
 			try
 			{
-				string sql = "SELECT COUNT(*) FROM production_records_detail WHERE sequence_id = @id1 AND ng_爆管 = 1 AND is_excluded = 0";
-				var r1 = _dbHelper.ExecuteQuery(sql, new SQLiteParameter("@id1", sequenceId - 1));
+				string sql = "SELECT COUNT(*) FROM production_records_detail WHERE sequence_id = @id1 AND sku = @sku AND run_id = @run_id AND ng_爆管 = 1 AND is_excluded = 0";
+				var r1 = _dbHelper.ExecuteQuery(sql, new SQLiteParameter("@id1", sequenceId - 1), new SQLiteParameter("@sku", sku), new SQLiteParameter("@run_id", _runId));
 				int c1 = (r1 != null && r1.Rows.Count > 0) ? Convert.ToInt32(r1.Rows[0][0]) : 0;
 				if (c1 == 0) return false;
 
-				var r2 = _dbHelper.ExecuteQuery(sql, new SQLiteParameter("@id1", sequenceId - 2));
+				var r2 = _dbHelper.ExecuteQuery(sql, new SQLiteParameter("@id1", sequenceId - 2), new SQLiteParameter("@sku", sku), new SQLiteParameter("@run_id", _runId));
 				int c2 = (r2 != null && r2.Rows.Count > 0) ? Convert.ToInt32(r2.Rows[0][0]) : 0;
 				bool result = c2 >= 1;
 				if (result) try { FastLogger.Instance.Debug("连续爆管: ID=" + sequenceId); } catch {}
@@ -517,13 +536,13 @@ namespace VisionMeasure
 
 				string insertSql = @"
                     INSERT INTO production_records_detail (
-                        p_time, p_date, p_shift, p_shift_date, sku, sequence_id,
+                        p_time, p_date, p_shift, p_shift_date, sku, sequence_id, run_id,
                         final_result, cam1_result, cam2_result, cam3_result, cam4_result, cam5_result,
                         ng_异物, ng_管盖有无, ng_管口圆度, ng_正面工号缺失, ng_背面工号缺失,
                         ng_PCode, ng_色标对中, ng_爆管, ng_斜口, ng_未剪断,
                         defect_detail, defect_count, is_excluded
                     ) VALUES (
-                        @p_time, @p_date, @p_shift, @p_shift_date, @sku, @sequence_id,
+                        @p_time, @p_date, @p_shift, @p_shift_date, @sku, @sequence_id, @run_id,
                         @final_result, @cam1, @cam2, @cam3, @cam4, @cam5,
                         @ng1, @ng2, @ng3, @ng4, @ng5, @ng6, @ng7, @ng8, @ng9, @ng10,
                         @defect_detail, @defect_count, @is_excluded
@@ -537,6 +556,7 @@ namespace VisionMeasure
 					new SQLiteParameter("@p_shift_date", record.ShiftDateStr),
 					new SQLiteParameter("@sku", record.Sku),
 					new SQLiteParameter("@sequence_id", record.SequenceId),
+					new SQLiteParameter("@run_id", _runId),
 					new SQLiteParameter("@final_result", record.FinalResult),
 					new SQLiteParameter("@cam1", record.Cam1Result),
 					new SQLiteParameter("@cam2", record.Cam2Result),
@@ -570,19 +590,25 @@ namespace VisionMeasure
 					// 【INSERT 后检查连续爆管】记录已入库，查 DB 前 2 条是否也是爆管
 					if (record.Cam5_BaoguanResult == 0)
 					{
-						bool burstExcluded = IsConsecutiveBurstExcluded(record.SequenceId);
+						bool burstExcluded = IsConsecutiveBurstExcluded(record.SequenceId, record.Sku);
 						try { FastLogger.Instance.Debug($"连续爆管检查: ID={record.SequenceId} Cam5Burst={record.Cam5_BaoguanResult} 结果={burstExcluded}"); } catch {}
 						if (burstExcluded)
 						{
 							// 更新当前记录：标记剔除，defect_detail拼接为"连续爆管剔除(原缺陷)"格式，保留ng_*字段不变
-							string updateSql = "UPDATE production_records_detail SET is_excluded=1, excluded_reason='连续爆管剔除', defect_detail='连续爆管剔除(' || defect_detail || ')' WHERE sequence_id=@id AND sku=@sku";
-							_dbHelper.ExecuteNonQuery(updateSql,
+							// 【修复】加 ng_爆管=1 校验：sequence_id 重启后会重复，防止同序列号的旧OK记录被误标成连续剔除
+							// 【根治】加 run_id 会话隔离：重启前/其他会话的同序列号记录完全不会命中
+							string updateSql = "UPDATE production_records_detail SET is_excluded=1, excluded_reason='连续爆管剔除', defect_detail='连续爆管剔除(' || defect_detail || ')' WHERE sequence_id=@id AND sku=@sku AND run_id=@run_id AND ng_爆管 = 1 AND is_excluded = 0";
+							int markedCount = _dbHelper.ExecuteNonQuery(updateSql,
 								new SQLiteParameter("@id", record.SequenceId),
-								new SQLiteParameter("@sku", record.Sku));
+								new SQLiteParameter("@sku", record.Sku),
+								new SQLiteParameter("@run_id", _runId)) ? 1 : 0;
 							// 回溯前 2 条
-							RetroactiveUpdateExcludedRecords(record.SequenceId, record.Sku);
-							// 通知主界面更新计数
-							try { OnBurstExcluded?.Invoke(); } catch { }
+							markedCount += RetroactiveUpdateExcludedRecords(record.SequenceId, record.Sku);
+							// 通知主界面更新计数：只传实际成功标记的记录数，保证主界面剔除数与DB一致
+							if (markedCount > 0)
+							{
+								try { OnBurstExcluded?.Invoke(markedCount); } catch { }
+							}
 						}
 					}
 
@@ -611,17 +637,35 @@ namespace VisionMeasure
 		{
 			try
 			{
-				string sku = GetCurrentSku?.Invoke() ?? "";
-				if (string.IsNullOrEmpty(sku)) return;
 				var now = DateTime.Now;
 				string shift = GetCurrentShift(now.Hour);
 				string date = now.ToString("yyyy-MM-dd"); // 夜班归属当天
-				UpdateOrCreateSummary(date, shift, sku);
+				// 【修复】刷新当前班次下所有SKU的汇总行：SKU切换后旧SKU行不再冻结，报表与界面计数保持一致
+				RefreshAllSkusForShift(date, shift);
 				// 每 30 秒触发一次 WAL checkpoint，防止 WAL 文件无限增长
 				try { _dbHelper.ExecuteNonQuery("PRAGMA wal_checkpoint(PASSIVE);"); }
 				catch { }
 			}
 			catch { }
+		}
+
+		/// <summary>刷新指定班次下所有SKU的汇总行（不写日志，供30秒定时器高频调用）</summary>
+		private void RefreshAllSkusForShift(string date, string shift)
+		{
+			string getSkusSql = @"
+                SELECT DISTINCT sku FROM production_records_detail
+                WHERE p_shift_date = @date AND p_shift = @shift";
+
+			var skus = _dbHelper.ExecuteQuery(getSkusSql,
+				new SQLiteParameter("@date", date),
+				new SQLiteParameter("@shift", shift));
+
+			foreach (DataRow row in skus.Rows)
+			{
+				string sku = row["sku"]?.ToString() ?? "";
+				if (!string.IsNullOrEmpty(sku))
+					UpdateOrCreateSummary(date, shift, sku);
+			}
 		}
 
 		private static string GetCurrentShift(int hour)
@@ -848,20 +892,8 @@ namespace VisionMeasure
 
 private void GenerateShiftSummaryInternal(string date, string shift)
 		{
-			// 获取该班次所有SKU
-			string getSkusSql = @"
-                SELECT DISTINCT sku FROM production_records_detail 
-                WHERE p_shift_date = @date AND p_shift = @shift";
-
-			var skus = _dbHelper.ExecuteQuery(getSkusSql,
-				new SQLiteParameter("@date", date),
-				new SQLiteParameter("@shift", shift));
-
-			foreach (DataRow row in skus.Rows)
-			{
-				string sku = row["sku"].ToString();
-				UpdateOrCreateSummary(date, shift, sku);
-			}
+			// 获取该班次所有SKU并更新汇总行
+			RefreshAllSkusForShift(date, shift);
 
 			FastLogger.Instance.Info($"汇总生成完成: {date} {shift}");
 		}
@@ -872,10 +904,11 @@ private void GenerateShiftSummaryInternal(string date, string shift)
 			// 连续爆管剔除优先级最高：被剔除的记录不计入其他缺陷统计
 			// 优先级：连续爆管剔除 > 混合缺陷 > 单一缺陷
 			string detailSql = @"
-                SELECT 
+                SELECT
                     COUNT(*) as total_count,
                     SUM(CASE WHEN final_result = 'OK' THEN 1 ELSE 0 END) as ok_count,
-                    SUM(CASE WHEN final_result = 'NG' THEN 1 ELSE 0 END) as ng_count,
+                    -- 【口径统一】连续剔除不计入NG总数
+                    SUM(CASE WHEN final_result = 'NG' AND is_excluded = 0 THEN 1 ELSE 0 END) as ng_count,
                     -- 连续爆管剔除：直接统计被剔除记录数（与主界面burstExcludeCount一致）
                     (SELECT COUNT(*) FROM production_records_detail d2
                      WHERE d2.p_shift_date = production_records_detail.p_shift_date
@@ -884,17 +917,18 @@ private void GenerateShiftSummaryInternal(string date, string shift)
                          AND d2.excluded_reason = '连续爆管剔除'
                                         ) as exclude_count,
                     
-                    -- 各缺陷类型独立统计（不限制defect_count，确保混合缺陷中的各子缺陷也被记录）
-                    SUM(CASE WHEN is_excluded = 0 AND ng_异物 = 1 THEN 1 ELSE 0 END) as ng_异物,
-                    SUM(CASE WHEN is_excluded = 0 AND ng_管盖有无 = 1 THEN 1 ELSE 0 END) as ng_管盖有无,
-                    SUM(CASE WHEN is_excluded = 0 AND ng_管口圆度 = 1 THEN 1 ELSE 0 END) as ng_管口圆度,
-                    SUM(CASE WHEN is_excluded = 0 AND ng_正面工号缺失 = 1 THEN 1 ELSE 0 END) as ng_正面工号缺失,
-                    SUM(CASE WHEN is_excluded = 0 AND ng_背面工号缺失 = 1 THEN 1 ELSE 0 END) as ng_背面工号缺失,
-                    SUM(CASE WHEN is_excluded = 0 AND ng_爆管 = 1 THEN 1 ELSE 0 END) as ng_爆管,
-                    SUM(CASE WHEN is_excluded = 0 AND ng_斜口 = 1 THEN 1 ELSE 0 END) as ng_斜口,
-                    SUM(CASE WHEN is_excluded = 0 AND ng_未剪断 = 1 THEN 1 ELSE 0 END) as ng_未剪断,
-                    SUM(CASE WHEN is_excluded = 0 AND ng_PCode = 1 THEN 1 ELSE 0 END) as ng_PCode,
-                    SUM(CASE WHEN is_excluded = 0 AND ng_色标对中 = 1 THEN 1 ELSE 0 END) as ng_色标对中,
+                    -- 各缺陷类型统计：【口径统一】单一缺陷与混合缺陷互斥（defect_count=1），
+                    -- 混合缺陷只计入混合多种缺陷列，确保各缺陷列之和 = NG总数
+                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_异物 = 1 THEN 1 ELSE 0 END) as ng_异物,
+                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_管盖有无 = 1 THEN 1 ELSE 0 END) as ng_管盖有无,
+                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_管口圆度 = 1 THEN 1 ELSE 0 END) as ng_管口圆度,
+                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_正面工号缺失 = 1 THEN 1 ELSE 0 END) as ng_正面工号缺失,
+                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_背面工号缺失 = 1 THEN 1 ELSE 0 END) as ng_背面工号缺失,
+                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_爆管 = 1 THEN 1 ELSE 0 END) as ng_爆管,
+                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_斜口 = 1 THEN 1 ELSE 0 END) as ng_斜口,
+                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_未剪断 = 1 THEN 1 ELSE 0 END) as ng_未剪断,
+                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_PCode = 1 THEN 1 ELSE 0 END) as ng_PCode,
+                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_色标对中 = 1 THEN 1 ELSE 0 END) as ng_色标对中,
                     
                     -- 混合多种缺陷：缺陷数>=2的NG记录，但被连续爆管剔除的不计入
                     SUM(CASE WHEN defect_count >= 2 AND final_result = 'NG' AND is_excluded = 0 THEN 1 ELSE 0 END) as ng_混合多种缺陷
@@ -919,10 +953,12 @@ private void GenerateShiftSummaryInternal(string date, string shift)
 				int ngCount = Convert.ToInt32(row["ng_count"]);
 				int excludeCount = Convert.ToInt32(row["exclude_count"]);
 
-				// 良率计算：剔除的记录不计入分母
+				// 良率计算：OK合格数 ÷（总检测数 - 连续剔除数）
 				double yieldRate = (totalCount - excludeCount) > 0
 					? Math.Min(100.0, Math.Max(0.0, (double)okCount / (totalCount - excludeCount) * 100))
 					: 0;
+				// 【防误导】存在真实NG时最高99.99，防止99.995%被两位小数四舍五入成100.00
+				if (ngCount > 0) yieldRate = Math.Min(99.99, yieldRate);
 
 				// 更新汇总表
 				string upsertSql = @"
