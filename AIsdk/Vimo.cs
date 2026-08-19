@@ -16,13 +16,11 @@ namespace AIsdk
 	{
 		private const int ERROR_OK = 0;
 		private const int ERROR_FAILED = -1;
-		private int returnValue = 0;
 		public string ErrorInfo = "";
 		private string modelsPath = "";
 		private string modelID = "";
 		private bool useGpu = false;
 		private int deviceId = 0;
-		private int SegmentArea = 0;
 		Stopwatch stopwatch = new Stopwatch();
 		public ModuleType moduleType { get; set; }
 

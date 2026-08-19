@@ -78,7 +78,7 @@ namespace CommonLib
                                 imagefile.Image.Save(sfile, ImageFormat.Jpeg);
                             }
                         }
-                        catch (Exception ex)
+                        catch (Exception)
                         {
                             //logger.error(ex.Message + @"\r\n" + ex.StackTrace);
                         }

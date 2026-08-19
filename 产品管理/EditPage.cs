@@ -21,7 +21,6 @@ namespace SetProduct
 		{
 			InitializeComponent();
 		}
-		string userChartName = "product_info";
 		SQLiteHelper _sqliteHelper = new SQLiteHelper();
 
 		public Model modelVal;

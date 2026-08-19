@@ -18,7 +18,6 @@ namespace SetVision
 		{
 			InitializeComponent();
 		}
-		IMainListener listener = null;
 		public Vision vision = new Vision();
 
 		private void MainFrm_Load(object sender, EventArgs e)

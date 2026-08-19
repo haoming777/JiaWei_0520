@@ -291,7 +291,7 @@ namespace CommonLib
 				res = ZAux_Direct_SetAtype(g_handle, axis, 1);//设置轴类型是什么玩意？？？应该只设置一次就可以了
 				res += ZAux_Direct_Single_Vmove(g_handle, axis, fangxiang);
 			}
-			catch (Exception ex)
+			catch (Exception)
 			{
 				zhm.SaveLog("轴连续运动出错！");
 				res = 1;
@@ -332,7 +332,7 @@ namespace CommonLib
 				res += ZAux_Direct_Single_Move(g_handle, axis, distance);
 
 			}
-			catch (Exception ex)
+			catch (Exception)
 			{
 				zhm.SaveLog("ERR:轴寸动运动出错！");
 				res = 1;
@@ -807,7 +807,7 @@ namespace CommonLib
 
 				return true;
 			}
-			catch (Exception ex)
+			catch (Exception)
 			{
 				return false;
 			}

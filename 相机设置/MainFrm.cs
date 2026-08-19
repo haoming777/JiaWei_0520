@@ -66,7 +66,6 @@ namespace SetCamera
 	private int _axisDir = 1;      // 轴方向：1=正向, -1=反向（从INI读取）
 
 		public DaHuaSDK cam1, cam2, cam3, cam4, cam5;
-		Bitmap bitmap = null;
 		XLToolClass toolClass = new XLToolClass();
 		HCModbusClass _modbusHc;
 		S7_1200Class _modbusS7;
@@ -131,6 +130,9 @@ namespace SetCamera
 				_lastValidCamIndex = firstEnabled;
 				uiComboBox_cam.SelectedIndex = firstEnabled;
 				uiComboBox_axis.SelectedIndex = 0;
+				axis = 1; // Combo第一项=轴1(正面拍照位)，必须在ReadAxisDirection前手动设置
+				// 强制读取初始轴方向（SelectedIndex=0时SelectedIndexChanged可能不触发）
+				ReadAxisDirection();
 
 				cam1TriggerPath = _Config.Output_Camera1;
 				cam2TriggerPath = _Config.Output_Camera2;
@@ -146,7 +148,7 @@ namespace SetCamera
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog($"加载相机信息错误！！！ \r\n {ex.Message} \r\n {ex.StackTrace}");
+				FastLogger.Instance.Info($"加载相机信息错误！！！ \r\n {ex.Message} \r\n {ex.StackTrace}");
 			}
 		}
 
@@ -168,7 +170,7 @@ namespace SetCamera
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog($"程序错误！！！ \r\n {ex.Message} \r\n {ex.StackTrace}");
+				FastLogger.Instance.Info($"程序错误！！！ \r\n {ex.Message} \r\n {ex.StackTrace}");
 			}
 		}
 		/// <summary>
@@ -245,10 +247,51 @@ namespace SetCamera
 			catch (Exception ex)
 			{
 
-				toolClass.SaveLog($"手动调试时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
-				throw;
+				FastLogger.Instance.Info($"手动调试时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
 			}
 		}
+	/// <summary>从 setup.ini [motion] 节读取当前轴的方向: axis{N}_dir, 1=正向 -1=反向</summary>
+	private void ReadAxisDirection()
+	{
+		try
+		{
+			// 使用与主程序 Class_Config 一致的路径，避免 StartupPath 与工作目录不一致
+			string iniPath = System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "setup.ini");
+			if (!System.IO.File.Exists(iniPath))
+			{
+				_axisDir = 1;
+				FastLogger.Instance.Info($"[轴方向] setup.ini 不存在({iniPath})，轴{axis} 方向使用默认值: 正向");
+				return;
+			}
+
+			string key = "axis" + axis + "_dir";
+			bool found = false;
+			foreach (var line in System.IO.File.ReadAllLines(iniPath))
+			{
+				string t = line.Trim();
+				if (t.StartsWith("[") || !t.Contains("=")) continue;
+				int eq = t.IndexOf('=');
+				if (t.Substring(0, eq).Trim() == key)
+				{
+					// 去除行尾分号注释，避免 "; 轴1方向" 干扰 int.TryParse
+					string rawVal = t.Substring(eq + 1).Trim();
+					int semiIdx = rawVal.IndexOf(';');
+					if (semiIdx >= 0) rawVal = rawVal.Substring(0, semiIdx).Trim();
+					if (!int.TryParse(rawVal, out _axisDir))
+						_axisDir = 1;
+					found = true;
+					break;
+				}
+			}
+			string dirText = _axisDir == 1 ? "正向" : "反向";
+			if (found)
+				FastLogger.Instance.Info($"[轴方向] 轴{axis} 方向配置已加载: {key}={_axisDir} ({dirText})");
+			else
+				FastLogger.Instance.Info($"[轴方向] 轴{axis} 方向未配置({key})，使用默认值: 正向");
+		}
+		catch { _axisDir = 1; }
+		if (_axisDir != 1 && _axisDir != -1) _axisDir = 1;
+	}
 
 
 		private void gainTxt_KeyDown(object sender, KeyEventArgs e)
@@ -264,7 +307,7 @@ namespace SetCamera
 			catch (Exception ex)
 			{
 				MessageBox.Show(ex.Message);
-				toolClass.SaveLog($"手动调试时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
+				FastLogger.Instance.Info($"手动调试时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
 				return;
 			}
 		}
@@ -283,7 +326,7 @@ namespace SetCamera
 			catch (Exception ex)
 			{
 				MessageBox.Show(ex.Message);
-				toolClass.SaveLog($"手动调试时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
+				FastLogger.Instance.Info($"手动调试时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
 				return;
 			}
 		}
@@ -313,7 +356,7 @@ namespace SetCamera
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog($"手动调试时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
+				FastLogger.Instance.Info($"手动调试时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
 			}
 		}
 
@@ -340,32 +383,11 @@ namespace SetCamera
 					default:
 						break;
 				}
-				// 读取轴方向配置 [motion] axis{N}_dir, 1=正向 -1=反向
-				try
-				{
-					string iniPath = System.IO.Path.Combine(System.Windows.Forms.Application.StartupPath, "setup.ini");
-					if (System.IO.File.Exists(iniPath))
-					{
-						string key = "axis" + axis + "_dir";
-						foreach (var line in System.IO.File.ReadAllLines(iniPath))
-						{
-							string t = line.Trim();
-							if (t.StartsWith("[") || !t.Contains("=")) continue;
-							int eq = t.IndexOf('=');
-							if (t.Substring(0, eq).Trim() == key)
-							{
-								int.TryParse(t.Substring(eq + 1).Trim(), out _axisDir);
-								break;
-							}
-						}
-					}
-				}
-				catch { _axisDir = 1; }
-				if (_axisDir != 1 && _axisDir != -1) _axisDir = 1;
+				ReadAxisDirection();
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog($"手动调试时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
+				FastLogger.Instance.Info($"手动调试时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
 			}
 		}
 
@@ -395,7 +417,7 @@ namespace SetCamera
 						if(cam5!=null) cam5.OnImage -= Cam1_OnImage;
 						cam1.OnImage += Cam1_OnImage;
 						daHuaSDK = cam1; if(daHuaSDK==null) return;
-						toolClass.SaveLog($"切换为相机一：tempTriggerPath: {tempTriggerPath} ------------------------------------------------------------------------");
+						FastLogger.Instance.Info($"切换为相机一：tempTriggerPath: {tempTriggerPath} ------------------------------------------------------------------------");
 
 
 
@@ -408,7 +430,7 @@ namespace SetCamera
 						if(cam5!=null) cam5.OnImage -= Cam1_OnImage;
 						cam2.OnImage += Cam1_OnImage;
 						daHuaSDK = cam2; if(daHuaSDK==null) return;
-						toolClass.SaveLog($"切换为相机二：tempTriggerPath: {tempTriggerPath}	------------------------------------------------------------------------");
+						FastLogger.Instance.Info($"切换为相机二：tempTriggerPath: {tempTriggerPath}	------------------------------------------------------------------------");
 						break;
 					case 3:
 						tempTriggerPath = cam3TriggerPath;
@@ -421,7 +443,7 @@ namespace SetCamera
 
 						uiComboBox_axis.SelectedIndex = 2;
 
-						toolClass.SaveLog($"切换为相机三：tempTriggerPath: {tempTriggerPath} ------------------------------------------------------------------------");
+						FastLogger.Instance.Info($"切换为相机三：tempTriggerPath: {tempTriggerPath} ------------------------------------------------------------------------");
 						break;
 					case 4:
 						tempTriggerPath = cam4TriggerPath;
@@ -432,7 +454,7 @@ namespace SetCamera
 						cam4.OnImage += Cam1_OnImage;
 						daHuaSDK = cam4; if(daHuaSDK==null) return;
 						uiComboBox_axis.SelectedIndex = 0;
-						toolClass.SaveLog($"切换为相机四：tempTriggerPath: {tempTriggerPath}------------------------------------------------------------------------");
+						FastLogger.Instance.Info($"切换为相机四：tempTriggerPath: {tempTriggerPath}------------------------------------------------------------------------");
 						break;
 					case 5:
 						tempTriggerPath = cam5TriggerPath;
@@ -443,7 +465,7 @@ namespace SetCamera
 						cam5.OnImage += Cam1_OnImage;
 						daHuaSDK = cam5; if(daHuaSDK==null) return;
 						uiComboBox_axis.SelectedIndex = 1;
-						toolClass.SaveLog($"切换为相机五：tempTriggerPath: {tempTriggerPath}------------------------------------------------------------------------");
+						FastLogger.Instance.Info($"切换为相机五：tempTriggerPath: {tempTriggerPath}------------------------------------------------------------------------");
 						break;
 					default:
 						break;
@@ -455,7 +477,7 @@ namespace SetCamera
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog($"手动调试时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
+				FastLogger.Instance.Info($"手动调试时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
 			}
 
 		}
@@ -468,7 +490,7 @@ namespace SetCamera
 			{
 				Task.Run(() =>
 				{
-					toolClass.SaveLog("goBtn，point：" + point_Txt.Text);
+					FastLogger.Instance.Info("goBtn，point：" + point_Txt.Text);
 					float x = Convert.ToSingle(point_Txt.Text);
 
 					this.Invoke(new Action(() =>
@@ -483,14 +505,14 @@ namespace SetCamera
 						leftBtn.Enabled = true;
 						rightBtn.Enabled = true;
 					}));
-					toolClass.SaveLog("goBtn，完成：" + myZmcaux.GetLocation(g_handle, axis));
+					FastLogger.Instance.Info("goBtn，完成：" + myZmcaux.GetLocation(g_handle, axis));
 
 				});
 
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog($"手动调试时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
+				FastLogger.Instance.Info($"手动调试时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
 			}
 		}
 
@@ -500,11 +522,11 @@ namespace SetCamera
 			{
 				//myZmcaux.StopMethod(g_handle);
 				myZmcaux.StopMove(g_handle, axis);
-				toolClass.SaveLog($"停止成功");
+				FastLogger.Instance.Info($"停止成功");
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog($"手动调试时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
+				FastLogger.Instance.Info($"手动调试时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
 			}
 		}
 
@@ -513,11 +535,11 @@ namespace SetCamera
 			try
 			{
 				myZmcaux.Vmove(g_handle, axis, -1 * _axisDir);
-				//toolClass.SaveLog($"Vmove -1 axis：{axis}");
+				//FastLogger.Instance.Info($"Vmove -1 axis：{axis}");
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog($"手动调试时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
+				FastLogger.Instance.Info($"手动调试时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
 			}
 		}
 
@@ -528,11 +550,11 @@ namespace SetCamera
 			try
 			{
 				myZmcaux.Vmove(g_handle, axis, 1 * _axisDir);
-				//toolClass.SaveLog($"Vmove 1 axis：{axis}");
+				//FastLogger.Instance.Info($"Vmove 1 axis：{axis}");
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog($"手动调试时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
+				FastLogger.Instance.Info($"手动调试时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
 			}
 		}
 
@@ -544,7 +566,7 @@ namespace SetCamera
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog($"手动调试时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
+				FastLogger.Instance.Info($"手动调试时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
 			}
 		}
 		private void rightBtn_MouseUp(object sender, MouseEventArgs e)
@@ -555,7 +577,7 @@ namespace SetCamera
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog($"手动调试时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
+				FastLogger.Instance.Info($"手动调试时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
 			}
 		}
 
@@ -569,7 +591,7 @@ namespace SetCamera
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog($"获取数据时异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
+				FastLogger.Instance.Info($"获取数据时异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
 			}
 		}
 
@@ -682,7 +704,7 @@ namespace SetCamera
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog($"保存数据时异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
+				FastLogger.Instance.Info($"保存数据时异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
 			}
 
 		}
@@ -716,7 +738,7 @@ namespace SetCamera
 						//Thread.Sleep(10);
 						//myZmcaux.SetOut(g_handle, tempTriggerPath, 0);
 
-						//toolClass.SaveLog(tempTriggerPath+"");
+						//FastLogger.Instance.Info(tempTriggerPath+"");
 						if (_modbusType == 1) _modbusHc.modbusTcp.Write(tempTriggerPath, true);
 					else if (_modbusType == 2) _modbusS7.WriteRegister(tempTriggerPath, (short)1);
 						Thread.Sleep(100);
@@ -734,7 +756,7 @@ namespace SetCamera
 			}
 			catch (Exception ex)
 			{
-				toolClass.SaveLog($"手动调试时...\r\n {ex.Message} \r\n {ex.StackTrace}");
+				FastLogger.Instance.Info($"手动调试时...\r\n {ex.Message} \r\n {ex.StackTrace}");
 			}
 		}
 
@@ -757,7 +779,7 @@ namespace SetCamera
 		//				//Thread.Sleep(10);
 		//				myZmcaux.SetOut(g_handle, tempTriggerPath, 0);
 
-		//				//toolClass.SaveLog(tempTriggerPath+"");
+		//				//FastLogger.Instance.Info(tempTriggerPath+"");
 		//				if (type)
 		//				{
 		//					TriggerFlag = false;
@@ -768,7 +790,7 @@ namespace SetCamera
 		//	}
 		//	catch (Exception ex)
 		//	{
-		//		toolClass.SaveLog($"手动调试时...\r\n {ex.Message} \r\n {ex.StackTrace}");
+		//		FastLogger.Instance.Info($"手动调试时...\r\n {ex.Message} \r\n {ex.StackTrace}");
 		//	}
 		//}
 		#endregion

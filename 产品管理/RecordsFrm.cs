@@ -21,6 +21,10 @@ namespace SetProduct
         private string currentMode = "summary";
         private string _previousMode = null;
         private DataTable _currentData;
+        // 明细模式统计栏：按全部过滤结果用SQL统计（不受分页LIMIT影响）
+        private int _detailStatsTotal = 0;
+        private int _detailStatsOk = 0;
+        private int _detailStatsNg = 0;
         private SQLiteConnection _sharedConnection;
         private readonly object _dbLock = new object();
         private UIDataGridView dgvRecords;
@@ -38,7 +42,6 @@ namespace SetProduct
         private UIButton btnReset;
         private UIButton btnExport;
         private UIButton btnRefresh;
-        private UIButton btnSummary;
         private UILabel lblTotal;
         private UILabel lblOK;
         private UILabel lblNG;
@@ -47,7 +50,6 @@ namespace SetProduct
         private UIButton btnPrev;
         private UIButton btnNext;
         private int _pageSize = 50;
-        private int _detailLimit = 3000;  // 副表查询最大条数，可自行调整
         private int _currentPage = 1;
         private int _totalPages = 1;
         private CancellationTokenSource _loadCts;
@@ -273,7 +275,7 @@ namespace SetProduct
             x = this.Width - 850;
             var formulaLabel = new UILabel
             {
-                Text = "💡 良率计算公式：良率 = OK合格数 ÷（总检测数 - 被剔除的连续爆管异常数量）",
+                Text = "💡 良率计算公式：良率 = OK合格数 ÷（总检测数 - 连续爆管剔除数）（连续爆管剔除不计入NG总数）",
                 Location = new Point(x, y),
                 Size = new Size(550, 35),
                 ForeColor = Color.FromArgb(255, 140, 0),
@@ -638,6 +640,7 @@ namespace SetProduct
                         p_shift_date TEXT NOT NULL,
                         sku TEXT NOT NULL,
                         sequence_id INTEGER,
+                        run_id TEXT DEFAULT '',
                         final_result TEXT NOT NULL,
                         cam1_result INTEGER,
                         cam2_result INTEGER,
@@ -754,38 +757,59 @@ namespace SetProduct
                 }
                 else
                 {
-                    sql = "SELECT p_time, p_date, p_shift, sku, sequence_id, " +
-                          "final_result, defect_detail, defect_count " +
-                          "FROM production_records_detail WHERE 1=1";
+                    string whereClause = "";
 
                     DateTime startDate = dtStart.Value.Date;
                     DateTime endDate = dtEnd.Value.Date.AddDays(1).AddSeconds(-1);
 
-                    sql += " AND p_time >= @startTime AND p_time <= @endTime";
+                    whereClause += " AND p_time >= @startTime AND p_time <= @endTime";
                     parameters.Add(new SQLiteParameter("@startTime", startDate));
                     parameters.Add(new SQLiteParameter("@endTime", endDate));
 
                     if (cboShift.SelectedIndex > 0)
                     {
                         string shiftText = cboShift.SelectedItem.ToString();
-                        sql += " AND p_shift = @shift";
+                        whereClause += " AND p_shift = @shift";
                         parameters.Add(new SQLiteParameter("@shift", shiftText.Replace("班次", "")));
                     }
 
                     if (!string.IsNullOrWhiteSpace(txtSearch.Text))
                     {
-                        sql += " AND (sku LIKE @search OR CAST(sequence_id AS TEXT) LIKE @search OR defect_detail LIKE @search)";
+                        whereClause += " AND (sku LIKE @search OR CAST(sequence_id AS TEXT) LIKE @search OR defect_detail LIKE @search)";
                         parameters.Add(new SQLiteParameter("@search", $"%{txtSearch.Text}%"));
                     }
 
                     if (cboResult.SelectedIndex > 0)
                     {
-                        sql += " AND final_result = @result";
+                        whereClause += " AND final_result = @result";
                         parameters.Add(new SQLiteParameter("@result", cboResult.SelectedItem.ToString()));
                     }
 
-						int limitVal = int.TryParse(txtLimit?.Text, out int v) && v > 0 ? v : 3000;
-				sql += $" ORDER BY p_time DESC LIMIT {limitVal}";
+						// 【修复】统计栏按全部过滤结果统计（不受分页LIMIT影响），口径：连续剔除不计入NG
+                    string statsSql = "SELECT COUNT(*) AS total_count, " +
+                        "SUM(CASE WHEN final_result = 'OK' THEN 1 ELSE 0 END) AS ok_count, " +
+                        "SUM(CASE WHEN final_result = 'NG' AND is_excluded = 0 THEN 1 ELSE 0 END) AS ng_count " +
+                        "FROM production_records_detail WHERE 1=1" + whereClause;
+                    try
+                    {
+                        var statsData = await Task.Run(() => ExecuteProdQuery(statsSql, parameters.ToArray()), token);
+                        if (statsData != null && statsData.Rows.Count > 0)
+                        {
+                            _detailStatsTotal = Convert.ToInt32(statsData.Rows[0]["total_count"]);
+                            _detailStatsOk = Convert.ToInt32(statsData.Rows[0]["ok_count"]);
+                            _detailStatsNg = Convert.ToInt32(statsData.Rows[0]["ng_count"]);
+                        }
+                        statsData?.Dispose();
+                    }
+                    catch (Exception statsEx)
+                    {
+                        _log.SaveLog($"明细统计查询异常: {statsEx.Message}");
+                    }
+                    int limitVal = int.TryParse(txtLimit?.Text, out int v) && v > 0 ? v : 3000;
+				sql = "SELECT p_time, p_date, p_shift, sku, sequence_id, " +
+                          "final_result, defect_detail, defect_count, " +
+                          "is_excluded, excluded_reason " +
+                          "FROM production_records_detail WHERE 1=1" + whereClause + $" ORDER BY p_time DESC LIMIT {limitVal}";
 					}
 
 					_currentData = await Task.Run(() => ExecuteProdQuery(sql, parameters.ToArray()), token);
@@ -1025,7 +1049,6 @@ namespace SetProduct
             int total = 0, ok = 0, ng = 0, excludeCount = 0;
 
 				bool _hasExcludeColumn = _currentData.Columns.Contains("continuous_exclude_count");
-					bool _hasIsExcluded = _currentData.Columns.Contains("is_excluded");
             if (currentMode == "summary")
             {
                 foreach (DataRow row in _currentData.Rows)
@@ -1041,32 +1064,23 @@ namespace SetProduct
             }
             else
             {
-                // 详细模式：收集连续爆管剔除的序列号，按组统计（与主界面逻辑一致）
-                var excludedIds = new List<long>();
-                foreach (DataRow row in _currentData.Rows)
-                {
-                    total++;
-                    if (row["final_result"].ToString() == "OK") ok++;
-                    else ng++;
-                    if (_hasIsExcluded)
-                    {
-                        if (Convert.ToInt32(row["is_excluded"]) == 1
-                            && row["excluded_reason"].ToString() == "连续爆管剔除")
-                        {
-                            excludedIds.Add(Convert.ToInt64(row["sequence_id"]));
-                        }
-                    }
-                }
-                // 统计被剔除记录数（与主界面burstExcludeCount一致，每条被剔除记录计为1支）
-                excludeCount = excludedIds.Count;
+                // 详细模式：统计栏使用SQL全量统计结果（LoadData中已按全部过滤结果统计，不受分页LIMIT影响）
+                total = _detailStatsTotal;
+                ok = _detailStatsOk;
+                ng = _detailStatsNg;
+                // 连续剔除数 = 总数 - OK - NG总数（明细统计SQL中ng已排除剔除记录）
+                excludeCount = _detailStatsTotal - _detailStatsOk - _detailStatsNg;
             }
 
             lblTotal.Text = total.ToString("N0");
             lblOK.Text = ok.ToString("N0");
             lblNG.Text = ng.ToString("N0");
 
-            double effectiveCount = total - excludeCount;
-            double yield = effectiveCount > 0 ? Math.Min(100.0, Math.Max(0.0, (double)ok / effectiveCount * 100)) : 0;
+            // 良率 = OK合格数 ÷（总检测数 - 连续剔除数）
+            double effectiveTotal = total - excludeCount;
+            double yield = effectiveTotal > 0 ? Math.Min(100.0, Math.Max(0.0, (double)ok / effectiveTotal * 100)) : 0;
+            // 【防误导】存在真实NG时最高显示99.99，防止四舍五入显示成100.00
+            if (ng > 0) yield = Math.Min(99.99, yield);
             lblYield.Text = yield.ToString("F2") + "%";
         }
 
@@ -1194,7 +1208,7 @@ namespace SetProduct
                         p_shift_date AS p_date, p_shift, sku,
                         COUNT(*) AS total_count,
                         SUM(CASE WHEN final_result = 'OK' THEN 1 ELSE 0 END) AS ok_count,
-                        SUM(CASE WHEN final_result = 'NG' THEN 1 ELSE 0 END) AS ng_count,
+                        SUM(CASE WHEN final_result = 'NG' AND is_excluded = 0 THEN 1 ELSE 0 END) AS ng_count,
                         SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_异物 = 1 THEN 1 ELSE 0 END),
                         SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_管盖有无 = 1 THEN 1 ELSE 0 END),
                         SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_管口圆度 = 1 THEN 1 ELSE 0 END),
@@ -1212,7 +1226,7 @@ namespace SetProduct
                          AND d2.sku = production_records_detail.sku
                          AND d2.excluded_reason = '连续爆管剔除'),
                         CASE WHEN (COUNT(*) - (SELECT COUNT(*) FROM production_records_detail d2 WHERE d2.p_shift_date = production_records_detail.p_shift_date AND d2.p_shift = production_records_detail.p_shift AND d2.sku = production_records_detail.sku AND d2.excluded_reason = '连续爆管剔除')) > 0
-                            THEN MIN(100.0, MAX(0.0, SUM(CASE WHEN final_result = 'OK' THEN 1 ELSE 0 END) * 100.0 / (COUNT(*) - (SELECT COUNT(*) FROM production_records_detail d2 WHERE d2.p_shift_date = production_records_detail.p_shift_date AND d2.p_shift = production_records_detail.p_shift AND d2.sku = production_records_detail.sku AND d2.excluded_reason = '连续爆管剔除'))))
+                            THEN MIN(CASE WHEN SUM(CASE WHEN final_result = 'NG' AND is_excluded = 0 THEN 1 ELSE 0 END) > 0 THEN 99.99 ELSE 100.0 END, MAX(0.0, SUM(CASE WHEN final_result = 'OK' THEN 1 ELSE 0 END) * 100.0 / (COUNT(*) - (SELECT COUNT(*) FROM production_records_detail d2 WHERE d2.p_shift_date = production_records_detail.p_shift_date AND d2.p_shift = production_records_detail.p_shift AND d2.sku = production_records_detail.sku AND d2.excluded_reason = '连续爆管剔除'))))
                             ELSE 0 END,
                         @summaryDate,
                         @cfg1, @cfg2, @cfg3, @cfg4, @cfg5, @cfg6, @cfg7, @cfg8
@@ -1273,7 +1287,7 @@ namespace SetProduct
                         p_shift_date AS p_date, p_shift, sku,
                         COUNT(*) AS total_count,
                         SUM(CASE WHEN final_result = 'OK' THEN 1 ELSE 0 END) AS ok_count,
-                        SUM(CASE WHEN final_result = 'NG' THEN 1 ELSE 0 END) AS ng_count,
+                        SUM(CASE WHEN final_result = 'NG' AND is_excluded = 0 THEN 1 ELSE 0 END) AS ng_count,
                         SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_异物 = 1 THEN 1 ELSE 0 END),
                         SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_管盖有无 = 1 THEN 1 ELSE 0 END),
                         SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_管口圆度 = 1 THEN 1 ELSE 0 END),
@@ -1290,17 +1304,8 @@ namespace SetProduct
                          AND d2.p_shift = production_records_detail.p_shift
                          AND d2.sku = production_records_detail.sku
                          AND d2.excluded_reason = '连续爆管剔除'),
-                        CASE WHEN (COUNT(*) - (SELECT COUNT(*) FROM production_records_detail d2
-                            WHERE d2.p_shift_date = production_records_detail.p_shift_date
-                            AND d2.p_shift = production_records_detail.p_shift
-                            AND d2.sku = production_records_detail.sku
-                            AND d2.excluded_reason = '连续爆管剔除')) > 0
-                            THEN MIN(100.0, MAX(0.0, SUM(CASE WHEN final_result = 'OK' THEN 1 ELSE 0 END) * 100.0 /
-                                (COUNT(*) - (SELECT COUNT(*) FROM production_records_detail d2
-                                    WHERE d2.p_shift_date = production_records_detail.p_shift_date
-                                    AND d2.p_shift = production_records_detail.p_shift
-                                    AND d2.sku = production_records_detail.sku
-                                    AND d2.excluded_reason = '连续爆管剔除'))))
+                        CASE WHEN (COUNT(*) - (SELECT COUNT(*) FROM production_records_detail d2 WHERE d2.p_shift_date = production_records_detail.p_shift_date AND d2.p_shift = production_records_detail.p_shift AND d2.sku = production_records_detail.sku AND d2.excluded_reason = '连续爆管剔除')) > 0
+                            THEN MIN(CASE WHEN SUM(CASE WHEN final_result = 'NG' AND is_excluded = 0 THEN 1 ELSE 0 END) > 0 THEN 99.99 ELSE 100.0 END, MAX(0.0, SUM(CASE WHEN final_result = 'OK' THEN 1 ELSE 0 END) * 100.0 / (COUNT(*) - (SELECT COUNT(*) FROM production_records_detail d2 WHERE d2.p_shift_date = production_records_detail.p_shift_date AND d2.p_shift = production_records_detail.p_shift AND d2.sku = production_records_detail.sku AND d2.excluded_reason = '连续爆管剔除'))))
                             ELSE 0 END,
                         @summaryDate,
                         @cfg1, @cfg2, @cfg3, @cfg4, @cfg5, @cfg6, @cfg7, @cfg8

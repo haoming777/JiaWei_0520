@@ -21,8 +21,6 @@ namespace PLC调试.Class
 
 		Thread doState;
 
-		Thread doReadT1;
-
 		Thread doReadCount;
 
 		Stopwatch timeOut;
@@ -72,11 +70,6 @@ namespace PLC调试.Class
 
 		public event PlcCountHandler EventCount;
 
-		/// <summary>
-		/// 相机一触发信号
-		/// </summary>
-		public delegate void DelegateTriggerGet();
-		public event DelegateTriggerGet EventTriggerGet;
 		public bool ConnectModbus()
 		{
 			try
@@ -715,9 +708,9 @@ namespace PLC调试.Class
 					// Log.Warning("发送间隔超过5秒，不记录统计");
 				}
 			}
-			catch (Exception ex)
+			catch (Exception)
 			{
-				// Log.Error($"发送PLC失败: {ex.Message}");
+				// Log.Error($"发送PLC失败");
 			}
 		}
 

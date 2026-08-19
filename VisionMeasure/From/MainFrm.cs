@@ -341,6 +341,9 @@ namespace VisionMeasure
 			// 绑定导出按钮事件
 			if (exportBtn != null) exportBtn.Click += ExportBtn_Click;
 
+			// 绑定打开NG图片路径按钮事件
+			if (OpenNGimageBtn != null) OpenNGimageBtn.Click += OpenNGimageBtn_Click;
+
 			// 加载保存的SKU
 			InitializeSavedSku();
 
@@ -353,6 +356,62 @@ namespace VisionMeasure
 		private void ExportBtn_Click(object sender, EventArgs e)
 		{
 			ManualSaveCurrentShiftReport();
+		}
+
+		/// <summary>
+		/// 打开NG图片路径按钮点击事件：打开当前班次、当前SKU的NG存图目录
+		/// 路径结构与存图一致：存图目录/日期(yyMMdd)/班次/SKU/NG
+		/// </summary>
+		private void OpenNGimageBtn_Click(object sender, EventArgs e)
+		{
+			try
+			{
+				string imagePath = _Config.ImagePath;
+				if (string.IsNullOrEmpty(imagePath))
+				{
+					MessageBox.Show("未配置存图目录！请先在系统设置中配置存图目录。");
+					return;
+				}
+
+				string sku = GetCurrentSkuValue();
+				if (string.IsNullOrEmpty(sku))
+				{
+					MessageBox.Show("当前SKU为空，请先设置SKU！");
+					return;
+				}
+
+				string dateFolder = DateTime.Now.ToString("yyMMdd");
+				// 班次可能尚未初始化（定时器未触发），兜底按当前时间计算
+				string shiftFolder = !string.IsNullOrEmpty(_currentShift) ? _currentShift : GetShiftByTime(DateTime.Now);
+
+				string targetPath = Path.Combine(imagePath, dateFolder, shiftFolder, sku, "NG");
+
+				// 目标目录还未生成时，逐级回退到最近的已存在目录
+				string openPath = targetPath;
+				while (!string.IsNullOrEmpty(openPath) && !Directory.Exists(openPath))
+				{
+					string parent = Path.GetDirectoryName(openPath);
+					if (string.IsNullOrEmpty(parent) || parent == openPath)
+					{
+						openPath = imagePath;
+						break;
+					}
+					openPath = parent;
+				}
+
+				if (!Directory.Exists(openPath))
+				{
+					MessageBox.Show($"存图目录不存在：\r\n{targetPath}");
+					return;
+				}
+
+				System.Diagnostics.Process.Start("explorer.exe", "\"" + openPath + "\"");
+			}
+			catch (Exception ex)
+			{
+				FastLogger.Instance.Error($"打开NG图片路径异常: {ex.Message}");
+				MessageBox.Show($"打开NG图片路径失败：{ex.Message}");
+			}
 		}
 
 		/// <summary>
