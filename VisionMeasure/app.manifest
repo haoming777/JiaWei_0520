@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+  <assemblyIdentity version="1.0.0.0" name="VisionMeasure.app" />
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
+    <security>
+      <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
+        <!-- 程序以管理员权限运行：
+             需要它来写入 WER LocalDumps 注册表（原生崩溃自动转储的最后兜底）。
+             注意：
+             1. 每次启动会弹 UAC 确认框；现场机若把 UAC 设为"从不通知"则无弹窗
+             2. 开机自启不能用启动文件夹（UAC 开启时会被拦截），请改用
+                任务计划程序并勾选"使用最高权限运行" -->
+        <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+</assembly>

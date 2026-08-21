@@ -92,6 +92,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Class_Config.cs" />
+    <Compile Include="CrashDump.cs" />
     <Compile Include="FastLogger.cs" />
     <Compile Include="GlobalVar.cs" />
     <Compile Include="IFormPlugin.cs" />

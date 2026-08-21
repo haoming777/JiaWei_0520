@@ -31,6 +31,7 @@ namespace SetCamera
 			g_handle = handle;
 			_modbusHc = modbusClass1;
 			_modbusType = 1;
+			_plc = null; // HCModbusClass 不实现 IPlcCommunication，直连构造无互锁（产线走接口构造）
 		}
 		public MainFrm(IntPtr handle, S7_1200Class s7Class)
 		{
@@ -38,12 +39,14 @@ namespace SetCamera
 			g_handle = handle;
 			_modbusS7 = s7Class;
 			_modbusType = 2;
+			_plc = s7Class;
 		}
 		/// <summary>统一接口构造函数（兼容 IPlcCommunication）</summary>
 		public MainFrm(IntPtr handle, IPlcCommunication plc)
 		{
 			InitializeComponent();
 			g_handle = handle;
+			_plc = plc;
 			if (plc is S7_1200Class s7)
 			{
 				_modbusS7 = s7;
@@ -70,6 +73,8 @@ namespace SetCamera
 		HCModbusClass _modbusHc;
 		S7_1200Class _modbusS7;
 		int _modbusType = 0; // 0=none, 1=HCModbus, 2=S7_1200
+		IPlcCommunication _plc;                     // 统一接口引用（互锁 + 自动关闭事件订阅）
+		private volatile int _realtimeBitIdx = -1;  // 当前实时回报位索引: 0=DBX72.0 1=DBX72.1 -1=未回报
 
 		// 工位启用状态（与 MainFrm 联动）
 		private bool[] _cameraEnabled = { true, true, true, true, true };
@@ -101,6 +106,10 @@ namespace SetCamera
 		{
 			try
 			{
+				// 订阅设备模式变化（自动模式下自动停止实时并关闭本窗体）
+				this.FormClosed += MainFrm_FormClosed;
+				if (_plc != null) _plc.EventDeviceMode += OnDeviceModeFromPlc;
+
 				// 读取工位启用状态（与 MainFrm 联动）
 				_cameraEnabled[0] = _Config.ActiveCam1;
 				_cameraEnabled[1] = _Config.ActiveCam2;
@@ -200,6 +209,14 @@ namespace SetCamera
 		{
 			if (uiButton4.Text.Equals("实时取像"))
 			{
+				// 【互锁】自动模式下禁止打开实时取像
+				if (_plc != null && _plc.IsAutoMode)
+				{
+					MessageBox.Show("设备处于自动模式，禁止实时取像！", "系统提示",
+						MessageBoxButtons.OK, MessageBoxIcon.Warning);
+					try { FastLogger.Instance.Info("【设备状态】自动模式下点击实时取像被拦截"); } catch { }
+					return;
+				}
 				uiButton4.Text = "停止实时";
 
 				uiButton3.Enabled = false;
@@ -709,7 +726,7 @@ namespace SetCamera
 
 		}
 
-		bool TriggerFlag = true;
+		volatile bool TriggerFlag = true;
 		/// <summary>
 		/// 触发拍照
 		/// </summary>
@@ -725,15 +742,39 @@ namespace SetCamera
 					return;
 				}
 
+				// 【兜底拦截】实时取像在自动模式下禁止（单张取像保留）
+				if (!type && _plc != null && _plc.IsAutoMode)
+				{
+					try { FastLogger.Instance.Info("【设备状态】自动模式下禁止实时取像（TriggerCameraMethod兜底拦截）"); } catch { }
+					return;
+				}
+
 				TriggerFlag = true;
 
 				if (_modbusType == 1 && !_modbusHc.modbusState) { MessageBox.Show("HCM连接已断开"); return; }
 				if (_modbusType == 2 && !_modbusS7.modbusState) { MessageBox.Show("S7-1200连接已断开"); return; }
 
+				// 【实时回报位】仅实时模式、仅 S7、仅当前相机是正/反面时置位
+				if (!type)
+				{
+					_realtimeBitIdx = GetRealtimeBitIndex(camIdx + 1);
+					if (_realtimeBitIdx < 0)
+						try { FastLogger.Instance.Info($"【实时回报】相机{camIdx + 1}不在正/反面配置(frontCamNo/backCamNo)中，跳过回报位"); } catch { }
+					else
+						SetRealtimeReportBit(true);
+				}
+
 				Task.Run(() =>
 				{
 					while (TriggerFlag)
 					{
+						// 【循环内自动停止】实时进行中切自动 → 停止循环（不依赖事件的第二道防线）
+						if (!type && _plc != null && _plc.IsAutoMode)
+						{
+							TriggerFlag = false;
+							try { FastLogger.Instance.Info("【设备状态】自动模式切入，实时取像循环自动停止"); } catch { }
+							break;
+						}
 						//myZmcaux.SetOut(g_handle, tempTriggerPath, 1);
 						//Thread.Sleep(10);
 						//myZmcaux.SetOut(g_handle, tempTriggerPath, 0);
@@ -752,11 +793,99 @@ namespace SetCamera
 					}
 					if (_modbusType == 1) _modbusHc.modbusTcp.Write(tempTriggerPath, false);
 					else if (_modbusType == 2) _modbusS7.WriteRegister(tempTriggerPath, (short)0);
+
+					// 【停止复位回报位】（用户停/自动停两条路径都汇聚到这里）
+					if (!type && _realtimeBitIdx >= 0)
+					{
+						SetRealtimeReportBit(false);
+						_realtimeBitIdx = -1;
+						// UI 状态幂等恢复（用户手动停时按钮文本已是"实时取像"，此处不动作）
+						try { if (!this.IsDisposed && this.IsHandleCreated) this.BeginInvoke(new Action(() =>
+						{
+							if (!IsDisposed && uiButton4.Text == "停止实时")
+							{ uiButton4.Text = "实时取像"; uiButton3.Enabled = true; uiComboBox_cam.Enabled = true; uiComboBox_axis.Enabled = true; }
+						})); } catch { }
+					}
 				});
 			}
 			catch (Exception ex)
 			{
 				FastLogger.Instance.Info($"手动调试时...\r\n {ex.Message} \r\n {ex.StackTrace}");
+			}
+		}
+
+		/// <summary>
+		/// camNo(1-5)→实时回报位索引: -1=非正反面, 0=DB1000.DBX72.0, 1=DB1000.DBX72.1
+		/// （realtimeBitFront=0 时正面=72.0 反面=72.1；=1 时互换。运行期改 setup.ini 立即生效）
+		/// </summary>
+		private int GetRealtimeBitIndex(int camNo)
+		{
+			bool isFront = camNo == _Config.FrontCamNo;
+			bool isBack = camNo == _Config.BackCamNo;
+			if (!isFront && !isBack) return -1;
+			int frontBit = _Config.RealtimeBitFront == 1 ? 1 : 0;
+			return isFront ? frontBit : 1 - frontBit;
+		}
+
+		/// <summary>写入 S7 实时取像回报位（TRUE=打开实时显示 FALSE=关闭）。仅西门子有此回报位</summary>
+		private void SetRealtimeReportBit(bool value)
+		{
+			if (_modbusType != 2 || _modbusS7 == null || _realtimeBitIdx < 0) return;
+			try
+			{
+				string addr = _realtimeBitIdx == 1 ? "DB1000.DBX72.1" : "DB1000.DBX72.0";
+				_modbusS7.WriteRegister(addr, value);
+				try { FastLogger.Instance.Info($"【实时回报】{addr}={(value ? "TRUE" : "FALSE")}"); } catch { }
+			}
+			catch (Exception ex)
+			{
+				try { FastLogger.Instance.Info($"【实时回报】写入{(_realtimeBitIdx == 1 ? "DB1000.DBX72.1" : "DB1000.DBX72.0")}失败: {ex.Message}"); } catch { }
+			}
+		}
+
+		/// <summary>设备模式变化（PLC后台线程触发）：切自动时先停实时、提示并自动关闭本窗体</summary>
+		private void OnDeviceModeFromPlc(bool isAuto, short rawValue)
+		{
+			if (!isAuto) return;   // 只处理切自动
+			try
+			{
+				if (this.IsDisposed || !this.IsHandleCreated) return;
+				this.BeginInvoke(new Action(() =>
+				{
+					try
+					{
+						if (this.IsDisposed || !this.Visible) return;
+						StopRealtimeByAutoMode();   // ① 必须先停实时（否则 FormClosing 会拦截 Close）
+						MessageBox.Show(this, "设备已切换到自动模式，相机设置将自动关闭！", "系统提示",
+							MessageBoxButtons.OK, MessageBoxIcon.Warning);   // ② 提示
+						this.Close();                // ③ ShowDialog 内 Close 合法，返回后主程序 cameraDebug 复位
+					}
+					catch (Exception ex) { try { FastLogger.Instance.Info($"自动模式关闭相机设置异常...\r\n {ex.Message}"); } catch { } }
+				}));
+			}
+			catch (Exception ex) { try { FastLogger.Instance.Error("OnDeviceModeFromPlc 异常", ex); } catch { } }
+		}
+
+		/// <summary>自动模式切入时停止实时取像（幂等：已停止时直接返回），回报位复位由触发循环收尾统一做</summary>
+		private void StopRealtimeByAutoMode()
+		{
+			if (uiButton4.Text != "停止实时") return;
+			TriggerFlag = false;
+			uiButton4.Text = "实时取像";
+			uiButton3.Enabled = true;
+			uiComboBox_cam.Enabled = true;
+			uiComboBox_axis.Enabled = true;
+			try { FastLogger.Instance.Info("【设备状态】自动模式切入，已自动停止实时取像"); } catch { }
+		}
+
+		/// <summary>窗体关闭兜底：退订事件 + 复位回报位</summary>
+		private void MainFrm_FormClosed(object sender, FormClosedEventArgs e)
+		{
+			try { if (_plc != null) _plc.EventDeviceMode -= OnDeviceModeFromPlc; } catch { }
+			if (_realtimeBitIdx >= 0)
+			{
+				try { SetRealtimeReportBit(false); } catch { }
+				_realtimeBitIdx = -1;
 			}
 		}
 

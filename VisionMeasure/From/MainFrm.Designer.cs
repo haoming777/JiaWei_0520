@@ -575,6 +575,7 @@ namespace VisionMeasure
             this.camera5CountTxt.Size = new System.Drawing.Size(67, 17);
             this.camera5CountTxt.TabIndex = 33;
             this.camera5CountTxt.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+            this.camera5CountTxt.Visible = false;
             // 
             // camera4CountTxt
             // 
@@ -586,6 +587,7 @@ namespace VisionMeasure
             this.camera4CountTxt.Size = new System.Drawing.Size(67, 17);
             this.camera4CountTxt.TabIndex = 32;
             this.camera4CountTxt.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+            this.camera4CountTxt.Visible = false;
             // 
             // camera3CountTxt
             // 
@@ -597,6 +599,7 @@ namespace VisionMeasure
             this.camera3CountTxt.Size = new System.Drawing.Size(67, 17);
             this.camera3CountTxt.TabIndex = 31;
             this.camera3CountTxt.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+            this.camera3CountTxt.Visible = false;
             // 
             // camera2CountTxt
             // 
@@ -608,6 +611,7 @@ namespace VisionMeasure
             this.camera2CountTxt.Size = new System.Drawing.Size(67, 17);
             this.camera2CountTxt.TabIndex = 30;
             this.camera2CountTxt.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+            this.camera2CountTxt.Visible = false;
             // 
             // camera1CountTxt
             // 
@@ -619,6 +623,7 @@ namespace VisionMeasure
             this.camera1CountTxt.Size = new System.Drawing.Size(67, 17);
             this.camera1CountTxt.TabIndex = 29;
             this.camera1CountTxt.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+            this.camera1CountTxt.Visible = false;
             // 
             // uiButton5
             // 
@@ -644,6 +649,7 @@ namespace VisionMeasure
             this.plcInput5Txt.Size = new System.Drawing.Size(67, 17);
             this.plcInput5Txt.TabIndex = 27;
             this.plcInput5Txt.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+            this.plcInput5Txt.Visible = false;
             // 
             // plcInput4Txt
             // 
@@ -655,6 +661,7 @@ namespace VisionMeasure
             this.plcInput4Txt.Size = new System.Drawing.Size(67, 17);
             this.plcInput4Txt.TabIndex = 26;
             this.plcInput4Txt.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+            this.plcInput4Txt.Visible = false;
             // 
             // plcInput3Txt
             // 
@@ -666,6 +673,7 @@ namespace VisionMeasure
             this.plcInput3Txt.Size = new System.Drawing.Size(67, 17);
             this.plcInput3Txt.TabIndex = 25;
             this.plcInput3Txt.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+            this.plcInput3Txt.Visible = false;
             // 
             // plcInput2Txt
             // 
@@ -677,6 +685,7 @@ namespace VisionMeasure
             this.plcInput2Txt.Size = new System.Drawing.Size(67, 17);
             this.plcInput2Txt.TabIndex = 24;
             this.plcInput2Txt.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+            this.plcInput2Txt.Visible = false;
             // 
             // plcInput1Txt
             // 
@@ -688,6 +697,7 @@ namespace VisionMeasure
             this.plcInput1Txt.Size = new System.Drawing.Size(67, 17);
             this.plcInput1Txt.TabIndex = 23;
             this.plcInput1Txt.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+            this.plcInput1Txt.Visible = false;
             // 
             // output5Txt
             // 
@@ -1048,6 +1058,7 @@ namespace VisionMeasure
             this.versionNum.Size = new System.Drawing.Size(115, 21);
             this.versionNum.TabIndex = 1;
             this.versionNum.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            this.versionNum.Visible = false;
             // 
             // uiLabel4
             // 
@@ -1061,6 +1072,7 @@ namespace VisionMeasure
             this.uiLabel4.TabIndex = 0;
             this.uiLabel4.Text = "当前检测型号：";
             this.uiLabel4.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+            this.uiLabel4.Visible = false;
             // 
             // panel36
             // 
@@ -5181,7 +5193,7 @@ namespace VisionMeasure
             // 
             // MainFrm
             // 
-            this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 17F);
+            this.AutoScaleDimensions = new System.Drawing.SizeF(11F, 24F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.Color.White;
             this.ClientSize = new System.Drawing.Size(1711, 1048);

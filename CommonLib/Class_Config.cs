@@ -422,6 +422,35 @@ namespace CommonLib
 			}
 		}
 
+		#region 正反面相机与实时回报位映射（非缓存 getter：运行期改 setup.ini 立即生效，无需重启）
+		/// <summary>正面工位物理相机号（1-5，默认4=相机四"夹尾正面"）</summary>
+		public int FrontCamNo
+		{
+			get
+			{
+				return GetPrivateProfileInt("camera", "frontCamNo", 4, _iniPath);
+			}
+		}
+
+		/// <summary>反面工位物理相机号（1-5，默认5=相机五"夹尾反面"）</summary>
+		public int BackCamNo
+		{
+			get
+			{
+				return GetPrivateProfileInt("camera", "backCamNo", 5, _iniPath);
+			}
+		}
+
+		/// <summary>正面实时回报位索引：0=正面→DB1000.DBX72.0（PLC的"相机1实时"），1=正面→DB1000.DBX72.1；反面自动取另一位</summary>
+		public int RealtimeBitFront
+		{
+			get
+			{
+				return GetPrivateProfileInt("camera", "realtimeBitFront", 0, _iniPath);
+			}
+		}
+		#endregion
+
 		public string ControlIP
 		{
 			get

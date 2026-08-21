@@ -20,6 +20,8 @@ namespace PLC调试.Class
             // 转发内部事件到接口事件
             _inner.EventConnectState += (state, error) => EventConnectState?.Invoke(state, error);
             _inner.EventCount += (c1, c2, c3, c4, c5) => EventCount?.Invoke(c1, c2, c3, c4, c5);
+            _inner.EventDeviceMode += (isAuto, raw) => EventDeviceMode?.Invoke(isAuto, raw);
+            _inner.EventCylinderState += (disabled) => EventCylinderState?.Invoke(disabled);
         }
 
         /// <summary>获取内部 HCModbusClass 实例（相机设置窗体等需要直接引用）</summary>
@@ -27,8 +29,12 @@ namespace PLC调试.Class
 
         public bool modbusState => _inner.modbusState;
 
+        public bool IsAutoMode => _inner.IsAutoMode;
+
         public event PlcConnectStateHandler EventConnectState;
         public event PlcCountHandler EventCount;
+        public event PlcDeviceModeHandler EventDeviceMode;
+        public event PlcCylinderStateHandler EventCylinderState;
 
         public bool ConnectModbus()
         {

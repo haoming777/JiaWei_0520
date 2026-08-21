@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Threading.Tasks;
 using OpenCvSharp;
@@ -23,6 +25,36 @@ namespace AIsdk
 		private int deviceId = 0;
 		Stopwatch stopwatch = new Stopwatch();
 		public ModuleType moduleType { get; set; }
+
+		/// <summary>原生级致命异常：进程内存已不可信，记录后必须重新抛出（由全局处理器转储退出），绝不能吞掉继续跑</summary>
+		private static bool IsFatal(Exception ex)
+		{
+			if (ex == null) return false;
+			for (Exception e = ex; e != null; e = e.InnerException)
+			{
+				if (e is AccessViolationException ||
+					e is System.Runtime.InteropServices.SEHException ||
+					e is OutOfMemoryException ||
+					e is StackOverflowException)
+					return true;
+			}
+			return false;
+		}
+
+		/// <summary>崩溃兜底日志：直接同步写文件（AIsdk 不引用 CommonLib，无法使用 FastLogger）</summary>
+		private static void WriteFatalLog(Exception ex)
+		{
+			try
+			{
+				string dir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Logs");
+				if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+				string file = Path.Combine(dir, "crash_" + DateTime.Now.ToString("yyyyMMdd") + ".log");
+				string line = "[" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + "] [CRASH] [ViMo原生崩溃] "
+					+ ex.GetType().Name + " | " + ex.Message + "\r\n堆栈: " + (ex.StackTrace ?? "");
+				File.AppendAllText(file, line + Environment.NewLine);
+			}
+			catch { }
+		}
 
 		IPipelines pipelines1;
 		Solution solution;
@@ -43,6 +75,7 @@ namespace AIsdk
 
 
 
+		[HandleProcessCorruptedStateExceptions] // 允许捕获 ViMo 原生层的访问违例等致命异常并留痕
 		public int Init(string modelPath, bool usegup, int deviceid, string modelid)
 		{
 			try
@@ -59,11 +92,13 @@ namespace AIsdk
 			}
 			catch (Exception ex)
 			{
+				if (IsFatal(ex)) { WriteFatalLog(ex); throw; } // 原生致命异常：留痕后重新抛出，走全局处理器转储退出
 				ErrorInfo = ex.ToString();
 				return ERROR_FAILED;
 			}
 		}
 
+		[HandleProcessCorruptedStateExceptions]
 		public int Init_Segmentation(string modelPath, bool usegup, int deviceid, string modelid)
 		{
 			try
@@ -79,11 +114,13 @@ namespace AIsdk
 			}
 			catch (Exception ex)
 			{
+				if (IsFatal(ex)) { WriteFatalLog(ex); throw; } // 原生致命异常：留痕后重新抛出，走全局处理器转储退出
 				ErrorInfo = ex.ToString();
 				return ERROR_FAILED;
 			}
 		}
 
+		[HandleProcessCorruptedStateExceptions]
 		public int Init_OrderOcr(string modelPath, bool usegup, int deviceid, string modelid)
 		{
 			try
@@ -102,11 +139,13 @@ namespace AIsdk
 			}
 			catch (Exception ex)
 			{
+				if (IsFatal(ex)) { WriteFatalLog(ex); throw; } // 原生致命异常：留痕后重新抛出，走全局处理器转储退出
 				ErrorInfo = ex.ToString();
 				return ERROR_FAILED;
 			}
 		}
 
+		[HandleProcessCorruptedStateExceptions]
 		public int Init_Class(string modelPath, bool usegup, int deviceid, string modelid)
 		{
 			try
@@ -122,6 +161,7 @@ namespace AIsdk
 			}
 			catch (Exception ex)
 			{
+				if (IsFatal(ex)) { WriteFatalLog(ex); throw; } // 原生致命异常：留痕后重新抛出，走全局处理器转储退出
 				ErrorInfo = ex.ToString();
 				return ERROR_FAILED;
 			}
@@ -130,6 +170,7 @@ namespace AIsdk
 		/// <summary>
 		/// SDK Run接口
 		/// </summary>
+		[HandleProcessCorruptedStateExceptions]
 		public int Run(Mat image, out ResponseList<DetectionResponse> results)
 		{
 			try
@@ -142,6 +183,7 @@ namespace AIsdk
 			}
 			catch (Exception ex)
 			{
+				if (IsFatal(ex)) { WriteFatalLog(ex); throw; } // 原生致命异常：留痕后重新抛出，走全局处理器转储退出
 				results = null;
 				ErrorInfo = ex.ToString();
 				return ERROR_FAILED;
@@ -151,6 +193,7 @@ namespace AIsdk
 		/// <summary>
 		/// SDK Run接口
 		/// </summary>
+		[HandleProcessCorruptedStateExceptions]
 		public int Run(Mat image, out ResponseList<SegmentationResponse> results)
 		{
 			try
@@ -163,6 +206,7 @@ namespace AIsdk
 			}
 			catch (Exception ex)
 			{
+				if (IsFatal(ex)) { WriteFatalLog(ex); throw; } // 原生致命异常：留痕后重新抛出，走全局处理器转储退出
 				results = null;
 				ErrorInfo = ex.ToString();
 				return ERROR_FAILED;
@@ -172,6 +216,7 @@ namespace AIsdk
 		/// <summary>
 		/// SDK Run接口
 		/// </summary>
+		[HandleProcessCorruptedStateExceptions]
 		public int Run(Mat image, out ResponseList<ClassificationResponse> results)
 		{
 			try
@@ -184,12 +229,14 @@ namespace AIsdk
 			}
 			catch (Exception ex)
 			{
+				if (IsFatal(ex)) { WriteFatalLog(ex); throw; } // 原生致命异常：留痕后重新抛出，走全局处理器转储退出
 				results = null;
 				ErrorInfo = ex.ToString();
 				return ERROR_FAILED;
 			}
 		}
 
+		[HandleProcessCorruptedStateExceptions]
 		public int Run(Mat image, out ResponseList<OcrResponse> results)
 		{
 			try
@@ -202,12 +249,14 @@ namespace AIsdk
 			}
 			catch (Exception ex)
 			{
+				if (IsFatal(ex)) { WriteFatalLog(ex); throw; } // 原生致命异常：留痕后重新抛出，走全局处理器转储退出
 				results = null;
 				ErrorInfo = ex.ToString();
 				return ERROR_FAILED;
 			}
 		}
 
+		[HandleProcessCorruptedStateExceptions]
 		public int Run_OrderOcr(Mat image, out OcrResponse results)
 		{
 			try
@@ -220,12 +269,14 @@ namespace AIsdk
 			}
 			catch (Exception ex)
 			{
+				if (IsFatal(ex)) { WriteFatalLog(ex); throw; } // 原生致命异常：留痕后重新抛出，走全局处理器转储退出
 				results = null;
 				ErrorInfo = ex.ToString();
 				return ERROR_FAILED;
 			}
 		}
 
+		[HandleProcessCorruptedStateExceptions]
 		public int Run_OrderOcr(Mat image, Rect roi, out OcrResponse results)
 		{
 			try
@@ -238,12 +289,14 @@ namespace AIsdk
 			}
 			catch (Exception ex)
 			{
+				if (IsFatal(ex)) { WriteFatalLog(ex); throw; } // 原生致命异常：留痕后重新抛出，走全局处理器转储退出
 				results = null;
 				ErrorInfo = ex.ToString();
 				return ERROR_FAILED;
 			}
 		}
 
+		[HandleProcessCorruptedStateExceptions]
 		public int Run_Segmentation(Mat image, out SegmentationResponse results)
 		{
 			try
@@ -256,11 +309,13 @@ namespace AIsdk
 			}
 			catch (Exception ex)
 			{
+				if (IsFatal(ex)) { WriteFatalLog(ex); throw; } // 原生致命异常：留痕后重新抛出，走全局处理器转储退出
 				results = null;
 				ErrorInfo = ex.ToString();
 				return ERROR_FAILED;
 			}
 		}
+		[HandleProcessCorruptedStateExceptions]
 		public int Run_Segmentation(Mat image,Rect roi, out SegmentationResponse results)
 		{
 			try
@@ -273,12 +328,14 @@ namespace AIsdk
 			}
 			catch (Exception ex)
 			{
+				if (IsFatal(ex)) { WriteFatalLog(ex); throw; } // 原生致命异常：留痕后重新抛出，走全局处理器转储退出
 				results = null;
 				ErrorInfo = ex.ToString();
 				return ERROR_FAILED;
 			}
 		}
 
+		[HandleProcessCorruptedStateExceptions]
 		public int Run_Class(Mat image, Rect roi, out ClassificationResponse results)
 		{
 			try
@@ -291,6 +348,7 @@ namespace AIsdk
 			}
 			catch (Exception ex)
 			{
+				if (IsFatal(ex)) { WriteFatalLog(ex); throw; } // 原生致命异常：留痕后重新抛出，走全局处理器转储退出
 				results = null;
 				ErrorInfo = ex.ToString();
 				return ERROR_FAILED;

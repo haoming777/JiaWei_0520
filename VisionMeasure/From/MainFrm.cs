@@ -72,6 +72,10 @@ namespace VisionMeasure
 
 		public Vision vision = new Vision();
 		public IPlcCommunication modbusClass; // 运行时根据配置选择 S7-1200 或 HCModbus
+
+		/// <summary>当前是否自动模式（由 PLC 设备状态事件驱动，值=4 为自动；首读成功前按手动处理）</summary>
+		private volatile bool _isAutoMode = false;
+		public bool IsAutoMode => _isAutoMode;
 		XLUsbDogClass UsbDogClass = new XLUsbDogClass();
 
 		private AsyncDatabaseRecorder _dbRecorder;
@@ -1300,6 +1304,8 @@ namespace VisionMeasure
 
 				modbusClass.EventConnectState += ModbusConnectState;
 				modbusClass.EventCount += PLCCountMethod;
+				modbusClass.EventDeviceMode += DeviceModeChanged;
+				modbusClass.EventCylinderState += CylinderStateChanged;
 
 				if (modbusClass.ConnectModbus())
 				{
@@ -1620,17 +1626,74 @@ namespace VisionMeasure
 			}
 		}
 
+		/// <summary>跨线程安全更新状态灯（相机/PLC回调线程调用，控件可能已释放或正处于关闭中）</summary>
+		private void TrySetLight(Sunny.UI.UILight light, Sunny.UI.UILightState state)
+		{
+			try
+			{
+				if (light == null || light.IsDisposed || _isClosing) return;
+				if (light.InvokeRequired)
+				{
+					light.BeginInvoke(new Action(() =>
+					{
+						try { if (!light.IsDisposed) light.State = state; } catch { }
+					}));
+				}
+				else
+				{
+					light.State = state;
+				}
+			}
+			catch { }
+		}
+
 		private void ModbusConnectState(bool state, string error)
 		{
-			FastLogger.Instance.Info($"ModbusConnectState: {error}");
-			if (state)
+			try
 			{
-				PlcState.State = Sunny.UI.UILightState.On;
+				FastLogger.Instance.Info($"ModbusConnectState: {error}");
+				if (state)
+				{
+					TrySetLight(PlcState, Sunny.UI.UILightState.On);
+				}
+				else
+				{
+					TrySetLight(PlcState, Sunny.UI.UILightState.Off);
+					try { modbusClass.Reconnect(); } catch (Exception ex) { FastLogger.Instance.Error("PLC重连调用异常", ex); }
+				}
 			}
-			else
+			catch (Exception ex)
 			{
-				PlcState.State = Sunny.UI.UILightState.Off;
-				modbusClass.Reconnect();
+				// 事件来自PLC通讯线程：异常绝不能逃出回调（后台线程未处理异常=进程直接终止）
+				try { FastLogger.Instance.Error("ModbusConnectState 回调异常", ex); } catch { }
+			}
+		}
+
+		/// <summary>设备运行模式变化（PLC后台线程调用：只写字段+日志，不碰UI）</summary>
+		private void DeviceModeChanged(bool isAuto, short rawValue)
+		{
+			try
+			{
+				_isAutoMode = isAuto;
+				FastLogger.Instance.Info($"【设备状态】运行模式变化: {(isAuto ? "自动" : "手动")} (PLC原始值={rawValue})");
+			}
+			catch (Exception ex)
+			{
+				try { FastLogger.Instance.Error("DeviceModeChanged 回调异常", ex); } catch { }
+			}
+		}
+
+		/// <summary>气缸禁用状态变化（PLC后台线程调用：只写日志，两路PLC分开标识）</summary>
+		private void CylinderStateChanged(bool disabled)
+		{
+			try
+			{
+				string plcName = (modbusClass is HCModbusAdapter) ? "Modbus" : "S7-1200";
+				FastLogger.Instance.Info($"【气缸状态】[{plcName}] 气缸状态变化: {(disabled ? "禁用(TRUE)" : "启用(FALSE)")}");
+			}
+			catch (Exception ex)
+			{
+				try { FastLogger.Instance.Error("CylinderStateChanged 回调异常", ex); } catch { }
 			}
 		}
 
@@ -1860,41 +1923,59 @@ namespace VisionMeasure
 		#region 实现相机接口
 		public void OnCameraClose(string cameraName, string cameraKey)
 		{
-			FastLogger.Instance.Info(string.Format("相机【{0}】关闭连接", cameraKey));
-			if (FastLogger.IsInitialized) FastLogger.Instance.Debug("相机断连: " + cameraName + " key=" + cameraKey);
-			if (camera1SDK != null && camera1SDK.curCameraKey.Equals(cameraKey))
-				camera1State.State = Sunny.UI.UILightState.Off;
-			else if (camera2SDK != null && camera2SDK.curCameraKey.Equals(cameraKey))
-				camera2State.State = Sunny.UI.UILightState.Off;
-			else if (camera3SDK != null && camera3SDK.curCameraKey.Equals(cameraKey))
-				camera3State.State = Sunny.UI.UILightState.Off;
-			else if (camera4SDK != null && camera4SDK.curCameraKey.Equals(cameraKey))
-				camera4State.State = Sunny.UI.UILightState.Off;
-			else if (camera5SDK != null && camera5SDK.curCameraKey.Equals(cameraKey))
-				camera5State.State = Sunny.UI.UILightState.Off;
+			try
+			{
+				FastLogger.Instance.Info(string.Format("相机【{0}】关闭连接", cameraKey));
+				if (FastLogger.IsInitialized) FastLogger.Instance.Debug("相机断连: " + cameraName + " key=" + cameraKey);
+				if (camera1SDK != null && camera1SDK.curCameraKey.Equals(cameraKey))
+					TrySetLight(camera1State, Sunny.UI.UILightState.Off);
+				else if (camera2SDK != null && camera2SDK.curCameraKey.Equals(cameraKey))
+					TrySetLight(camera2State, Sunny.UI.UILightState.Off);
+				else if (camera3SDK != null && camera3SDK.curCameraKey.Equals(cameraKey))
+					TrySetLight(camera3State, Sunny.UI.UILightState.Off);
+				else if (camera4SDK != null && camera4SDK.curCameraKey.Equals(cameraKey))
+					TrySetLight(camera4State, Sunny.UI.UILightState.Off);
+				else if (camera5SDK != null && camera5SDK.curCameraKey.Equals(cameraKey))
+					TrySetLight(camera5State, Sunny.UI.UILightState.Off);
+			}
+			catch (Exception ex)
+			{
+				// 相机SDK原生回调线程：异常逃出回调会杀死进程，必须全兜住
+				try { FastLogger.Instance.Error("OnCameraClose 回调异常", ex); } catch { }
+			}
 		}
 
 		public void OnCameraOpen(string cameraName, string cameraKey)
 		{
-			FastLogger.Instance.Info(string.Format("相机【{0}】连接", cameraKey));
-			if (camera1SDK != null && camera1SDK.curCameraKey.Equals(cameraKey))
-				camera1State.State = Sunny.UI.UILightState.On;
-			else if (camera2SDK != null && camera2SDK.curCameraKey.Equals(cameraKey))
-				camera2State.State = Sunny.UI.UILightState.On;
-			else if (camera3SDK != null && camera3SDK.curCameraKey.Equals(cameraKey))
-				camera3State.State = Sunny.UI.UILightState.On;
-			else if (camera4SDK != null && camera4SDK.curCameraKey.Equals(cameraKey))
-				camera4State.State = Sunny.UI.UILightState.On;
-			else if (camera5SDK != null && camera5SDK.curCameraKey.Equals(cameraKey))
-				camera5State.State = Sunny.UI.UILightState.On;
+			try
+			{
+				FastLogger.Instance.Info(string.Format("相机【{0}】连接", cameraKey));
+				if (camera1SDK != null && camera1SDK.curCameraKey.Equals(cameraKey))
+					TrySetLight(camera1State, Sunny.UI.UILightState.On);
+				else if (camera2SDK != null && camera2SDK.curCameraKey.Equals(cameraKey))
+					TrySetLight(camera2State, Sunny.UI.UILightState.On);
+				else if (camera3SDK != null && camera3SDK.curCameraKey.Equals(cameraKey))
+					TrySetLight(camera3State, Sunny.UI.UILightState.On);
+				else if (camera4SDK != null && camera4SDK.curCameraKey.Equals(cameraKey))
+					TrySetLight(camera4State, Sunny.UI.UILightState.On);
+				else if (camera5SDK != null && camera5SDK.curCameraKey.Equals(cameraKey))
+					TrySetLight(camera5State, Sunny.UI.UILightState.On);
+			}
+			catch (Exception ex)
+			{
+				// 相机SDK原生回调线程：异常逃出回调会杀死进程，必须全兜住
+				try { FastLogger.Instance.Error("OnCameraOpen 回调异常", ex); } catch { }
+			}
 		}
 
 		public void OnCameraConnectLoss(string cameraName, string cameraKey)
 		{
+			try
+			{
 			FastLogger.Instance.Info(string.Format("相机【{0}】丢失连接", cameraKey));
 			if (camera1SDK != null && camera1SDK.curCameraKey.Equals(cameraKey))
 			{
-				camera1State.State = Sunny.UI.UILightState.Off;
+				TrySetLight(camera1State, Sunny.UI.UILightState.Off);
 				if (_cam1Reconnecting) return;
 				_cam1Reconnecting = true;
 				Task.Factory.StartNew(() =>
@@ -1919,7 +2000,7 @@ namespace VisionMeasure
 			}
 			else if (camera2SDK != null && camera2SDK.curCameraKey.Equals(cameraKey))
 			{
-				camera2State.State = Sunny.UI.UILightState.Off;
+				TrySetLight(camera2State, Sunny.UI.UILightState.Off);
 				if (_cam2Reconnecting) return;
 				_cam2Reconnecting = true;
 				Task.Factory.StartNew(() =>
@@ -1944,7 +2025,7 @@ namespace VisionMeasure
 			}
 			else if (camera3SDK != null && camera3SDK.curCameraKey.Equals(cameraKey))
 			{
-				camera3State.State = Sunny.UI.UILightState.Off;
+				TrySetLight(camera3State, Sunny.UI.UILightState.Off);
 				if (_cam3Reconnecting) return;
 				_cam3Reconnecting = true;
 				Task.Factory.StartNew(() =>
@@ -1969,7 +2050,7 @@ namespace VisionMeasure
 			}
 			else if (camera4SDK != null && camera4SDK.curCameraKey.Equals(cameraKey))
 			{
-				camera4State.State = Sunny.UI.UILightState.Off;
+				TrySetLight(camera4State, Sunny.UI.UILightState.Off);
 				if (_cam4Reconnecting) return;
 				_cam4Reconnecting = true;
 				Task.Factory.StartNew(() =>
@@ -1994,7 +2075,7 @@ namespace VisionMeasure
 			}
 			else if (camera5SDK != null && camera5SDK.curCameraKey.Equals(cameraKey))
 			{
-				camera5State.State = Sunny.UI.UILightState.Off;
+				TrySetLight(camera5State, Sunny.UI.UILightState.Off);
 				if (_cam5Reconnecting) return;
 				_cam5Reconnecting = true;
 				Task.Factory.StartNew(() =>
@@ -2017,13 +2098,19 @@ namespace VisionMeasure
 					finally { _cam5Reconnecting = false; }
 				}, TaskCreationOptions.LongRunning);
 			}
+			}
+			catch (Exception ex)
+			{
+				// 相机SDK原生回调线程：异常逃出回调会杀死进程，必须全兜住
+				try { FastLogger.Instance.Error("OnCameraConnectLoss 回调异常", ex); } catch { }
+			}
 		}
 		#endregion
 
 		#region 相机图像处理方法（优化版）
 		private void OnCamera1Image(Bitmap bitmap, string cameraName, string cameraKey)
 		{
-			if (_isClosing || _Config.cameraDebug != 0 || bitmap == null) return;
+			if (_isClosing || _Config.cameraDebug != 0 || bitmap == null) { try { bitmap?.Dispose(); } catch { } return; }
 			if (_processor1 == null) { bitmap.Dispose(); return; }  // 工位未启用，丢弃图像
 			try
 			{
@@ -2033,13 +2120,14 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
+				try { bitmap?.Dispose(); } catch { } // AddImage失败时图像所有权仍在回调，必须释放，否则每帧泄漏约2MB
 				FastLogger.Instance.Error($"相机一图像处理失败: {ex.Message}");
 			}
 		}
 
 		private void OnCamera2Image(Bitmap bitmap, string cameraName, string cameraKey)
 		{
-			if (_isClosing || _Config.cameraDebug != 0 || bitmap == null) return;
+			if (_isClosing || _Config.cameraDebug != 0 || bitmap == null) { try { bitmap?.Dispose(); } catch { } return; }
 			if (_processor2 == null) { bitmap.Dispose(); return; }
 			try
 			{
@@ -2049,13 +2137,14 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
+				try { bitmap?.Dispose(); } catch { } // AddImage失败时图像所有权仍在回调，必须释放，否则每帧泄漏约2MB
 				FastLogger.Instance.Error($"相机二图像处理失败: {ex.Message}");
 			}
 		}
 
 		private void OnCamera3Image(Bitmap bitmap, string cameraName, string cameraKey)
 		{
-			if (_isClosing || _Config.cameraDebug != 0 || bitmap == null) return;
+			if (_isClosing || _Config.cameraDebug != 0 || bitmap == null) { try { bitmap?.Dispose(); } catch { } return; }
 			if (_processor3 == null) { bitmap.Dispose(); return; }
 			try
 			{
@@ -2065,6 +2154,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
+				try { bitmap?.Dispose(); } catch { } // AddImage失败时图像所有权仍在回调，必须释放，否则每帧泄漏约2MB
 				FastLogger.Instance.Error($"相机三图像处理失败: {ex.Message}");
 			}
 		}
@@ -2076,8 +2166,8 @@ namespace VisionMeasure
 			if (callbackCount <= 1 || callbackCount % 50 == 0)
 				try { FastLogger.Instance.Info($"[回调] Camera4 #{callbackCount} 收到图片 bitmap={bitmap != null} bmpSize={bitmap?.Width}x{bitmap?.Height}"); } catch { }
 
-			if (_isClosing) { try { FastLogger.Instance.Info("[回调] Camera4 被 _isClosing 拦截"); } catch { } return; }
-			if (_Config.cameraDebug != 0) { try { FastLogger.Instance.Info($"[回调] Camera4 被 cameraDebug={_Config.cameraDebug} 拦截"); } catch { } return; }
+			if (_isClosing) { try { FastLogger.Instance.Info("[回调] Camera4 被 _isClosing 拦截"); } catch { } try { bitmap?.Dispose(); } catch { } return; }
+			if (_Config.cameraDebug != 0) { try { FastLogger.Instance.Info($"[回调] Camera4 被 cameraDebug={_Config.cameraDebug} 拦截"); } catch { } try { bitmap?.Dispose(); } catch { } return; }
 			if (bitmap == null) { try { FastLogger.Instance.Info("[回调] Camera4 bitmap为null"); } catch { } return; }
 			if (_processor4 == null) { try { FastLogger.Instance.Info("[回调] Camera4 _processor4为null，丢弃图片"); } catch { } bitmap.Dispose(); return; }
 			try
@@ -2088,6 +2178,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
+				try { bitmap?.Dispose(); } catch { } // AddImage失败时图像所有权仍在回调，必须释放，否则每帧泄漏约2MB
 				FastLogger.Instance.Error($"相机四图像处理失败: {ex.Message}");
 				try { FastLogger.Instance.Error("Camera4 AddImage异常", ex); } catch { }
 			}
@@ -2100,8 +2191,8 @@ namespace VisionMeasure
 			if (callbackCount <= 1 || callbackCount % 50 == 0)
 				try { FastLogger.Instance.Info($"[回调] Camera5 #{callbackCount} 收到图片 bitmap={bitmap != null} bmpSize={bitmap?.Width}x{bitmap?.Height}"); } catch { }
 
-			if (_isClosing) { try { FastLogger.Instance.Info("[回调] Camera5 被 _isClosing 拦截"); } catch { } return; }
-			if (_Config.cameraDebug != 0) { try { FastLogger.Instance.Info($"[回调] Camera5 被 cameraDebug={_Config.cameraDebug} 拦截"); } catch { } return; }
+			if (_isClosing) { try { FastLogger.Instance.Info("[回调] Camera5 被 _isClosing 拦截"); } catch { } try { bitmap?.Dispose(); } catch { } return; }
+			if (_Config.cameraDebug != 0) { try { FastLogger.Instance.Info($"[回调] Camera5 被 cameraDebug={_Config.cameraDebug} 拦截"); } catch { } try { bitmap?.Dispose(); } catch { } return; }
 			if (bitmap == null) { try { FastLogger.Instance.Info("[回调] Camera5 bitmap为null"); } catch { } return; }
 			if (_processor5 == null) { try { FastLogger.Instance.Info("[回调] Camera5 _processor5为null，丢弃图片"); } catch { } bitmap.Dispose(); return; }
 			try
@@ -2112,6 +2203,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
+				try { bitmap?.Dispose(); } catch { } // AddImage失败时图像所有权仍在回调，必须释放，否则每帧泄漏约2MB
 				FastLogger.Instance.Error($"相机五图像处理失败: {ex.Message}");
 				try { FastLogger.Instance.Error("Camera5 AddImage异常", ex); } catch { }
 			}
@@ -4591,6 +4683,8 @@ namespace VisionMeasure
 				// 【P2】事件反注册，防止委托泄漏
 				try { modbusClass.EventConnectState -= ModbusConnectState; } catch { }
 				try { modbusClass.EventCount -= PLCCountMethod; } catch { }
+				try { modbusClass.EventDeviceMode -= DeviceModeChanged; } catch { }
+				try { modbusClass.EventCylinderState -= CylinderStateChanged; } catch { }
 				_cts?.Cancel();
 
 				// 停止接收新图像
@@ -4679,6 +4773,9 @@ namespace VisionMeasure
 			{
 				_closeWaitHandle?.Dispose();
 				_cts?.Dispose();
+				// 【崩溃排查】Environment.Exit 会跳过所有 finally 并直接杀进程，
+				// 关闭流程中若发生异常/卡死会被它掩盖成"程序凭空消失"——退出前必须留一条最终状态
+				try { FastLogger.Instance.Info("FormClosing finally: 关闭流程结束，即将强制退出(Environment.Exit)"); } catch { }
 				// 快速退出（200ms足够FastLogger刷写残留队列）
 				System.Threading.Thread.Sleep(200);
 				Environment.Exit(0);

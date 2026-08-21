@@ -50,6 +50,10 @@ namespace PLC调试.Class
 			doReadCount.IsBackground = true;
 			toolClass.SaveLog("doReadCount.Start");
 			doReadCount.Start();
+
+			doReadStatus = new Thread(new ThreadStart(DoReadDeviceStatus));
+			doReadStatus.IsBackground = true;
+			doReadStatus.Start();
 			toolClass.SaveLog("doReadCount.Start完成");
 			toolClass.SaveLog("PLC初始化完成");
 
@@ -69,7 +73,7 @@ namespace PLC调试.Class
 			plcState = false;
 
 			// 等待所有线程退出（最多等3秒）
-			var threads = new Thread[] { doReadT1, doKeepAlive, doState, doReadCount };
+			var threads = new Thread[] { doReadT1, doKeepAlive, doState, doReadCount, doReadStatus };
 			foreach (var t in threads)
 			{
 				if (t != null && t.IsAlive)
@@ -89,11 +93,20 @@ namespace PLC调试.Class
 
 		public event PlcCountHandler EventCount;
 
+		/// <summary>设备运行模式变化事件（DB1000.DBW323，4=自动 其他=手动）</summary>
+		public event PlcDeviceModeHandler EventDeviceMode;
+
+		/// <summary>气缸禁用状态变化事件（DB1000.DBX234.0，TRUE=禁用 FALSE=启用）</summary>
+		public event PlcCylinderStateHandler EventCylinderState;
+
 		SiemensS7Net plc = new SiemensS7Net(SiemensPLCS.S1200);
 
 		XLToolClass toolClass = new XLToolClass();
 		bool plcState = false;
 		public bool modbusState => plcState;
+
+		/// <summary>设备是否处于自动模式（DB1000.DBW323==4）。首次成功读取前返回 false（按手动处理）</summary>
+		public bool IsAutoMode => _statusInited && _lastModeRaw == 4;
 
 		/// <summary>兼容 HCModbusClass 的 modbusTcp.Write 调用</summary>
 		public void WriteRegister(string address, short value)
@@ -106,9 +119,59 @@ namespace PLC调试.Class
 			plc.Write(address, value);
 		}
 
+		/// <summary>
+		/// 读设备模式 DB1000.DBW323（4=自动）与气缸状态 DB1000.DBX234.0（TRUE=禁用），周期 100ms。
+		/// 【关键安全设计】读失败不置 plcState=false、不触发 EventConnectState——
+		/// 这两个是 PLC 程序新增地址，现场 PLC 未同步更新时会持续读失败；
+		/// 若按既有线程模式判断线，会导致 WriteResult 停止、整机停摆。
+		/// 改为节流 Warn 日志暴露问题：互锁自然失效，但不影响生产主流程。
+		/// </summary>
+		private void DoReadDeviceStatus()
+		{
+			int failCount = 0;
+			while (!_disposed)
+			{
+				try
+				{
+					Thread.Sleep(100);
+					if (!plcState) continue;
+
+					short modeRaw = plc.ReadInt16("DB1000.DBW323").Content;
+					bool cylDisabled = plc.ReadBool("DB1000.DBX234.0").Content;
+					failCount = 0;
+
+					if (!_statusInited)
+					{
+						_statusInited = true;
+						_lastModeRaw = modeRaw;
+						_cylinderDisabled = cylDisabled;
+						EventDeviceMode?.Invoke(modeRaw == 4, modeRaw);   // 首读触发事件，记录初始状态
+						EventCylinderState?.Invoke(cylDisabled);
+					}
+					else
+					{
+						if (_lastModeRaw != modeRaw) { _lastModeRaw = modeRaw; EventDeviceMode?.Invoke(modeRaw == 4, modeRaw); }
+						if (_cylinderDisabled != cylDisabled) { _cylinderDisabled = cylDisabled; EventCylinderState?.Invoke(cylDisabled); }
+					}
+				}
+				catch (Exception ex)
+				{
+					failCount++;
+					if (failCount == 1 || failCount % 600 == 0) // 首次 + 每约60秒一次节流
+						try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn(string.Format("【设备状态】读DB1000.DBW323/DBX234.0失败(第{0}次): {1}（不影响主流程；持续出现请检查PLC程序是否已包含该地址）", failCount, ex.Message)); } catch { }
+					Thread.Sleep(1000);
+				}
+			}
+		}
+
 		private readonly SendIntervalStatistics _plcSendStatistics = new SendIntervalStatistics();
 
 		Thread doReadCount;
+
+		Thread doReadStatus;                     // 设备状态/气缸状态轮询线程
+		volatile short _lastModeRaw = 0;         // DBW323 上次值
+		volatile bool _cylinderDisabled = false; // DBX234.0 上次值
+		volatile bool _statusInited = false;     // 首读成功标志
 
 		public bool ConnectModbus()
 		{

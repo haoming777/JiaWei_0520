@@ -82,6 +82,15 @@ namespace VisionMeasure.From
 							return;
 						}
 
+						// 【互锁】自动模式下禁止进入相机设置（打开后会冻结主程序检测，存在漏检风险）
+						if (mainFrm.IsAutoMode)
+						{
+							MessageBox.Show("设备处于自动模式，禁止进入相机设置！", "系统提示",
+								MessageBoxButtons.OK, MessageBoxIcon.Warning);
+							try { FastLogger.Instance.Info("【设备状态】自动模式下禁止进入相机设置（TabFrm拦截）"); } catch { }
+							return;
+						}
+
 						SetCamera.MainFrm SetCameraMainFrm = new SetCamera.MainFrm(mainFrm.g_handle, mainFrm.modbusClass);
 						//if (mainFrm.camera1SDK != null && mainFrm.camera2SDK != null)
 						//{
