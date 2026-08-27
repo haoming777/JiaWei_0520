@@ -17,6 +17,8 @@ namespace VisionMeasure
 	public class AsyncDatabaseRecorder : IDisposable
 	{
 		private readonly BlockingCollection<ProductionRecord> _recordQueue;
+		/// <summary>待写入队列当前积压条数（每分钟诊断报告水位用；队列上限50000，满则丢弃记Error）</summary>
+		public int PendingCount => _recordQueue.Count;
 		private readonly Thread _workerThread;
 		private readonly string _databasePath;
 		private readonly SQLiteHelper _dbHelper;
@@ -33,6 +35,10 @@ namespace VisionMeasure
 
 		// 汇总行缓存：记录已确认存在的 (date, shift, sku) 组合，避免每条记录都查 DB
 		private readonly HashSet<string> _summaryCache = new HashSet<string>();
+		// 【防呆】汇总口径一致性检查的去重缓存（key: 日期|班次|SKU，value: 差异快照，只在差异变化时写日志）
+		private readonly Dictionary<string, string> _summaryCheckCache = new Dictionary<string, string>();
+		// 【防呆】NG未归类缺陷计数（首3次+每100次记录一次，防止异常时刷爆日志）
+		private int _unclassifiedNgCount = 0;
 
 		// 数据保留策略：超过保留天数自动清理（默认90天）
 		private const int DATA_RETENTION_DAYS = 30; // 与图像保留天数一致，防DB文件过大
@@ -381,6 +387,12 @@ namespace VisionMeasure
 			if (defects.Count == 0)
 			{
 				record.DefectDetail = "";
+				// 【防呆】NG但无法归类到任何缺陷列（会导致汇总缺陷列合计<NG数），记录原始相机结果便于排查
+				_unclassifiedNgCount++;
+				if (_unclassifiedNgCount <= 3 || _unclassifiedNgCount % 100 == 0)
+				{
+					try { FastLogger.Instance.Warn($"【汇总防呆】NG未归类缺陷(第{_unclassifiedNgCount}次): Seq={record.SequenceId} Cam1={record.Cam1Result} Cam2={record.Cam2Result} Cam3={record.Cam3Result} Cam4={record.Cam4Result} Cam5={record.Cam5Result} 爆管={record.Cam5_BaoguanResult} 斜口={record.Cam5_XiekouResult} 未剪断={record.Cam5_WeijianduanResult} 工号={record.Cam5_CharResult} PCode={record.Cam5_PCodeResult} 色标={record.Cam5_SebiaoResult}"); } catch {}
+				}
 				return;
 			}
 
@@ -771,12 +783,14 @@ namespace VisionMeasure
 					// ══════════════════════════════════
 					string summarySql = @"
 						SELECT * FROM production_records_summary
-							ORDER BY p_date DESC, p_shift DESC, sku LIMIT 1000";
+							ORDER BY p_date DESC,
+							    CASE p_shift WHEN '夜班' THEN 1 WHEN '早班' THEN 2 WHEN '中班' THEN 3 ELSE 0 END DESC,
+							    sku LIMIT 1000";
 
 					var summaryData = _dbHelper.ExecuteQuery(summarySql);
 
 					writer.WriteLine("# ==== 汇总表（全部历史班次，倒序） ====");
-					writer.WriteLine("日期,班次,SKU,总检数,OK总数,NG总数,管内异物NG数量,管盖有无NG数量,管口圆度NG数量,正面工号不齐数量,背面工号不齐数量,P-CodeNG数量,色标对中NG数量,爆管数量,斜口数量,未剪断数量,混合多种缺陷,连续爆管剔除,良率(%),正面字符标准数量,反面字符标准数量,异物面积上限标准,爆管检测状态,斜口检测状态,未剪断检测状态,色标对中检测状态,反面字符检测状态");
+					writer.WriteLine("日期,班次,SKU,总检数,OK总数,NG总数,管内异物NG数量,管盖有无NG数量,管口圆度NG数量,正面工号不齐数量,背面工号不齐数量,P-CodeNG数量,色标对中NG数量,爆管数量,斜口数量,未剪断数量,连续爆管剔除,良率(%),正面字符标准数量,反面字符标准数量,异物面积上限标准,爆管检测状态,斜口检测状态,未剪断检测状态,色标对中检测状态,反面字符检测状态");
 
 					if (summaryData.Rows.Count > 0)
 					{
@@ -797,7 +811,7 @@ namespace VisionMeasure
 								$"{row["total_count"]},{row["ok_count"]},{row["ng_count"]}," +
 								$"{row["ng_异物"]},{row["ng_管盖有无"]},{row["ng_管口圆度"]},{row["ng_正面工号缺失"]},{row["ng_背面工号缺失"]}," +
 								$"{row["ng_PCode"]},{row["ng_色标对中"]},{row["ng_爆管"]},{row["ng_斜口"]},{row["ng_未剪断"]}," +
-								$"{row["ng_混合多种缺陷"]},{row["continuous_exclude_count"]},{row["yield_rate"]}," +
+								$"{row["continuous_exclude_count"]},{row["yield_rate"]}," +
 								$"{c1},{c2},{c3},{c4},{c5},{c6},{c7},{c8}");
 						}
 					}
@@ -902,7 +916,7 @@ private void GenerateShiftSummaryInternal(string date, string shift)
 		{
 			// 获取该班次该SKU的详细统计数据
 			// 连续爆管剔除优先级最高：被剔除的记录不计入其他缺陷统计
-			// 优先级：连续爆管剔除 > 混合缺陷 > 单一缺陷
+			// 缺陷统计：【纯优先级口径】每条非剔除NG按主缺陷（优先级最高者）归入唯一一列
 			string detailSql = @"
                 SELECT
                     COUNT(*) as total_count,
@@ -917,23 +931,19 @@ private void GenerateShiftSummaryInternal(string date, string shift)
                          AND d2.excluded_reason = '连续爆管剔除'
                                         ) as exclude_count,
                     
-                    -- 各缺陷类型统计：【口径统一】单一缺陷与混合缺陷互斥（defect_count=1），
-                    -- 混合缺陷只计入混合多种缺陷列，确保各缺陷列之和 = NG总数
-                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_异物 = 1 THEN 1 ELSE 0 END) as ng_异物,
-                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_管盖有无 = 1 THEN 1 ELSE 0 END) as ng_管盖有无,
-                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_管口圆度 = 1 THEN 1 ELSE 0 END) as ng_管口圆度,
-                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_正面工号缺失 = 1 THEN 1 ELSE 0 END) as ng_正面工号缺失,
-                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_背面工号缺失 = 1 THEN 1 ELSE 0 END) as ng_背面工号缺失,
-                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_爆管 = 1 THEN 1 ELSE 0 END) as ng_爆管,
-                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_斜口 = 1 THEN 1 ELSE 0 END) as ng_斜口,
-                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_未剪断 = 1 THEN 1 ELSE 0 END) as ng_未剪断,
-                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_PCode = 1 THEN 1 ELSE 0 END) as ng_PCode,
-                    SUM(CASE WHEN is_excluded = 0 AND defect_count = 1 AND ng_色标对中 = 1 THEN 1 ELSE 0 END) as ng_色标对中,
-                    
-                    -- 混合多种缺陷：缺陷数>=2的NG记录，但被连续爆管剔除的不计入
-                    SUM(CASE WHEN defect_count >= 2 AND final_result = 'NG' AND is_excluded = 0 THEN 1 ELSE 0 END) as ng_混合多种缺陷
-                    
-                FROM production_records_detail 
+                    -- 各缺陷类型统计：【纯优先级口径】混合缺陷按主缺陷（优先级最高）归入对应列，
+                    -- 明细层已只置主缺陷的 ng_* = 1，因此各缺陷列之和 = NG总数
+                    SUM(CASE WHEN is_excluded = 0 AND ng_异物 = 1 THEN 1 ELSE 0 END) as ng_异物,
+                    SUM(CASE WHEN is_excluded = 0 AND ng_管盖有无 = 1 THEN 1 ELSE 0 END) as ng_管盖有无,
+                    SUM(CASE WHEN is_excluded = 0 AND ng_管口圆度 = 1 THEN 1 ELSE 0 END) as ng_管口圆度,
+                    SUM(CASE WHEN is_excluded = 0 AND ng_正面工号缺失 = 1 THEN 1 ELSE 0 END) as ng_正面工号缺失,
+                    SUM(CASE WHEN is_excluded = 0 AND ng_背面工号缺失 = 1 THEN 1 ELSE 0 END) as ng_背面工号缺失,
+                    SUM(CASE WHEN is_excluded = 0 AND ng_爆管 = 1 THEN 1 ELSE 0 END) as ng_爆管,
+                    SUM(CASE WHEN is_excluded = 0 AND ng_斜口 = 1 THEN 1 ELSE 0 END) as ng_斜口,
+                    SUM(CASE WHEN is_excluded = 0 AND ng_未剪断 = 1 THEN 1 ELSE 0 END) as ng_未剪断,
+                    SUM(CASE WHEN is_excluded = 0 AND ng_PCode = 1 THEN 1 ELSE 0 END) as ng_PCode,
+                    SUM(CASE WHEN is_excluded = 0 AND ng_色标对中 = 1 THEN 1 ELSE 0 END) as ng_色标对中
+                FROM production_records_detail
                 WHERE p_shift_date = @date AND p_shift = @shift AND sku = @sku";
 
 			var parameters = new SQLiteParameter[]
@@ -953,6 +963,35 @@ private void GenerateShiftSummaryInternal(string date, string shift)
 				int ngCount = Convert.ToInt32(row["ng_count"]);
 				int excludeCount = Convert.ToInt32(row["exclude_count"]);
 
+				// 【防呆】汇总口径一致性验算（纯日志，不影响任何数据）：
+				// 1) 各缺陷列之和必须 = NG数（每条非剔除NG只置一个 ng_* = 1）
+				// 2) 总数 = OK + NG + 连续剔除
+				int defectColSum = 0;
+				foreach (string col in new[] { "ng_异物", "ng_管盖有无", "ng_管口圆度", "ng_正面工号缺失", "ng_背面工号缺失", "ng_爆管", "ng_斜口", "ng_未剪断", "ng_PCode", "ng_色标对中" })
+					defectColSum += Convert.ToInt32(row[col]);
+				int defectDelta = ngCount - defectColSum;
+				int totalDelta = totalCount - (okCount + ngCount + excludeCount);
+				if (defectDelta != 0 || totalDelta != 0)
+				{
+					string checkKey = date + "|" + shift + "|" + sku;
+					string state = defectDelta + "|" + totalDelta;
+					string lastState = null;
+					lock (_summaryCheckCache)
+					{
+						_summaryCheckCache.TryGetValue(checkKey, out lastState);
+						if (lastState != state)
+						{
+							if (_summaryCheckCache.Count > 500) _summaryCheckCache.Clear();
+							_summaryCheckCache[checkKey] = state;
+						}
+					}
+					// 只在差异值变化时写日志，避免30秒定时器重复刷屏
+					if (lastState != state)
+					{
+						try { FastLogger.Instance.Warn($"【汇总防呆】口径不一致: {date} {shift} {sku} NG={ngCount} 缺陷列合计={defectColSum}(差{defectDelta}) 总数={totalCount} OK+NG+剔除={okCount + ngCount + excludeCount}(差{totalDelta})"); } catch {}
+					}
+				}
+
 				// 良率计算：OK合格数 ÷（总检测数 - 连续剔除数）
 				double yieldRate = (totalCount - excludeCount) > 0
 					? Math.Min(100.0, Math.Max(0.0, (double)okCount / (totalCount - excludeCount) * 100))
@@ -965,13 +1004,13 @@ private void GenerateShiftSummaryInternal(string date, string shift)
                     INSERT OR REPLACE INTO production_records_summary (
                         p_date, p_shift, sku, total_count, ok_count, ng_count,
                         ng_异物, ng_管盖有无, ng_管口圆度, ng_正面工号缺失, ng_背面工号缺失,
-                        ng_爆管, ng_斜口, ng_未剪断, ng_混合多种缺陷, ng_PCode, ng_色标对中,
+                        ng_爆管, ng_斜口, ng_未剪断, ng_PCode, ng_色标对中,
                         continuous_exclude_count, yield_rate, summary_date,
                         cfg_正面字符标准, cfg_反面字符标准, cfg_异物面积上限,
                         cfg_爆管检测, cfg_斜口检测, cfg_未剪断检测, cfg_色标检测, cfg_反面字符检测
                     ) VALUES (
                         @date, @shift, @sku, @total, @ok, @ng,
-                        @ng1, @ng2, @ng3, @ng4, @ng5, @ng8, @ng9, @ng10, @ng_mix, @ng6, @ng7,
+                        @ng1, @ng2, @ng3, @ng4, @ng5, @ng8, @ng9, @ng10, @ng6, @ng7,
                         @exclude, @yield, @summary_date,
                         @cfg1, @cfg2, @cfg3, @cfg4, @cfg5, @cfg6, @cfg7, @cfg8
                     )";
@@ -994,7 +1033,6 @@ private void GenerateShiftSummaryInternal(string date, string shift)
 					new SQLiteParameter("@ng8", row["ng_爆管"]),
 					new SQLiteParameter("@ng9", row["ng_斜口"]),
 					new SQLiteParameter("@ng10", row["ng_未剪断"]),
-					new SQLiteParameter("@ng_mix", row["ng_混合多种缺陷"]),
 					new SQLiteParameter("@exclude", excludeCount),
 					new SQLiteParameter("@yield", Math.Round(yieldRate, 2)),
 					new SQLiteParameter("@summary_date", DateTime.Now.ToString("yyyy-MM-dd")),
@@ -1047,13 +1085,13 @@ private void GenerateShiftSummaryInternal(string date, string shift)
 					using (var writer = new StreamWriter(filePath, false, Encoding.UTF8))
 					{
 						// 写入表头
-						writer.WriteLine("日期,班次,SKU,总检数,OK总数,NG总数,管内异物NG数量,管盖有无NG数量,管口圆度NG数量,正面工号不齐数量,背面工号不齐数量,爆管数量,斜口数量,未剪断数量,P-CodeNG数量,色标对中NG数量,混合多种缺陷,连续爆管剔除,良率(%)");
+						writer.WriteLine("日期,班次,SKU,总检数,OK总数,NG总数,管内异物NG数量,管盖有无NG数量,管口圆度NG数量,正面工号不齐数量,背面工号不齐数量,爆管数量,斜口数量,未剪断数量,P-CodeNG数量,色标对中NG数量,连续爆管剔除,良率(%)");
 
 						DataRow row = data.Rows[0];
 						writer.WriteLine($"{row["p_date"]},{row["p_shift"]},{row["sku"]},{row["total_count"]},{row["ok_count"]},{row["ng_count"]}," +
 							$"{row["ng_异物"]},{row["ng_管盖有无"]},{row["ng_管口圆度"]},{row["ng_正面工号缺失"]},{row["ng_背面工号缺失"]}," +
 							$"{row["ng_爆管"]},{row["ng_斜口"]},{row["ng_未剪断"]},{row["ng_PCode"]},{row["ng_色标对中"]}," +
-							$"{row["ng_混合多种缺陷"]},{row["continuous_exclude_count"]},{row["yield_rate"]}");
+							$"{row["continuous_exclude_count"]},{row["yield_rate"]}");
 					}
 
 					FastLogger.Instance.Debug($"报表已导出: {filePath}");

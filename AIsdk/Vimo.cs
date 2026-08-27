@@ -26,6 +26,9 @@ namespace AIsdk
 		Stopwatch stopwatch = new Stopwatch();
 		public ModuleType moduleType { get; set; }
 
+		/// <summary>最近一次推理耗时(ms)，供现场诊断/性能告警使用（每个 Vimo 实例只被一个处理线程调用）</summary>
+		public long LastRunElapsedMs => stopwatch.ElapsedMilliseconds;
+
 		/// <summary>原生级致命异常：进程内存已不可信，记录后必须重新抛出（由全局处理器转储退出），绝不能吞掉继续跑</summary>
 		private static bool IsFatal(Exception ex)
 		{

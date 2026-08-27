@@ -701,6 +701,14 @@ namespace VisionMeasure
 		private int _startupThreadCount;       // 首次报告的线程数基线
 		private int _startupHandleCount;       // 首次报告的句柄数基线
 
+		// ──── 观测告警（第一期）：AI变慢/卡死/滞后/队列积压阈值与告警状态 ────
+		private const long AI_SLOW_ABS_MS = 2000;       // AI阶段均值绝对阈值：超过即"严重变慢"(ms)
+		private const long AI_SLOW_MIN_MS = 1000;       // AI阶段均值变慢下限(ms)
+		private const double AI_SLOW_FACTOR = 2.0;      // 相对上一分钟该相机AI均值的变慢倍数
+		private const int QUEUE_BACKLOG_WARN = 30;      // 图像处理队列积压告警阈值(帧)
+		private const int DB_QUEUE_WARN = 10000;        // DB待写入队列积压告警阈值(条)
+		private readonly Dictionary<string, bool> _aiSlowAlarm = new Dictionary<string, bool>(); // 各相机AI变慢告警状态(避免刷屏)
+
 		private void InitializePerformanceMonitoring()
 		{
 			_performanceHistory = new Dictionary<string, PerformanceStats>();
@@ -815,26 +823,69 @@ namespace VisionMeasure
 					{
 						sb.AppendLine(string.Format("══════ 耗时汇总 [{0}] (每分钟一批, 批间独立统计) ══════", csvTs));
 						double maxCamAvg = 0; string slowestCam = ""; long maxAiAvg = 0; string heaviestAiCam = "";
+						var obsAlerts = new List<string>();             // 本期观测告警收集（AI/卡死/滞后/队列/DB）
+						var rcvdByCam = new Dictionary<string, long>(); // 本分钟各相机接收帧快照（下分钟基线）
+						var aiAvgByCam = new Dictionary<string, long>();// 本分钟各相机AI均值（下分钟基准）
 						foreach (var proc in processors)
 						{
 							if (proc == null) continue;
 							var perf = proc.Performance;
-							if (perf.ProcessCount == 0) { sb.AppendLine(string.Format("[{0}] 无帧", proc.CameraName)); continue; }
+							string camName = proc.CameraName;
 
-							sb.AppendLine(perf.GetStageReport(proc.CameraName));
+							// ── 观测告警：接收/处理帧对比（先于无帧continue，卡死相机ProcessCount==0也要检测）──
+							long recvCur = GetReceivedFrames(camName);
+							rcvdByCam[camName] = recvCur;
+							long recvPrev = _prevMetrics != null && _prevMetrics.CamRcvd.TryGetValue(camName, out long rp) ? rp : 0;
+							long recvN = recvPrev > 0 ? Math.Max(0, recvCur - recvPrev) : 0;
+							if (recvN > 0 && perf.ProcessCount == 0)
+								obsAlerts.Add(string.Format("⚠{0}疑似卡死(收{1}/处理0)", camName, recvN));
+
+							if (perf.ProcessCount == 0) { sb.AppendLine(string.Format("[{0}] 无帧", camName)); continue; }
+
+							if (recvN >= 10 && perf.ProcessCount < recvN / 2)
+								obsAlerts.Add(string.Format("⚠{0}处理滞后(收{1}/处理{2})", camName, recvN, perf.ProcessCount));
+							if (proc.ImageQueueCount > QUEUE_BACKLOG_WARN)
+								obsAlerts.Add(string.Format("⚠{0}队列积压{1}", camName, proc.ImageQueueCount));
+
+							sb.AppendLine(perf.GetStageReport(camName));
 
 							// 收集诊断线索
-							if (perf.AverageTimeMs > maxCamAvg) { maxCamAvg = perf.AverageTimeMs; slowestCam = proc.CameraName; }
+							if (perf.AverageTimeMs > maxCamAvg) { maxCamAvg = perf.AverageTimeMs; slowestCam = camName; }
 							long aiT = perf.StageTimes != null && perf.StageTimes.ContainsKey("AI模型推理") ? perf.StageTimes["AI模型推理"] : 0;
 							long aiAvgMs = aiT / perf.ProcessCount;
-							if (aiAvgMs > maxAiAvg) { maxAiAvg = aiAvgMs; heaviestAiCam = proc.CameraName; }
+							aiAvgByCam[camName] = aiAvgMs;
+							if (aiAvgMs > maxAiAvg) { maxAiAvg = aiAvgMs; heaviestAiCam = camName; }
+
+							// ── 观测告警：AI耗时绝对阈值（自适应：>max(1000ms,上分钟均值×2)，或>2000ms判严重；带【AI性能】搜索标识）──
+							if (aiAvgMs > 0)
+							{
+								long prevAi = _prevMetrics != null && _prevMetrics.CamAiAvgMs.TryGetValue(camName, out long pa) ? pa : 0;
+								long threshold = Math.Max(AI_SLOW_MIN_MS, (long)(prevAi * AI_SLOW_FACTOR));
+								bool severe = aiAvgMs > AI_SLOW_ABS_MS;
+								bool slow = severe || aiAvgMs > threshold;
+								bool wasAlarm = _aiSlowAlarm.TryGetValue(camName, out bool al) && al;
+								if (slow)
+								{
+									if (!wasAlarm)
+									{
+										_aiSlowAlarm[camName] = true;
+										try { FastLogger.Instance.Warn(string.Format("【AI性能】{0} AI模型推理均值{1}ms超阈值{2}ms{3}", camName, aiAvgMs, threshold, prevAi > 0 ? string.Format("(上分钟基准={0}ms)", prevAi) : "")); } catch { }
+									}
+									obsAlerts.Add(string.Format(severe ? "⚠AI严重变慢 {0} AI均值{1}ms" : "⚠AI变慢 {0} AI均值{1}ms", camName, aiAvgMs));
+								}
+								else if (wasAlarm)
+								{
+									_aiSlowAlarm[camName] = false;
+									try { FastLogger.Instance.Info(string.Format("【AI性能】{0} 已恢复(AI均值{1}ms)", camName, aiAvgMs)); } catch { }
+								}
+							}
 
 							long aiM = perf.StageMax != null && perf.StageMax.ContainsKey("AI模型推理") ? perf.StageMax["AI模型推理"] : 0;
 							long aiMin = perf.StageMin != null && perf.StageMin.ContainsKey("AI模型推理") ? perf.StageMin["AI模型推理"] : 0;
 							string aiAvg = aiT > 0 ? ((double)aiT / perf.ProcessCount).ToString("F0") : "-";
 							string aiMinStr = aiT > 0 ? aiMin.ToString() : "-";
 							csvRows.Add(string.Format("{0},{1},{2},{3:F0},{4},{5},{6},{7},{8},,,,",
-								csvTs, proc.CameraName, perf.ProcessCount, perf.AverageTimeMs, perf.MinTimeMs, perf.MaxTimeMs, aiAvg, aiMinStr, aiM));
+								csvTs, camName, perf.ProcessCount, perf.AverageTimeMs, perf.MinTimeMs, perf.MaxTimeMs, aiAvg, aiMinStr, aiM));
 						}
 
 						sb.AppendLine(plcCnt > 0
@@ -888,7 +939,10 @@ namespace VisionMeasure
 							int logPend = 0, logDrop = 0;
 							try { logPend = FastLogger.Instance.PendingCount; logDrop = FastLogger.Instance.DroppedCount; } catch { }
 							int dbPend = _pendingRecords?.Count ?? 0;
-							qParts.Add($"日志积压:{logPend}(丢弃:{logDrop}) DB待写入:{dbPend}");
+							int dbQ = 0;
+							try { dbQ = _dbRecorder?.PendingCount ?? 0; } catch { }
+							qParts.Add($"日志积压:{logPend}(丢弃:{logDrop}) DB待写入:{dbPend} DB队列:{dbQ}");
+							if (dbQ > DB_QUEUE_WARN) obsAlerts.Add($"⚠DB队列积压{dbQ}");
 							sb.AppendLine("[流水线] " + string.Join(" | ", qParts));
 
 							// ──── 趋势对比 vs 上一分钟（不猜阈值，用跑出来的数据自己比）────
@@ -926,16 +980,19 @@ namespace VisionMeasure
 							}
 							else { trends.Add("(首份,下分钟起有对比)"); }
 
-							// 仅保留普适的绝对危险告警
+							// 普适的绝对危险告警 + 本期观测告警（AI/卡死/滞后/队列/DB）
 							var alerts = new List<string>();
 							if (cpuPct > 95) alerts.Add("⚠CPU>95%");
 							if (logDrop > 0) alerts.Add("⚠日志丢弃");
 							if (gc2Delta >= 5) alerts.Add("⚠GC暴增");
+							alerts.AddRange(obsAlerts);
 
 							// 保存快照
 							_prevMetrics = new MinuteSnapshot
 							{
 								CamAvgMs = processors.Where(p => p != null).ToDictionary(p => p.CameraName, p => p.Performance.AverageTimeMs),
+								CamAiAvgMs = aiAvgByCam,
+								CamRcvd = rcvdByCam,
 								CpuPct = cpuPct,
 								GpuUtil = gUtil,
 								GpuMemMB = gMem,
@@ -960,8 +1017,9 @@ namespace VisionMeasure
 								sb.AppendLine($"  GC累计: 0代={gc0} 1代={gc1} 2代={gc2} | 缓存驱逐累计={_cacheEvictCount}");
 							}
 
+							if (alerts.Count > 0) sb.AppendLine("══ 告警: " + string.Join(" ", alerts));
 							string trendLine = trends.Count > 0 ? "══ 趋势(vs上一分钟): " + string.Join(" | ", trends) : "";
-							if (trendLine.Length > 0) sb.AppendLine(trendLine + (alerts.Count > 0 ? " " + string.Join(" ", alerts) : ""));
+							if (trendLine.Length > 0) sb.AppendLine(trendLine);
 							sb.Append("══════════════════════════════════");
 						}
 						catch { }
@@ -998,6 +1056,20 @@ namespace VisionMeasure
 				case "Camera3": return Interlocked.CompareExchange(ref resultCount3, 0, 0);
 				case "Camera4": return Interlocked.CompareExchange(ref resultCount4, 0, 0);
 				case "Camera5": return Interlocked.CompareExchange(ref resultCount5, 0, 0);
+				default: return 0;
+			}
+		}
+
+		/// <summary>获取相机累计接收帧数（卡死/处理滞后检测用；回调线程 Interlocked 计数）</summary>
+		private long GetReceivedFrames(string cameraName)
+		{
+			switch (cameraName)
+			{
+				case "Camera1": return Interlocked.Read(ref camera1Count);
+				case "Camera2": return Interlocked.Read(ref camera2Count);
+				case "Camera3": return Interlocked.Read(ref camera3Count);
+				case "Camera4": return Interlocked.Read(ref camera4Count);
+				case "Camera5": return Interlocked.Read(ref camera5Count);
 				default: return 0;
 			}
 		}
@@ -1683,13 +1755,12 @@ namespace VisionMeasure
 			}
 		}
 
-		/// <summary>气缸禁用状态变化（PLC后台线程调用：只写日志，两路PLC分开标识）</summary>
+		/// <summary>气缸禁用状态变化（PLC后台线程调用）。日志已下沉至各 PLC 类的检测点（含旧→新方向与来源地址，关键词【气缸状态】），此处仅保留事件钩子供后续 UI 扩展</summary>
 		private void CylinderStateChanged(bool disabled)
 		{
 			try
 			{
-				string plcName = (modbusClass is HCModbusAdapter) ? "Modbus" : "S7-1200";
-				FastLogger.Instance.Info($"【气缸状态】[{plcName}] 气缸状态变化: {(disabled ? "禁用(TRUE)" : "启用(FALSE)")}");
+				// 日志由 S7-1200Class / HCModbusClass 在状态检测点直接输出，避免一条变化打两行
 			}
 			catch (Exception ex)
 			{
@@ -5871,6 +5942,8 @@ namespace VisionMeasure
 		private class MinuteSnapshot
 		{
 			public Dictionary<string, double> CamAvgMs = new Dictionary<string, double>();
+			public Dictionary<string, long> CamAiAvgMs = new Dictionary<string, long>(); // 各相机AI均值（下分钟基准）
+			public Dictionary<string, long> CamRcvd = new Dictionary<string, long>();    // 各相机接收帧快照（下分钟基线）
 			public double CpuPct, GpuUtil, GpuMemMB, PrivateMB;
 			public int Gc2Count;
 		}

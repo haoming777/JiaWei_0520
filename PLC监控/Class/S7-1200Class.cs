@@ -147,11 +147,20 @@ namespace PLC调试.Class
 						_cylinderDisabled = cylDisabled;
 						EventDeviceMode?.Invoke(modeRaw == 4, modeRaw);   // 首读触发事件，记录初始状态
 						EventCylinderState?.Invoke(cylDisabled);
+						// 【气缸状态】日志：首读记录初始状态（含来源地址；日志搜索关键词：【气缸状态】）
+						try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Info(string.Format("【气缸状态】[S7-1200] 初始状态: {0} 来源:DB1000.DBX234.0", cylDisabled ? "禁用(TRUE)" : "启用(FALSE)")); } catch { }
 					}
 					else
 					{
 						if (_lastModeRaw != modeRaw) { _lastModeRaw = modeRaw; EventDeviceMode?.Invoke(modeRaw == 4, modeRaw); }
-						if (_cylinderDisabled != cylDisabled) { _cylinderDisabled = cylDisabled; EventCylinderState?.Invoke(cylDisabled); }
+						if (_cylinderDisabled != cylDisabled)
+						{
+							bool prevDisabled = _cylinderDisabled;
+							_cylinderDisabled = cylDisabled;
+							EventCylinderState?.Invoke(cylDisabled);
+							// 【气缸状态】日志：状态变化记录旧→新方向与来源地址（日志搜索关键词：【气缸状态】）
+							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Info(string.Format("【气缸状态】[S7-1200] 状态变化: {0}→{1} 来源:DB1000.DBX234.0", prevDisabled ? "禁用(TRUE)" : "启用(FALSE)", cylDisabled ? "禁用(TRUE)" : "启用(FALSE)")); } catch { }
+						}
 					}
 				}
 				catch (Exception ex)
