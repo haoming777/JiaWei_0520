@@ -1,0 +1,209 @@
+================================================================================
+内存优化建议核实结论与改法方案
+日期：2026-08-27
+文件：VisionMeasure\From\MainFrm.cs
+================================================================================
+
+一、核实结论总表
+--------------------------------------------------------------------------------
+| # | 问题                                      | 是否属实 | 严重度        | 反馈改法是否可直接用 |
+|---|-------------------------------------------|----------|---------------|----------------------|
+| 1 | BitmapConverter.ToMat 每帧大块分配        | 属实     | 高（热路径）  | 否，有两个 bug      |
+| 2 | CacheImageForDefectSave 的 .Clone()       | 属实     | 中（存图路径）| 思路对，但租共享池会饿死处理热路径 |
+| 3 | 分割解析高频 new Mat()（Cam1每帧5个，Cam5每帧15个）| 属实 | 高（热路径）| 可用，线程模型已核实 |
+| 4 | 字符串拼接模拟位运算                      | 存在     | 低（每帧几十字节）| 思路对，语义需精确保留 |
+
+补充问题：maxCapacity 现状（详见第六节）
+
+
+二、关键实测发现（改法1的依据）
+--------------------------------------------------------------------------------
+使用现场同版本 OpenCvSharp.Extensions.dll（4.11.0.20250507，net48）编写测试程序
+实测 BitmapConverter.ToMat 行为：
+
+  1. 8bppIndexed → CV_8UC1，像素值 = palette.Entries[index].R
+     （走调色板映射，不是原始索引直通）
+  2. 24bppRgb   → CV_8UC3，BGR 字节直通
+  3. 代码中 isGrayscale 分支是活代码（现场 8bppIndexed 帧会走 GRAY2BGR）
+
+因此反馈给的零拷贝改法有两个 bug：
+  (1) 没传 stride：8bpp 行按 4 字节对齐，宽度非 4 倍数时每行错位，图像撕裂；
+  (2) 忽略调色板：直接读原始字节当灰度，只有调色板是线性灰阶时才等价。
+      相机 SDK（预编译 DLL）的调色板无法确认——现场机上若调色板非恒等映射，
+      AI 输入像素值会变化，属于结果链路风险。
+另：反馈改法把翻转做成 labelImage/labelImage1 各翻一次（4 遍），可压到 3 遍。
+
+
+三、改法 1：零拷贝转换（5 个相机统一）
+--------------------------------------------------------------------------------
+新增 MainFrm 私有辅助方法 + 每相机 2 个小字段
+（各自只被本相机 ProcessorWorker 线程访问，线程安全已核实）：
+
+    // 每相机一份（如 Cam1，共 5 组）：
+    private readonly Mat _cam1ScratchGray = new Mat();          // 8UC1 中间缓冲
+    private readonly Mat _cam1Lut = new Mat(256, 1, MatType.CV_8UC1);
+    private readonly byte[] _cam1LutBuf = new byte[256];
+
+    /// <summary>
+    /// 零拷贝将 Bitmap 写入池化 Mat，语义与 BitmapConverter.ToMat 逐像素一致。
+    /// 8bppIndexed：经调色板 R 通道 LUT 映射（实测 ToMat 行为）后 GRAY2BGR；
+    /// 24bppRgb：BGR 直通。其他格式/倒置位图（负 stride）回退 ToMat 保证正确。
+    /// </summary>
+    private bool TryCopyBitmapZeroCopy(Bitmap bitmap, Mat dest, Mat scratchGray, Mat lut, byte[] lutBuf)
+    {
+        if (bitmap == null || dest == null) return false;
+        PixelFormat fmt = bitmap.PixelFormat;
+        bool indexed = fmt == PixelFormat.Format8bppIndexed;
+        if (!indexed && fmt != PixelFormat.Format24bppRgb) return false;
+
+        BitmapData bmpData = null;
+        try
+        {
+            bmpData = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height),
+                                      ImageLockMode.ReadOnly, fmt);
+            if (bmpData.Stride < 0) return false;   // 倒置位图，罕见，回退
+
+            if (indexed)
+            {
+                ColorPalette pal = bitmap.Palette;
+                for (int i = 0; i < 256; i++) lutBuf[i] = pal.Entries[i].R;
+                Marshal.Copy(lutBuf, 0, lut.Data, 256);
+
+                // wrapper 只是指向位图内存的 Mat 头，零拷贝零分配
+                using (Mat wrapper = new Mat(bitmap.Height, bitmap.Width, MatType.CV_8UC1, bmpData.Scan0, bmpData.Stride))
+                {
+                    Cv2.LUT(wrapper, lut, scratchGray);
+                    Cv2.CvtColor(scratchGray, dest, ColorConversionCodes.GRAY2BGR);
+                }
+            }
+            else
+            {
+                using (Mat wrapper = new Mat(bitmap.Height, bitmap.Width, MatType.CV_8UC3, bmpData.Scan0, bmpData.Stride))
+                    wrapper.CopyTo(dest);
+            }
+            return true;
+        }
+        finally
+        {
+            if (bmpData != null) bitmap.UnlockBits(bmpData);
+        }
+    }
+
+5 个 ProcessCameraXImage 开头统一替换（以 Cam1 为例，原行 2328-2352）：
+
+    // 原：sourceMat = BitmapConverter.ToMat(bitmap);
+    //     ApplyCameraFlip(sourceMat,...); 灰度判断; CvtColor/CopyTo ×2
+    if (!TryCopyBitmapZeroCopy(bitmap, labelImage, _cam1ScratchGray, _cam1Lut, _cam1LutBuf))
+    {
+        using (var tmp = BitmapConverter.ToMat(bitmap))   // 回退路径，与原逻辑逐像素一致
+        {
+            if (tmp.Type() == MatType.CV_8UC1) Cv2.CvtColor(tmp, labelImage, ColorConversionCodes.GRAY2BGR);
+            else tmp.CopyTo(labelImage);
+        }
+    }
+    ApplyCameraFlip(labelImage, _cameraFlipModes[0]);
+    labelImage.CopyTo(labelImage1);    // Cam3 无 labelImage1，此行走跳过
+
+配套：
+  - 删掉各函数里 sourceMat 的声明、灰度判断、sourceMat?.Dispose()；
+  - Cam3 只有 1 个租用 Mat，只跳过 CopyTo 那行；
+  - 翻转顺序从"先翻后转"变"先转后翻"，逐像素操作等价。
+
+收益：每帧每相机消灭 1 个约 15MB 非托管 Mat + 1 个约 15MB byte[] 分配和
+      2 次全量拷贝；语义与现状逐像素一致（含调色板行为）。
+
+
+四、改法 2：缓存 Clone —— 不建议按反馈原文做，给两个选项
+--------------------------------------------------------------------------------
+反馈让 CacheImageForDefectSave 从处理池租 Mat。问题：ImageBufferPool 每相机
+maxCapacity=10（行 465-469），而缓存上限是 MAX_IMAGE_CACHE_SIZE×2=100 组
+（行 683），DB 提交延迟时缓存轻松占掉几十个 Mat → 池被存图长期占用 →
+处理热路径 RentMat 全部退化为 new Mat，比现状更差。
+
+选项 A（推荐，若现场存图常开）：给存图缓存建专用池（复用现有 ImageBufferPool
+类，不预分配、只封顶，内存峰值约等于现状最坏情况）：
+
+    // 与 _bufferPool1..5 并列初始化：
+    _saveCachePool1 = _cameraEnabled[0] ? new ImageBufferPool(width12, height12,
+        PixelFormat.Format8bppIndexed, 5, 25, 400 * 1024 * 1024) { PoolName = "Camera1_SaveCachePool" } : null;
+    // Cam2~Cam5 同理
+
+配套改动（4 处，全部集中在存图路径）：
+  - CacheImageForDefectSave（行 3671-3672）的 Clone() → cachePool.RentMat() + CopyTo；
+    覆盖旧条目时 oldBmp?.Dispose() → ReturnMat
+  - ClearImageCache（行 4030 / 4039）的 Dispose() → 按相机名 ReturnMat
+  - 关窗时在缓存清空后释放 5 个存图池
+
+选项 B（保守）：保持 Clone 不动。它受驱逐上限约束、只在存图路径，不是内存
+暴涨的根因（根因是队列无界积压，已在另一条线处理）。如果现场平时不开存图，
+直接选 B，这处不值得动。
+
+
+五、改法 3：分割 Mat 提升为成员变量（直接采纳）
+--------------------------------------------------------------------------------
+线程模型已核实：每个相机的 ProcessCameraXImage 只由自己专属的 ProcessorWorker
+单线程调用（_processorThread + _isProcessing 守卫，行 6308-6330），成员复用安全。
+
+  - Cam1：行 2376-2380 的 5 个 new Mat() 改为 _cam1CompareMask 等 5 个成员字段，
+    删掉 finally 里的 5 个 Dispose（行 2476-2480）
+  - Cam5：ProcessSegmentationBatch 的 5 个 using Mat（行 4238-4242）改为
+    _cam5CompareMask 等成员字段，去掉 using 块
+    （同帧内 3 次顺序调用复用同一组，安全）
+  - 关窗时统一 Dispose 这 10 个字段
+
+收益：Cam1 每帧消灭约 30MB 原生内存分配+释放churn（其中 labels 是 32S 格式，
+5MP 下单帧就 20MB）；Cam5 每帧消灭 15 次分配（5×3 批）。
+
+
+六、改法 4：布尔量替代位运算字符串（低收益，顺手做）
+--------------------------------------------------------------------------------
+语义已逐分支核对，等价变换：
+
+    // result_Class_str → bool
+    // （ProcessCamera5Image / ProcessSegmentationResultsFast /
+    //   ProcessSegmentationBatch 的 ref 参数改型）
+    // 爆管/未剪断/斜口 分支：IF 开启且检出 → resultClassFlaw = true
+    //   （删掉 else 的 += "0"）
+    // "空杯"分支：resultClassFlaw = false（对应原来的 = "0" 复位）
+    // 行 3384 原：
+    //   result_flaw = Convert.ToInt32(result_Class_str, 2) == 0;
+    // 改为：
+    result_flaw = !resultClassFlaw;
+    // 行 3406 调试日志改为打印 resultClassFlaw
+    // （或在该罕见分支里临时重建字符串，保持日志格式）
+
+    // result_Char_PCode_str → bool（保留"OCR模型出错视为通过"的现有行为）：
+    // 行 3311 改为：
+    result_PCode_char = !_Config.Camera5IFPCode || pCodeStrOk;
+    // 其中 pCodeStrOk = rsp_PCode_ocr == null || (index_ocr > 0 && Standard_PCode == PCode)
+
+注意：
+  - 仓库根目录 fix_seg.py 是当初生成这些 += "1" 行的补丁脚本，如果以后重跑
+    会把字符串写法带回来，建议删掉或同步改掉；
+  - label_str 的拼接牵扯缺陷归类兜底逻辑（红线附近），不动。
+
+
+七、回答 maxCapacity 现状
+--------------------------------------------------------------------------------
+每相机池：initialCapacity=3，maxCapacity=10，maxMemoryBytes=50MB
+（行 465-469）。两个发现：
+
+  1. maxMemoryBytes 是死参数——ImageBufferPool 实现里从头到尾没有引用它
+     （行 7015-7131），实际只有 _maxCapacity 生效；
+  2. 池耗尽时 RentMat 直接 new Mat 退化（行 7095-7098），不阻塞——
+     这正是改法 2 不能用共享池的原因。
+
+
+八、红线确认
+--------------------------------------------------------------------------------
+以上改动均不触碰 PLC 结果发送链路：
+  - 改法 1/3 只改图像搬运方式（逐像素等价，含调色板语义，已实测验证）；
+  - 改法 4 布尔语义与原字符串逐分支等价（含两个怪癖）；
+  - 改法 2 只动存图路径。
+
+
+九、待确认
+--------------------------------------------------------------------------------
+  1. 改法 1、3、4 是否都改？
+  2. 改法 2 选 A（专用存图池）还是 B（保持不动）？
+================================================================================

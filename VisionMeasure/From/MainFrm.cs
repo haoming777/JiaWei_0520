@@ -134,6 +134,42 @@ namespace VisionMeasure
 		private ImageBufferPool _bufferPool4;
 		private ImageBufferPool _bufferPool5;
 
+		// 【内存优化】存图缓存专用池：与处理池物理隔离，防止存图滞留把处理热路径饿到退化 new Mat
+		private ImageBufferPool _saveCachePool1;
+		private ImageBufferPool _saveCachePool2;
+		private ImageBufferPool _saveCachePool3;
+		private ImageBufferPool _saveCachePool4;
+		private ImageBufferPool _saveCachePool5;
+
+		// 【内存优化】零拷贝转换缓冲：各字段仅被对应相机的 ProcessorWorker 单线程访问
+		private readonly Mat _cam1ScratchGray = new Mat();
+		private readonly Mat _cam1Lut = new Mat(256, 1, MatType.CV_8UC1);
+		private readonly byte[] _cam1LutBuf = new byte[256];
+		private readonly Mat _cam2ScratchGray = new Mat();
+		private readonly Mat _cam2Lut = new Mat(256, 1, MatType.CV_8UC1);
+		private readonly byte[] _cam2LutBuf = new byte[256];
+		private readonly Mat _cam3ScratchGray = new Mat();
+		private readonly Mat _cam3Lut = new Mat(256, 1, MatType.CV_8UC1);
+		private readonly byte[] _cam3LutBuf = new byte[256];
+		private readonly Mat _cam4ScratchGray = new Mat();
+		private readonly Mat _cam4Lut = new Mat(256, 1, MatType.CV_8UC1);
+		private readonly byte[] _cam4LutBuf = new byte[256];
+		private readonly Mat _cam5ScratchGray = new Mat();
+		private readonly Mat _cam5Lut = new Mat(256, 1, MatType.CV_8UC1);
+		private readonly byte[] _cam5LutBuf = new byte[256];
+
+		// 【内存优化】分割解析复用 Mat：Cam1/Cam5 各自线程独占，全生命周期只分配一次
+		private readonly Mat _cam1CompareMask = new Mat();
+		private readonly Mat _cam1ComponentLabels = new Mat();
+		private readonly Mat _cam1ComponentStats = new Mat();
+		private readonly Mat _cam1ComponentCentroids = new Mat();
+		private readonly Mat _cam1SingleContourMask = new Mat();
+		private readonly Mat _cam5CompareMask = new Mat();
+		private readonly Mat _cam5ComponentLabels = new Mat();
+		private readonly Mat _cam5ComponentStats = new Mat();
+		private readonly Mat _cam5ComponentCentroids = new Mat();
+		private readonly Mat _cam5SingleContourMask = new Mat();
+
 		private DateTime _lastShiftCheckTime = DateTime.Now;
 		private string _currentShift = "";
 		private string _currentShiftDate = "";
@@ -244,6 +280,9 @@ namespace VisionMeasure
 		#region 图像缓存（用于按缺陷类型存图）
 		private ConcurrentDictionary<long, Dictionary<string, Mat>> _imageCache = new ConcurrentDictionary<long, Dictionary<string, Mat>>();
 		private ConcurrentDictionary<long, Dictionary<string, Mat>> _resultImageCache = new ConcurrentDictionary<long, Dictionary<string, Mat>>();
+		// 正在编码存图的序列号集合：驱逐/紧急清理缓存时跳过这些条目，防止其Mat被归还存图池后
+		// 又被下一帧复用覆写 → 原生imencode并发读到被改写内存 → AccessViolationException 崩溃
+		private readonly ConcurrentDictionary<long, byte> _encodingIds = new ConcurrentDictionary<long, byte>();
 		private ConcurrentDictionary<long, QueueResultItem[]> _pendingImageSaves = new ConcurrentDictionary<long, QueueResultItem[]>();
 
 		// Task数组池化，避免每帧 new Task[]
@@ -281,11 +320,18 @@ namespace VisionMeasure
 		private const int DEBUG_LOG_INTERVAL = 100; // 每N次输出一次调试日志
 
 		#region 构造函数和初始化
+		// 窗体显示时序控制：Load期间 WindowState=Maximized 会强制提前显示窗体并触发Shown，
+		// 若此时就关Loading会出现"Loading关了但主界面还没加载完/不显示"——用两个标志保证
+		// Loading一直盖到Load完成，且主界面只在Loading关闭后才恢复可见
+		private bool _loadCompleted;   // MainFrm_Load 是否已执行完
+		private bool _shownFired;      // 窗体是否已被提前显示过（Shown已触发）
+
 		public MainFrm()
 		{
 			try { FastLogger.Instance.Info("MainFrm 构造函数开始"); } catch { }
 
 			InitializeComponent();
+			this.Shown += MainFrm_Shown;   // 主窗体首次显示时：先关Loading界面再显示主窗体（保证两界面不同屏）
 
 			// 【工位配置】启动时读一次，后续不再读 INI（防呆：有人改 INI 也不生效，必须重启）
 			_cameraEnabled = new bool[5];
@@ -462,11 +508,19 @@ namespace VisionMeasure
 				int width45 = 1624;
 				int height45 = 1240;
 
-				_bufferPool1 = _cameraEnabled[0] ? new ImageBufferPool(width12, height12, PixelFormat.Format8bppIndexed, 3, 10, 50 * 1024 * 1024) { PoolName = "Camera1_Pool" } : null;
-				_bufferPool2 = _cameraEnabled[1] ? new ImageBufferPool(width12, height12, PixelFormat.Format8bppIndexed, 3, 10, 50 * 1024 * 1024) { PoolName = "Camera2_Pool" } : null;
-				_bufferPool3 = _cameraEnabled[2] ? new ImageBufferPool(width3, height3, PixelFormat.Format8bppIndexed, 3, 10, 50 * 1024 * 1024) { PoolName = "Camera3_Pool" } : null;
-				_bufferPool4 = _cameraEnabled[3] ? new ImageBufferPool(width45, height45, PixelFormat.Format8bppIndexed, 3, 10, 50 * 1024 * 1024) { PoolName = "Camera4_Pool" } : null;
-				_bufferPool5 = _cameraEnabled[4] ? new ImageBufferPool(width45, height45, PixelFormat.Format8bppIndexed, 3, 10, 50 * 1024 * 1024) { PoolName = "Camera5_Pool" } : null;
+				_bufferPool1 = _cameraEnabled[0] ? new ImageBufferPool(width12, height12, PixelFormat.Format8bppIndexed, 3, 10) { PoolName = "Camera1_Pool" } : null;
+				_bufferPool2 = _cameraEnabled[1] ? new ImageBufferPool(width12, height12, PixelFormat.Format8bppIndexed, 3, 10) { PoolName = "Camera2_Pool" } : null;
+				_bufferPool3 = _cameraEnabled[2] ? new ImageBufferPool(width3, height3, PixelFormat.Format8bppIndexed, 3, 10) { PoolName = "Camera3_Pool" } : null;
+				_bufferPool4 = _cameraEnabled[3] ? new ImageBufferPool(width45, height45, PixelFormat.Format8bppIndexed, 3, 10) { PoolName = "Camera4_Pool" } : null;
+				_bufferPool5 = _cameraEnabled[4] ? new ImageBufferPool(width45, height45, PixelFormat.Format8bppIndexed, 3, 10) { PoolName = "Camera5_Pool" } : null;
+
+				// 【内存优化】存图缓存专用池（选项A）：独立于处理池，存图滞留不饿处理热路径。
+				// initialCapacity=0：按方案"不预分配、只封顶"，避免启动即占 250MB；Mat 随存图归还逐渐入池，上限25个
+				_saveCachePool1 = _cameraEnabled[0] ? new ImageBufferPool(width12, height12, PixelFormat.Format8bppIndexed, 0, 25) { PoolName = "Camera1_SaveCachePool" } : null;
+				_saveCachePool2 = _cameraEnabled[1] ? new ImageBufferPool(width12, height12, PixelFormat.Format8bppIndexed, 0, 25) { PoolName = "Camera2_SaveCachePool" } : null;
+				_saveCachePool3 = _cameraEnabled[2] ? new ImageBufferPool(width3, height3, PixelFormat.Format8bppIndexed, 0, 25) { PoolName = "Camera3_SaveCachePool" } : null;
+				_saveCachePool4 = _cameraEnabled[3] ? new ImageBufferPool(width45, height45, PixelFormat.Format8bppIndexed, 0, 25) { PoolName = "Camera4_SaveCachePool" } : null;
+				_saveCachePool5 = _cameraEnabled[4] ? new ImageBufferPool(width45, height45, PixelFormat.Format8bppIndexed, 0, 25) { PoolName = "Camera5_SaveCachePool" } : null;
 
 				FastLogger.Instance.Debug("内存池初始化完成");
 				try { FastLogger.Instance.Info("内存池初始化完成"); } catch { }
@@ -488,6 +542,20 @@ namespace VisionMeasure
 				case CameraSelect.Camera4: return _bufferPool4;
 				case CameraSelect.Camera5: return _bufferPool5;
 				default: return _bufferPool1;
+			}
+		}
+
+		/// <summary>按缓存相机名路由存图专用池；未启用或无对应池时返回 null（调用方回退 Clone/Dispose）</summary>
+		private ImageBufferPool GetSaveCachePoolByName(string cameraName)
+		{
+			switch (cameraName)
+			{
+				case "Camera1": return _saveCachePool1;
+				case "Camera2": return _saveCachePool2;
+				case "Camera3": return _saveCachePool3;
+				case "Camera4": return _saveCachePool4;
+				case "Camera5": return _saveCachePool5;
+				default: return null;
 			}
 		}
 
@@ -1140,13 +1208,21 @@ namespace VisionMeasure
 			if (count <= 0) return;
 			try
 			{
-				var keys = _imageCache.Keys.OrderBy(k => k).Take(count).ToList();
+				// 升序遍历最旧key，跳过"正在编码"的条目：其Mat正被存图任务原生编码读取，
+				// 若此时归还池并被下一帧复用覆写 → AccessViolationException 进程崩溃。
+				// 被跳过的条目由存图任务结束时自行ClearImageCache，下轮驱逐即可回收
+				var keys = _imageCache.Keys.OrderBy(k => k).ToList();
+				int evicted = 0, skipped = 0;
 				foreach (var key in keys)
 				{
+					if (evicted >= count) break;
+					if (_encodingIds.ContainsKey(key)) { skipped++; continue; }
 					ClearImageCache(key);
 					Interlocked.Increment(ref _cacheEvictCount);
+					evicted++;
 				}
-				try { FastLogger.Instance.Warn($"[内存] 驱逐{keys.Count}个旧缓存条目, 剩余{_imageCache.Count}, 累计驱逐{_cacheEvictCount}"); } catch { }
+				if (evicted > 0 || skipped > 0)
+					try { FastLogger.Instance.Warn($"[内存] 驱逐{evicted}个旧缓存条目(跳过在编{skipped}个), 剩余{_imageCache.Count}, 累计驱逐{_cacheEvictCount}"); } catch { }
 			}
 			catch { }
 		}
@@ -1159,10 +1235,13 @@ namespace VisionMeasure
 			try
 			{
 				var keys = _imageCache.Keys.ToArray();
+				int cleared = 0;
 				foreach (var key in keys)
 				{
+					if (_encodingIds.ContainsKey(key)) continue;   // 在编条目跳过，存图任务结束后自清(晚数十毫秒，不构成内存风险)
 					ClearImageCache(key);
 					Interlocked.Increment(ref _cacheEvictCount);
+					cleared++;
 				}
 				// 同时清理滞留的存图待处理队列，防止对象池泄漏
 				{
@@ -1177,7 +1256,7 @@ namespace VisionMeasure
 					}
 				}
 				// P1: single GC only
-				try { FastLogger.Instance.Error($"[内存] 紧急清理完成，清除{keys.Length}组缓存"); } catch { }
+				try { FastLogger.Instance.Error($"[内存] 紧急清理完成，清除{cleared}组缓存(跳过在编{keys.Length - cleared}组)"); } catch { }
 			}
 			catch { }
 		}
@@ -1329,9 +1408,12 @@ namespace VisionMeasure
 		{
 			try
 			{
+				// 加载期间主窗体保持不可见（Load中 WindowState=Maximized 等操作会强制提前显示窗体，
+				// 导致与Loading界面同屏）——完全加载后由 MainFrm_Shown 先关Loading再恢复可见
+				this.Opacity = 0;
 				try { FastLogger.Instance.Info("MainFrm_Load 开始初始化"); } catch { }
 				FastLogger.Instance.Info("系统开始初始化");
-				Loading.ShowLoadingScreen();
+				Program.ReportStartupProgress(2, "正在初始化系统组件...");
 
 				//if (!UsbDogClass.FindUsbDog())
 				//{
@@ -1341,8 +1423,11 @@ namespace VisionMeasure
 				_Config.cameraDebug = 0;
 
 				LoadConfiguration();
+				Program.ReportStartupProgress(15, "正在加载系统配置...");
 				InitData();
+				Program.ReportStartupProgress(25, "正在初始化数据...");
 				InitializeAIModels();
+				Program.ReportStartupProgress(40, "正在加载AI检测模型...");
 
 				// 【PLC类型选择】根据配置或默认选择通讯协议（防呆：初始化失败回退 S7-1200）
 				try
@@ -1386,19 +1471,21 @@ namespace VisionMeasure
 					WriteResultThread.Start();
 					FastLogger.Instance.Info("Modbus连接完成");
 				}
+				Program.ReportStartupProgress(55, "PLC通讯初始化完成...");
 
 				if (_Config.IFInitCamera.ToBool())
 				{
 					InitCamera();
 				}
+				Program.ReportStartupProgress(70, "相机初始化完成...");
 
 				DeleteDaysAgoImage();
+				Program.ReportStartupProgress(80, "正在启动检测线程...");
 
-				Loading.CloseLoadingScreen(System.Windows.Forms.Application.OpenForms["Loading"]);
-				Thread.Sleep(500);
 				this.WindowState = FormWindowState.Maximized;
 
 				StartIOThreads();
+				Program.ReportStartupProgress(90, "正在启动检测流程...");
 
 				uiMonitor1.Activte = true;
 				uiMonitor2.Activte = true;
@@ -1414,14 +1501,81 @@ namespace VisionMeasure
 
 				modbusClass.RuningMethod();
 
+				Program.ReportStartupProgress(100, "初始化完成");
+				// 加载界面改在 MainFrm_Shown 中关闭：先关Loading → 再显示主界面，保证两界面不同屏
+
 				FastLogger.Instance.Info("系统初始化完成");
 				try { FastLogger.Instance.Info("MainFrm_Load 初始化完成"); } catch { }
+
+				// Load完成。若窗体已在Load期间被强制提前显示（WindowState=Maximized触发Shown），
+				// 此时才关闭Loading并恢复可见——保证Loading覆盖整个加载过程、两个界面不同屏
+				_loadCompleted = true;
+				if (_shownFired)
+				{
+					Program.CloseLoadingWindow();   // ① 先关Loading界面
+					this.Opacity = 1;               // ② 再显示主界面
+					BringToFrontAfterLoading();     // ③ 抢回前台焦点（Loading是TopMost，关闭后焦点会落到别的窗口）
+					try { FastLogger.Instance.Info("Load完成且窗体已提前显示：关闭Loading并恢复主界面可见"); } catch { }
+				}
 			}
 			catch (Exception ex)
 			{
+				_loadCompleted = true;              // 标记Load已结束，防止Shown晚到误判
+				Program.CloseLoadingWindow();
+				this.Opacity = 1;                   // 窗体若已被提前显示则恢复可见，避免错误框背后窗体全透明
+				BringToFrontAfterLoading();         // 错误框弹出前先把主窗体推到前台
 				try { FastLogger.Instance.Error("MainFrm_Load 初始化失败", ex); } catch { }
 				FastLogger.Instance.Error($"初始化时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
 				MessageBox.Show($"系统初始化失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+			}
+		}
+
+		/// <summary>
+		/// 关闭Loading后把主窗体推到前台。Loading是TopMost窗口，它关闭后Windows会把前台焦点
+		/// 还给上一个活跃窗口（桌面/资源管理器等），主窗体虽然已显示却被压在后面，
+		/// 操作员看不到、任务栏上也可能不明显——表现为"必须手动切换应用才显示"。
+		/// TopMost瞬态切换是让SetForegroundWindow在非前台进程中也能成功的标准做法。
+		/// </summary>
+		private void BringToFrontAfterLoading()
+		{
+			try
+			{
+				this.ShowInTaskbar = true;   // 无边框窗体显式确保任务栏图标（默认true，保险起见）
+				this.TopMost = true;         // 瞬态置顶，使SetForegroundWindow合法化
+				this.Activate();
+				this.BringToFront();
+				this.Focus();
+				if (this.IsHandleCreated)
+					SetForegroundWindow(this.Handle);
+				this.TopMost = false;        // 恢复非置顶，避免之后遮挡其他弹窗
+			}
+			catch { }
+		}
+
+		[DllImport("user32.dll")]
+		private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+		/// <summary>主窗体首次显示：先关闭加载界面，再恢复主窗体可见（保证Loading覆盖整个加载过程、两个界面不同屏）</summary>
+		private void MainFrm_Shown(object sender, EventArgs e)
+		{
+			try
+			{
+				_shownFired = true;
+				if (!_loadCompleted)
+				{
+					// Load期间被强制提前显示（如 WindowState=Maximized）：暂不动作，
+					// 由MainFrm_Load末尾统一关Loading、恢复可见
+					try { FastLogger.Instance.Info("窗体在Load期间被提前显示，暂保持透明等待Load完成"); } catch { }
+					return;
+				}
+				Program.CloseLoadingWindow();   // ① 先关Loading界面
+				this.Opacity = 1;               // ② 再显示主界面
+				BringToFrontAfterLoading();     // ③ 抢回前台焦点（Loading是TopMost，关闭后焦点会落到别的窗口）
+				try { FastLogger.Instance.Info("主窗体已完全加载并显示，加载界面已关闭"); } catch { }
+			}
+			catch (Exception ex)
+			{
+				try { FastLogger.Instance.Error("MainFrm_Shown 异常", ex); } catch { }
 			}
 		}
 
@@ -1747,7 +1901,8 @@ namespace VisionMeasure
 			try
 			{
 				_isAutoMode = isAuto;
-				FastLogger.Instance.Info($"【设备状态】运行模式变化: {(isAuto ? "自动" : "手动")} (PLC原始值={rawValue})");
+				// 日志关键词覆盖"切换自动/切换手动"，便于现场按关键词检索；首读成功也会触发一次（记录初始模式）
+				FastLogger.Instance.Info($"【设备状态】切换{(isAuto ? "自动" : "手动")} (PLC原始值={rawValue})");
 			}
 			catch (Exception ex)
 			{
@@ -2297,20 +2452,58 @@ namespace VisionMeasure
 			Cv2.Flip(mat, mat, cvMode);
 		}
 
+		/// <summary>
+		/// 【内存优化】零拷贝将 Bitmap 内容写入池化 Mat，语义与 BitmapConverter.ToMat 逐像素一致。
+		/// 8bppIndexed：经调色板 R 通道 LUT 映射（实测 OpenCvSharp 4.11 ToMat 行为）后 GRAY2BGR 写入 dest；
+		/// 24bppRgb：BGR 直通。其他格式/倒置位图（负 stride）返回 false，调用方回退 ToMat 保证正确。
+		/// wrapper 只是指向位图内存的 Mat 头（不拥有数据），零分配零拷贝。
+		/// </summary>
+		private bool TryCopyBitmapZeroCopy(Bitmap bitmap, Mat dest, Mat scratchGray, Mat lut, byte[] lutBuf)
+		{
+			if (bitmap == null || dest == null) return false;
+			PixelFormat fmt = bitmap.PixelFormat;
+			bool indexed = fmt == PixelFormat.Format8bppIndexed;
+			if (!indexed && fmt != PixelFormat.Format24bppRgb) return false;
+
+			BitmapData bmpData = null;
+			try
+			{
+				bmpData = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height), ImageLockMode.ReadOnly, fmt);
+				if (bmpData.Stride < 0) return false;   // 倒置位图极罕见，回退保证正确性
+
+				if (indexed)
+				{
+					ColorPalette pal = bitmap.Palette;
+					for (int i = 0; i < 256; i++) lutBuf[i] = pal.Entries[i].R;
+					Marshal.Copy(lutBuf, 0, lut.Data, 256);
+
+					using (Mat wrapper = Mat.FromPixelData(bitmap.Height, bitmap.Width, MatType.CV_8UC1, bmpData.Scan0, bmpData.Stride))
+					{
+						Cv2.LUT(wrapper, lut, scratchGray);
+						Cv2.CvtColor(scratchGray, dest, ColorConversionCodes.GRAY2BGR);
+					}
+				}
+				else
+				{
+					using (Mat wrapper = Mat.FromPixelData(bitmap.Height, bitmap.Width, MatType.CV_8UC3, bmpData.Scan0, bmpData.Stride))
+						wrapper.CopyTo(dest);
+				}
+				return true;
+			}
+			finally
+			{
+				if (bmpData != null) bitmap.UnlockBits(bmpData);
+			}
+		}
+
 		private void ProcessCamera1Image(ImageProcessingContext context)
 		{
 			if (_isClosing) return;
 			Stopwatch stageTimer = Stopwatch.StartNew();
 			long id = context.SequenceId - context.Offset;
 
-			Mat sourceMat = null;
 			Mat labelImage = null;
 			Mat labelImage1 = null;
-			Mat compareMaskMat = null;
-			Mat componentLabelsMat = null;
-			Mat componentStatsMat = null;
-			Mat componentCentroidsMat = null;
-			Mat singleContourMaskMat = null;
 			Bitmap displayBitmap = null;
 
 			var pool = GetBufferPool(CameraSelect.Camera1);
@@ -2325,10 +2518,7 @@ namespace VisionMeasure
 				bool result = true;
 				double totalArea = 0;
 
-				sourceMat = BitmapConverter.ToMat(bitmap);
-				ApplyCameraFlip(sourceMat, _cameraFlipModes[0]);
-				bool isGrayscale = sourceMat.Type() == MatType.CV_8UC1;
-
+				// 【内存优化】零拷贝转换：锁定位图内存做 LUT/直通，消灭每帧 ToMat 的大块分配
 				if (pool != null)
 				{
 					labelImage = pool.RentMat();
@@ -2340,16 +2530,17 @@ namespace VisionMeasure
 					labelImage1 = new Mat();
 				}
 
-				if (isGrayscale)
+				if (!TryCopyBitmapZeroCopy(bitmap, labelImage, _cam1ScratchGray, _cam1Lut, _cam1LutBuf))
 				{
-					Cv2.CvtColor(sourceMat, labelImage, ColorConversionCodes.GRAY2BGR);
-					Cv2.CvtColor(sourceMat, labelImage1, ColorConversionCodes.GRAY2BGR);
+					// 回退路径（罕见格式/倒置位图）：与原逻辑逐像素一致
+					using (var tmp = BitmapConverter.ToMat(bitmap))
+					{
+						if (tmp.Type() == MatType.CV_8UC1) Cv2.CvtColor(tmp, labelImage, ColorConversionCodes.GRAY2BGR);
+						else tmp.CopyTo(labelImage);
+					}
 				}
-				else
-				{
-					sourceMat.CopyTo(labelImage);
-					sourceMat.CopyTo(labelImage1);
-				}
+				ApplyCameraFlip(labelImage, _cameraFlipModes[0]);
+				labelImage.CopyTo(labelImage1);
 
 				stageTimer.Stop();
 				context.StageTimes["图像前处理"] = stageTimer.ElapsedMilliseconds;
@@ -2373,11 +2564,12 @@ namespace VisionMeasure
 
 				if (rsp_segmentation != null)
 				{
-					compareMaskMat = new Mat();
-					componentLabelsMat = new Mat();
-					componentStatsMat = new Mat();
-					componentCentroidsMat = new Mat();
-					singleContourMaskMat = new Mat();
+					// 【内存优化】复用成员缓冲：本方法仅被 Camera1 处理器单线程调用，全生命周期只分配一次
+					Mat compareMaskMat = _cam1CompareMask;
+					Mat componentLabelsMat = _cam1ComponentLabels;
+					Mat componentStatsMat = _cam1ComponentStats;
+					Mat componentCentroidsMat = _cam1ComponentCentroids;
+					Mat singleContourMaskMat = _cam1SingleContourMask;
 
 					for (int i = 0; i < rsp_segmentation.Count; i++)
 					{
@@ -2473,13 +2665,6 @@ namespace VisionMeasure
 			}
 			finally
 			{
-				compareMaskMat?.Dispose();
-				componentLabelsMat?.Dispose();
-				componentStatsMat?.Dispose();
-				componentCentroidsMat?.Dispose();
-				singleContourMaskMat?.Dispose();
-				sourceMat?.Dispose();
-
 				if (pool != null)
 				{
 					if (labelImage != null) pool.ReturnMat(labelImage);
@@ -2504,7 +2689,6 @@ namespace VisionMeasure
 			Stopwatch stageTimer = Stopwatch.StartNew();
 			long id = context.SequenceId - context.Offset;
 
-			Mat sourceMat = null;
 			Mat labelImage = null;
 			Mat labelImage1 = null;
 			Bitmap displayBitmap = null;
@@ -2520,10 +2704,7 @@ namespace VisionMeasure
 				Bitmap bitmap = context.OriginalBitmap;
 				bool result = false;
 
-				sourceMat = BitmapConverter.ToMat(bitmap);
-				ApplyCameraFlip(sourceMat, _cameraFlipModes[1]);
-				bool isGrayscale = sourceMat.Type() == MatType.CV_8UC1;
-
+				// 【内存优化】零拷贝转换：锁定位图内存做 LUT/直通，消灭每帧 ToMat 的大块分配
 				if (pool != null)
 				{
 					labelImage = pool.RentMat();
@@ -2535,16 +2716,17 @@ namespace VisionMeasure
 					labelImage1 = new Mat();
 				}
 
-				if (isGrayscale)
+				if (!TryCopyBitmapZeroCopy(bitmap, labelImage, _cam2ScratchGray, _cam2Lut, _cam2LutBuf))
 				{
-					Cv2.CvtColor(sourceMat, labelImage, ColorConversionCodes.GRAY2BGR);
-					Cv2.CvtColor(sourceMat, labelImage1, ColorConversionCodes.GRAY2BGR);
+					// 回退路径（罕见格式/倒置位图）：与原逻辑逐像素一致
+					using (var tmp = BitmapConverter.ToMat(bitmap))
+					{
+						if (tmp.Type() == MatType.CV_8UC1) Cv2.CvtColor(tmp, labelImage, ColorConversionCodes.GRAY2BGR);
+						else tmp.CopyTo(labelImage);
+					}
 				}
-				else
-				{
-					sourceMat.CopyTo(labelImage);
-					sourceMat.CopyTo(labelImage1);
-				}
+				ApplyCameraFlip(labelImage, _cameraFlipModes[1]);
+				labelImage.CopyTo(labelImage1);
 
 				stageTimer.Stop();
 				context.StageTimes["图像前处理"] = stageTimer.ElapsedMilliseconds;
@@ -2640,7 +2822,6 @@ namespace VisionMeasure
 			}
 			finally
 			{
-				sourceMat?.Dispose();
 				if (pool != null)
 				{
 					if (labelImage != null) pool.ReturnMat(labelImage);
@@ -2664,7 +2845,6 @@ namespace VisionMeasure
 			Stopwatch stageTimer = Stopwatch.StartNew();
 			long id = context.SequenceId - context.Offset;
 
-			Mat sourceMat = null;
 			Mat labelImage = null;
 			Mat resultImage = null;
 			Bitmap displayBitmap = null;
@@ -2683,10 +2863,7 @@ namespace VisionMeasure
 				double PipeDiameter = _Config.Camera3PipeDiameter;
 				double longEdge = 0;
 
-				sourceMat = BitmapConverter.ToMat(bitmap);
-				ApplyCameraFlip(sourceMat, _cameraFlipModes[2]);
-				bool isGrayscale = sourceMat.Type() == MatType.CV_8UC1;
-
+				// 【内存优化】零拷贝转换：锁定位图内存做 LUT/直通，消灭每帧 ToMat 的大块分配
 				if (pool != null)
 				{
 					labelImage = pool.RentMat();
@@ -2696,14 +2873,16 @@ namespace VisionMeasure
 					labelImage = new Mat();
 				}
 
-				if (isGrayscale)
+				if (!TryCopyBitmapZeroCopy(bitmap, labelImage, _cam3ScratchGray, _cam3Lut, _cam3LutBuf))
 				{
-					Cv2.CvtColor(sourceMat, labelImage, ColorConversionCodes.GRAY2BGR);
+					// 回退路径（罕见格式/倒置位图）：与原逻辑逐像素一致
+					using (var tmp = BitmapConverter.ToMat(bitmap))
+					{
+						if (tmp.Type() == MatType.CV_8UC1) Cv2.CvtColor(tmp, labelImage, ColorConversionCodes.GRAY2BGR);
+						else tmp.CopyTo(labelImage);
+					}
 				}
-				else
-				{
-					sourceMat.CopyTo(labelImage);
-				}
+				ApplyCameraFlip(labelImage, _cameraFlipModes[2]);
 
 				stageTimer.Stop();
 				context.StageTimes["图像前处理"] = stageTimer.ElapsedMilliseconds;
@@ -2799,7 +2978,6 @@ namespace VisionMeasure
 			}
 			finally
 			{
-				sourceMat?.Dispose();
 				if (pool != null)
 				{
 					if (labelImage != null) pool.ReturnMat(labelImage);
@@ -2823,7 +3001,6 @@ namespace VisionMeasure
 			Stopwatch stageTimer = Stopwatch.StartNew();
 			long id = context.SequenceId - context.Offset;
 
-			Mat sourceMat = null;
 			Mat labelImage = null;
 			Mat labelImage1 = null;
 			Bitmap displayBitmap = null;
@@ -2842,10 +3019,7 @@ namespace VisionMeasure
 				string order_ocr = "";
 				int camera4StandChar = _Config.Camera1StandChar;
 
-				sourceMat = BitmapConverter.ToMat(bitmap);
-				ApplyCameraFlip(sourceMat, _cameraFlipModes[3]);
-				bool isGrayscale = sourceMat.Type() == MatType.CV_8UC1;
-
+				// 【内存优化】零拷贝转换：锁定位图内存做 LUT/直通，消灭每帧 ToMat 的大块分配
 				if (pool != null)
 				{
 					labelImage = pool.RentMat();
@@ -2857,16 +3031,17 @@ namespace VisionMeasure
 					labelImage1 = new Mat();
 				}
 
-				if (isGrayscale)
+				if (!TryCopyBitmapZeroCopy(bitmap, labelImage, _cam4ScratchGray, _cam4Lut, _cam4LutBuf))
 				{
-					Cv2.CvtColor(sourceMat, labelImage, ColorConversionCodes.GRAY2BGR);
-					Cv2.CvtColor(sourceMat, labelImage1, ColorConversionCodes.GRAY2BGR);
+					// 回退路径（罕见格式/倒置位图）：与原逻辑逐像素一致
+					using (var tmp = BitmapConverter.ToMat(bitmap))
+					{
+						if (tmp.Type() == MatType.CV_8UC1) Cv2.CvtColor(tmp, labelImage, ColorConversionCodes.GRAY2BGR);
+						else tmp.CopyTo(labelImage);
+					}
 				}
-				else
-				{
-					sourceMat.CopyTo(labelImage);
-					sourceMat.CopyTo(labelImage1);
-				}
+				ApplyCameraFlip(labelImage, _cameraFlipModes[3]);
+				labelImage.CopyTo(labelImage1);
 
 				stageTimer.Stop();
 				context.StageTimes["图像前处理"] = stageTimer.ElapsedMilliseconds;
@@ -3056,7 +3231,6 @@ namespace VisionMeasure
 			}
 			finally
 			{
-				sourceMat?.Dispose();
 				if (pool != null)
 				{
 					if (labelImage != null) pool.ReturnMat(labelImage);
@@ -3080,7 +3254,6 @@ namespace VisionMeasure
 			Stopwatch stageTimer = Stopwatch.StartNew();
 			long id = context.SequenceId - context.Offset;
 
-			Mat sourceMat = null;
 			Mat labelImage = null;
 			Mat labelImage1 = null;
 			Bitmap displayBitmap = null;
@@ -3100,17 +3273,14 @@ namespace VisionMeasure
 				bool result_char = true;
 				bool result_PCode_char = true;
 				bool result_Segmentation = true;
-				string result_Class_str = "0";
+				bool resultClassFlaw = false;   // 【内存优化】替代 result_Class_str 位运算字符串，语义逐分支等价
 				string result_class = "";
 				string order_ocr = "字符数量: 0;";
 				string pcode_ocr = "P码数量: 0;";
 				double projectionLength = 0;
 				string label_str = "";
 
-				sourceMat = BitmapConverter.ToMat(bitmap);
-				ApplyCameraFlip(sourceMat, _cameraFlipModes[4]);
-				bool isGrayscale = sourceMat.Type() == MatType.CV_8UC1;
-
+				// 【内存优化】零拷贝转换：锁定位图内存做 LUT/直通，消灭每帧 ToMat 的大块分配
 				if (pool != null)
 				{
 					labelImage = pool.RentMat();
@@ -3122,16 +3292,17 @@ namespace VisionMeasure
 					labelImage1 = new Mat();
 				}
 
-				if (isGrayscale)
+				if (!TryCopyBitmapZeroCopy(bitmap, labelImage, _cam5ScratchGray, _cam5Lut, _cam5LutBuf))
 				{
-					Cv2.CvtColor(sourceMat, labelImage, ColorConversionCodes.GRAY2BGR);
-					Cv2.CvtColor(sourceMat, labelImage1, ColorConversionCodes.GRAY2BGR);
+					// 回退路径（罕见格式/倒置位图）：与原逻辑逐像素一致
+					using (var tmp = BitmapConverter.ToMat(bitmap))
+					{
+						if (tmp.Type() == MatType.CV_8UC1) Cv2.CvtColor(tmp, labelImage, ColorConversionCodes.GRAY2BGR);
+						else tmp.CopyTo(labelImage);
+					}
 				}
-				else
-				{
-					sourceMat.CopyTo(labelImage);
-					sourceMat.CopyTo(labelImage1);
-				}
+				ApplyCameraFlip(labelImage, _cameraFlipModes[4]);
+				labelImage.CopyTo(labelImage1);
 
 				stageTimer.Stop();
 				context.StageTimes["图像前处理"] = stageTimer.ElapsedMilliseconds;
@@ -3252,7 +3423,8 @@ namespace VisionMeasure
 				#endregion
 
 				#region 处理P-Code结果
-				string result_Char_PCode_str = "0";
+				// 【内存优化】pCodeStrOk 替代 result_Char_PCode_str 位运算字符串，语义逐分支等价
+				bool pCodeStrOk;
 				string PCode = "";
 				index_ocr = 0;
 
@@ -3284,36 +3456,23 @@ namespace VisionMeasure
 
 					if (index_ocr > 0)
 					{
-						if (_Config.Standard_PCode == PCode)
-						{
-							result_Char_PCode_str += "0";
-						}
-						else
-						{
-							result_Char_PCode_str += "1";
-						}
+						pCodeStrOk = _Config.Standard_PCode == PCode;
 						pcode_ocr = $"P码内容: {PCode}";
 					}
 					else
 					{
 						pcode_ocr = "P码数量: 0;";
-						result_Char_PCode_str += "1";
+						pCodeStrOk = false;
 					}
 				}
 				else
 				{
-					result_Char_PCode_str += "0";
+					// 保留原怪癖：OCR模型出错时按通过处理
+					pCodeStrOk = true;
 					FastLogger.Instance.Error($"OCR模型出错：rsp_ocr == null");
 				}
 
-				if (_Config.Camera5IFPCode)
-				{
-					result_PCode_char = Convert.ToInt32(result_Char_PCode_str, 2) == 0;
-				}
-				else
-				{
-					result_PCode_char = true;
-				}
+				result_PCode_char = !_Config.Camera5IFPCode || pCodeStrOk;
 				if (!result_PCode_char && rsp_PCode_ocr != null)
 				{
 					foreach (var item in rsp_PCode_ocr)
@@ -3333,7 +3492,7 @@ namespace VisionMeasure
 				if (rsp_color != null && rsp_color.Count > 0 && rsp_segmentation != null && rsp_segmentation.Count > 0 && rsp_rests != null && rsp_rests.Count > 0)
 				{
 					segmentationResult = ProcessSegmentationResultsFast(
-						rsp_segmentation, rsp_color, rsp_rests, labelImage1, ref result_class, ref result_Class_str, ref label_str);
+						rsp_segmentation, rsp_color, rsp_rests, labelImage1, ref result_class, ref resultClassFlaw, ref label_str);
 
 					if (segmentationResult.DetectedBoth)
 					{
@@ -3381,7 +3540,7 @@ namespace VisionMeasure
 					result_Segmentation = true;
 				}
 
-				result_flaw = Convert.ToInt32(result_Class_str, 2) == 0;
+				result_flaw = !resultClassFlaw;
 				#endregion
 
 				if (label_str.Contains("空杯"))
@@ -3403,7 +3562,7 @@ namespace VisionMeasure
 				}
 				else if (!result && !result_flaw && string.IsNullOrEmpty(result_class))
 				{
-					if (FastLogger.DebugEnabled) FastLogger.Instance.Debug($"[Camera5] ID:{id} ⚠ 缺陷模型标记NG但result_class为空! 原始标签:[{label_str}], result_Class_str:[{result_Class_str}]");
+					if (FastLogger.DebugEnabled) FastLogger.Instance.Debug($"[Camera5] ID:{id} ⚠ 缺陷模型标记NG但result_class为空! 原始标签:[{label_str}], resultClassFlaw:[{resultClassFlaw}]");
 					// 用label_str兜底：写入原始模型标签
 					if (!string.IsNullOrEmpty(label_str))
 						result_class = "标签:" + label_str.Replace(";", ",").TrimEnd(',', ' ');
@@ -3482,7 +3641,6 @@ namespace VisionMeasure
 			}
 			finally
 			{
-				sourceMat?.Dispose();
 				if (pool != null)
 				{
 					if (labelImage != null) pool.ReturnMat(labelImage);
@@ -3665,18 +3823,35 @@ namespace VisionMeasure
 			{
 				EvictOldestCacheEntries(1);
 			}
+			// 【内存优化】改法2：专用存图池租用替代 Clone()，与处理池物理隔离，防止存图滞留饿死处理热路径
+			var savePool = GetSaveCachePoolByName(cameraName);
 			Mat originalCopy = null, resultCopy = null;
+			bool stored = false;   // 标记副本是否已存入缓存（异常路径据此决定归还还是释放）
 			try
 			{
-				originalCopy = original != null ? original.Clone() : null;
-				resultCopy = result != null ? result.Clone() : null;
+				if (original != null)
+				{
+					originalCopy = savePool != null ? savePool.RentMat() : new Mat();
+					original.CopyTo(originalCopy);
+				}
+				if (result != null)
+				{
+					resultCopy = savePool != null ? savePool.RentMat() : new Mat();
+					result.CopyTo(resultCopy);
+				}
 
 				// 线程安全：GetOrAdd + lock，防止 AddOrUpdate 的 addFactory 并发覆盖
 				var origDict = _imageCache.GetOrAdd(sequenceId, _ => new Dictionary<string, Mat>());
 				lock (origDict)
 				{
 					if (origDict.TryGetValue(cameraName, out var oldBmp))
-						oldBmp?.Dispose();
+					{
+						if (oldBmp != null)
+						{
+							if (savePool != null) savePool.ReturnMat(oldBmp);
+							else oldBmp.Dispose();
+						}
+					}
 					origDict[cameraName] = originalCopy;
 				}
 
@@ -3684,14 +3859,33 @@ namespace VisionMeasure
 				lock (resDict)
 				{
 					if (resDict.TryGetValue(cameraName, out var oldBmp))
-						oldBmp?.Dispose();
+					{
+						if (oldBmp != null)
+						{
+							if (savePool != null) savePool.ReturnMat(oldBmp);
+							else oldBmp.Dispose();
+						}
+					}
 					resDict[cameraName] = resultCopy;
 				}
+				stored = true;
 			}
 			catch (Exception ex)
 			{
-				originalCopy?.Dispose();
-				resultCopy?.Dispose();
+				// 异常路径：仅回收未存入缓存的 Mat（存入后缓存仍持有，归还会导致双重持有）
+				if (!stored)
+				{
+					if (savePool != null)
+					{
+						if (originalCopy != null) savePool.ReturnMat(originalCopy);
+						if (resultCopy != null) savePool.ReturnMat(resultCopy);
+					}
+					else
+					{
+						originalCopy?.Dispose();
+						resultCopy?.Dispose();
+					}
+				}
 				FastLogger.Instance.Error($"缓存图像异常: {ex.Message}");
 			}
 		}
@@ -3773,6 +3967,10 @@ namespace VisionMeasure
 				var captureResults = results;
 				Task.Factory.StartNew(() =>
 				{
+					// 【AV崩溃防护】标记"正在编码"：缓存驱逐(内存压力/热路径)会跳过本条目，
+					// 防止其Mat被归还存图池后又被下一帧复用覆写，导致原生imencode读取
+					// 被并发改写的内存 → AccessViolationException 进程崩溃(托管层无法捕获)
+					_encodingIds.TryAdd(captureId, 0);
 					try
 					{
 						SaveImagesByDefectType(captureId, captureResults);
@@ -3783,6 +3981,7 @@ namespace VisionMeasure
 					}
 					finally
 					{
+						try { _encodingIds.TryRemove(captureId, out _); } catch { }
 						if (captureResults != null)
 						{
 							foreach (var item in captureResults)
@@ -4017,7 +4216,7 @@ namespace VisionMeasure
 		}
 
 		/// <summary>
-		/// 清理指定SequenceId的图像缓存（释放Bitmap并移除）
+		/// 清理指定SequenceId的图像缓存（释放Mat并移除）
 		/// </summary>
 		private void ClearImageCache(long sequenceId)
 		{
@@ -4027,7 +4226,7 @@ namespace VisionMeasure
 				{
 					lock (originalImages)
 					{
-						foreach (var kvp in originalImages) kvp.Value?.Dispose();
+						foreach (var kvp in originalImages) ReturnMatToSavePool(kvp.Key, kvp.Value);
 						originalImages.Clear();
 					}
 				}
@@ -4036,7 +4235,7 @@ namespace VisionMeasure
 				{
 					lock (resultImages)
 					{
-						foreach (var kvp in resultImages) kvp.Value?.Dispose();
+						foreach (var kvp in resultImages) ReturnMatToSavePool(kvp.Key, kvp.Value);
 						resultImages.Clear();
 					}
 				}
@@ -4045,6 +4244,18 @@ namespace VisionMeasure
 			{
 				FastLogger.Instance.Error($"清理图像缓存异常: {ex.Message}");
 			}
+		}
+
+		/// <summary>
+		/// 【内存优化】改法2：按相机名将 Mat 归还到对应相机的专用存图池，
+		/// 防止分辨率不匹配的 Mat 进入错误池导致后续复用越界。
+		/// </summary>
+		private void ReturnMatToSavePool(string cameraName, Mat mat)
+		{
+			if (mat == null) return;
+			var savePool = GetSaveCachePoolByName(cameraName);
+			if (savePool != null) savePool.ReturnMat(mat);
+			else mat.Dispose();
 		}
 		#endregion
 
@@ -4203,16 +4414,16 @@ namespace VisionMeasure
 			ResponseList<SegmentationResponse> rsp_rests,
 			Mat resultImage,
 			ref string result_class,
-			ref string result_Class_str,
+			ref bool resultClassFlaw,
 			ref string label_str)
 		{
 			var result = new SegmentationResult();
 			int result_Segmentation_str = 0;
 			var classBuilder = new System.Text.StringBuilder(result_class);
 
-			ProcessSegmentationBatch(rsp_segmentation, resultImage, ref result, ref result_Segmentation_str, ref classBuilder, ref result_Class_str, ref label_str);
-			ProcessSegmentationBatch(rsp_color, resultImage, ref result, ref result_Segmentation_str, ref classBuilder, ref result_Class_str, ref label_str);
-			ProcessSegmentationBatch(rsp_rests, resultImage, ref result, ref result_Segmentation_str, ref classBuilder, ref result_Class_str, ref label_str);
+			ProcessSegmentationBatch(rsp_segmentation, resultImage, ref result, ref result_Segmentation_str, ref classBuilder, ref resultClassFlaw, ref label_str);
+			ProcessSegmentationBatch(rsp_color, resultImage, ref result, ref result_Segmentation_str, ref classBuilder, ref resultClassFlaw, ref label_str);
+			ProcessSegmentationBatch(rsp_rests, resultImage, ref result, ref result_Segmentation_str, ref classBuilder, ref resultClassFlaw, ref label_str);
 
 			result_class = classBuilder.ToString();
 
@@ -4230,16 +4441,17 @@ namespace VisionMeasure
 			ref SegmentationResult result,
 			ref int result_Segmentation_str,
 			ref System.Text.StringBuilder classBuilder,
-			ref string result_Class_str,
+			ref bool resultClassFlaw,
 			ref string label_str)
 		{
 			if (rspList == null) return;
 
-			using (Mat compareMask = new Mat())
-			using (Mat labels = new Mat())
-			using (Mat stats = new Mat())
-			using (Mat centroids = new Mat())
-			using (Mat singleContourMask = new Mat())
+			// 【内存优化】分割解析复用 Mat：Cam5 线程独占成员，全生命周期只分配一次
+			Mat compareMask = _cam5CompareMask;
+			Mat labels = _cam5ComponentLabels;
+			Mat stats = _cam5ComponentStats;
+			Mat centroids = _cam5ComponentCentroids;
+			Mat singleContourMask = _cam5SingleContourMask;
 			{
 				for (int i = 0; i < rspList.Count; i++)
 				{
@@ -4288,12 +4500,11 @@ namespace VisionMeasure
 										Cv2.DrawContours(resultImage, contours, -1, new Scalar(0, 0, 255), 2);
 										if (classBuilder.Length > 0) classBuilder.Append("; ");
 										classBuilder.Append("爆管");
-										result_Class_str += "1";
+										resultClassFlaw = true;
 									}
 									else
 									{
 										Cv2.DrawContours(resultImage, contours, -1, new Scalar(0, 165, 255), 2);
-										result_Class_str += "0";
 									}
 									break;
 								case "未剪断":
@@ -4302,12 +4513,11 @@ namespace VisionMeasure
 										Cv2.DrawContours(resultImage, contours, -1, new Scalar(0, 0, 255), 2);
 										if (classBuilder.Length > 0) classBuilder.Append("; ");
 										classBuilder.Append("未剪断");
-										result_Class_str += "1";
+										resultClassFlaw = true;
 									}
 									else
 									{
 										Cv2.DrawContours(resultImage, contours, -1, new Scalar(0, 165, 255), 2);
-										result_Class_str += "0";
 									}
 									break;
 								case "斜口":
@@ -4316,16 +4526,15 @@ namespace VisionMeasure
 										Cv2.DrawContours(resultImage, contours, -1, new Scalar(0, 0, 255), 2);
 										if (classBuilder.Length > 0) classBuilder.Append("; ");
 										classBuilder.Append("斜口");
-										result_Class_str += "1";
+										resultClassFlaw = true;
 									}
 									else
 									{
 										Cv2.DrawContours(resultImage, contours, -1, new Scalar(0, 165, 255), 2);
-										result_Class_str += "0";
 									}
 									break;
 								case "空杯":
-									result_Class_str = "0";
+									resultClassFlaw = false;
 									result_Segmentation_str = 1001;
 									// 空杯产品不再回退计数器（计数由ResultCountMethod统一管理）
 									break;
@@ -4417,8 +4626,17 @@ namespace VisionMeasure
 
 					FastLogger.Instance.Info($"[手动测试] ID:{unifiedId} 模型识别: Cam1:{(r0 ? "OK" : "NG")} Cam2:{(r1 ? "OK" : "NG")} Cam3:{(r2 ? "OK" : "NG")} Cam4:{(r3 ? "OK" : "NG")} Cam5:{(r4 ? "OK" : "NG")} 综合:{(finalResult ? "OK" : "NG")} (测试模式: 不计产量/不写库/不发PLC)");
 
-					SaveTestImages(unifiedId, results, isManualImport ? "手动导入" : "模拟运行");
-					ClearImageCache(unifiedId);
+					// 【AV崩溃防护】测试存图也标记在编，防止监控线程/紧急清理并发驱逐正在编码的Mat
+					_encodingIds.TryAdd(unifiedId, 0);
+					try
+					{
+						SaveTestImages(unifiedId, results, isManualImport ? "手动导入" : "模拟运行");
+					}
+					finally
+					{
+						ClearImageCache(unifiedId);
+						try { _encodingIds.TryRemove(unifiedId, out _); } catch { }
+					}
 					foreach (var item in results)
 						try { QueueResultItem.Return(item); } catch { }
 				}
@@ -4847,8 +5065,10 @@ namespace VisionMeasure
 				// 【崩溃排查】Environment.Exit 会跳过所有 finally 并直接杀进程，
 				// 关闭流程中若发生异常/卡死会被它掩盖成"程序凭空消失"——退出前必须留一条最终状态
 				try { FastLogger.Instance.Info("FormClosing finally: 关闭流程结束，即将强制退出(Environment.Exit)"); } catch { }
-				// 快速退出（200ms足够FastLogger刷写残留队列）
-				System.Threading.Thread.Sleep(200);
+				// 【尾部日志落盘】Environment.Exit 会跳过 Program.Main 的 finally(Flush+Dispose)，
+				// 而 FastLogger 每50条才 flush，最后不足50条的日志会留在缓冲里丢失——
+				// 这里显式 Dispose：排空队列→等后台线程写完→flush并关闭文件，保证"关闭完成"等尾日志必达磁盘
+				try { FastLogger.Instance.Dispose(); } catch { }
 				Environment.Exit(0);
 			}
 		}
@@ -4957,11 +5177,38 @@ namespace VisionMeasure
 		{
 			try
 			{
+				// 【内存优化】改法2：先把存图缓存里的 Mat 归还给存图池，再释放池（避免缓存持有已释放池的内存）
+				foreach (var kvp in _imageCache)
+				{
+					var dict = kvp.Value;
+					if (dict == null) continue;
+					lock (dict)
+					{
+						foreach (var item in dict) ReturnMatToSavePool(item.Key, item.Value);
+						dict.Clear();
+					}
+				}
+				foreach (var kvp in _resultImageCache)
+				{
+					var dict = kvp.Value;
+					if (dict == null) continue;
+					lock (dict)
+					{
+						foreach (var item in dict) ReturnMatToSavePool(item.Key, item.Value);
+						dict.Clear();
+					}
+				}
+
 				_bufferPool1?.Dispose();
 				_bufferPool2?.Dispose();
 				_bufferPool3?.Dispose();
 				_bufferPool4?.Dispose();
 				_bufferPool5?.Dispose();
+				_saveCachePool1?.Dispose();
+				_saveCachePool2?.Dispose();
+				_saveCachePool3?.Dispose();
+				_saveCachePool4?.Dispose();
+				_saveCachePool5?.Dispose();
 				FastLogger.Instance.Info("内存池已释放");
 			}
 			catch (Exception ex)
@@ -6863,6 +7110,9 @@ namespace VisionMeasure
 		/// </summary>
 		public static byte[] ToJpegBytesViaOpenCv(Mat mat, int quality = 85)
 		{
+			// 【注意】AccessViolationException 在 .NET Framework 4.x 下无法被托管 catch 捕获
+			// （AppDomain兜底/crash日志全部失效，进程直接终止），下面 catch 只能兜普通异常。
+			// 真正的防护在上游：_encodingIds 标记保证编码期间 Mat 不会被驱逐归还池后复用
 			if (mat == null || mat.Empty()) return null;
 			try
 			{
@@ -6998,7 +7248,6 @@ namespace VisionMeasure
 		private readonly int _defaultWidth, _defaultHeight;
 		private readonly PixelFormat _pixelFormat;
 		private readonly int _initialCapacity, _maxCapacity;
-		private readonly long _maxMemoryBytes;
 
 		private long _totalAllocatedMemory = 0;
 		private bool _disposed = false;
@@ -7012,14 +7261,13 @@ namespace VisionMeasure
 		public long TotalAllocatedMemory => _totalAllocatedMemory;
 		public double PoolHitRate => _rentCount > 0 ? (double)_poolHitCount / _rentCount * 100 : 0;
 
-		public ImageBufferPool(int width, int height, PixelFormat pixelFormat, int initialCapacity = 5, int maxCapacity = 20, long maxMemoryBytes = 500 * 1024 * 1024)
+		public ImageBufferPool(int width, int height, PixelFormat pixelFormat, int initialCapacity = 5, int maxCapacity = 20)
 		{
 			_defaultWidth = width;
 			_defaultHeight = height;
 			_pixelFormat = pixelFormat;
 			_initialCapacity = initialCapacity;
 			_maxCapacity = maxCapacity;
-			_maxMemoryBytes = maxMemoryBytes;
 
 			InitializePool();
 			ThreadPool.QueueUserWorkItem(MonitorPool);

@@ -11,6 +11,11 @@ namespace VisionMeasure
 {
 	internal static class Program
 	{
+		// ──── WPF 加载界面（单独STA线程运行，参考N29线体实现；不可用时自动回退无加载界面）────
+		private static Wpf_Loading.LoadingWindow _loadingWindow;
+		private static Thread _loadingThread;
+		private static volatile bool _wpfLoadingAvailable;
+
 		/// <summary>
 		/// 应用程序的主入口点。
 		/// </summary>
@@ -23,8 +28,9 @@ namespace VisionMeasure
 			Application.ThreadException += (sender, e) =>
 			{
 				FastLogger.Emergency(e.Exception, "UI线程异常");
-				MessageBox.Show($"程序发生异常，请查看日志。\n{e.Exception.Message}", "异常",
-					MessageBoxButtons.OK, MessageBoxIcon.Error);
+				// 【修复】不再弹模态框：模态MessageBox会卡住UI线程消息泵（历史挂起事件诱因之一），
+				// 改用非阻塞提示条（自动消失、可点击关闭），只记日志不打断运行。
+				try { UiAlert.ShowError("程序发生异常，请查看日志。\n" + e.Exception.Message); } catch { }
 			};
 
 			// 非 UI 线程异常（最后防线；处理器执行完后进程仍会退出）
@@ -96,7 +102,7 @@ namespace VisionMeasure
 			catch { }
 
 			// ──── 版本标识（每次改动后手动递增 BUILD_TAG，编译时间自动取 exe 时间戳）────
-			const string BUILD_TAG = "2026-08-20-v7"; // ← 改代码后记得改这个（v7: PLC状态互锁+气缸日志+实时取像回报位）
+			const string BUILD_TAG = "2026-08-31-v13"; // ← 改代码后记得改这个（v13: 关闭Loading后主窗体抢回前台焦点——SetForegroundWindow+瞬态TopMost+ShowInTaskbar，修复"主界面被压在后面只能手动切换"）
 			string buildTime = "未知";
 			try { buildTime = System.IO.File.GetLastWriteTime(typeof(Program).Assembly.Location).ToString("yyyy-MM-dd HH:mm:ss"); } catch { }
 			try
@@ -117,6 +123,52 @@ namespace VisionMeasure
 				Application.EnableVisualStyles();
 				Application.SetCompatibleTextRenderingDefault(false);
 
+				// ──── WPF 加载界面（单独STA线程；启动失败自动回退无加载界面，不影响主流程）────
+				ManualResetEvent loadingReady = new ManualResetEvent(false);
+				try
+				{
+					FastLogger.Instance.Info("正在初始化 WPF 加载界面...");
+					_loadingThread = new Thread(() =>
+					{
+						try
+						{
+							_loadingWindow = new Wpf_Loading.LoadingWindow();
+							_loadingWindow.LoadingCancelled += (s, args) =>
+							{
+								FastLogger.Instance.Warn("用户取消加载，程序退出");
+								try { FastLogger.Instance.Flush(3000); FastLogger.Instance.Dispose(); } catch { }
+								Environment.Exit(0);
+							};
+							_loadingWindow.Show();
+							loadingReady.Set();
+							System.Windows.Threading.Dispatcher.Run();
+						}
+						catch (Exception ex)
+						{
+							FastLogger.Instance.Error("WPF 加载界面线程异常: " + ex.Message, ex);
+							loadingReady.Set(); // 释放主线程等待
+						}
+					});
+					_loadingThread.SetApartmentState(ApartmentState.STA);
+					_loadingThread.IsBackground = true;
+					_loadingThread.Start();
+
+					// 等最多 5 秒，看 LoadingWindow 是否成功创建
+					if (loadingReady.WaitOne(5000) && _loadingWindow != null)
+					{
+						_wpfLoadingAvailable = true;
+						FastLogger.Instance.Info("WPF 加载界面就绪");
+					}
+					else
+					{
+						FastLogger.Instance.Warn("WPF 加载界面启动超时或失败，回退到无加载界面模式");
+					}
+				}
+				catch (Exception ex)
+				{
+					FastLogger.Instance.Warn("WPF 环境不可用，回退到直接启动: " + ex.GetType().Name + " - " + ex.Message);
+				}
+
 				FastLogger.Instance.Info("开始加载主窗体...");
 				MainFrm mainFrm = new MainFrm();
 				FastLogger.Instance.Info("主窗体已创建，进入消息循环");
@@ -125,6 +177,7 @@ namespace VisionMeasure
 			}
 			catch (Exception ex)
 			{
+				CloseLoadingWindow();
 				FastLogger.Emergency(ex, "Main函数异常");
 				MessageBox.Show($"程序启动失败: {ex.Message}", "启动错误",
 					MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -134,6 +187,43 @@ namespace VisionMeasure
 				FastLogger.Instance.Info("应用程序关闭");
 				try { FastLogger.Instance.Flush(3000); FastLogger.Instance.Dispose(); } catch { }
 			}
+		}
+
+		/// <summary>启动进度上报：写日志 + 更新 WPF 加载界面（线程安全，WPF 不可用时仅记日志）</summary>
+		public static void ReportStartupProgress(int percentage, string statusText)
+		{
+			try { if (FastLogger.IsInitialized) FastLogger.Instance.Info($"[启动 {percentage}%] {statusText}"); } catch { }
+			try
+			{
+				var w = _loadingWindow;
+				if (_wpfLoadingAvailable && w != null)
+					w.Dispatcher.Invoke(() => w.UpdateProgress(percentage, statusText));
+			}
+			catch { }
+		}
+
+		/// <summary>关闭 WPF 加载界面（幂等，可重复调用）</summary>
+		public static void CloseLoadingWindow()
+		{
+			try
+			{
+				var w = _loadingWindow;
+				if (w != null && !w.Dispatcher.HasShutdownStarted)
+				{
+					w.Dispatcher.Invoke(() => w.Close());
+					try { w.Dispatcher.InvokeShutdown(); } catch { }
+				}
+			}
+			catch { }
+			try
+			{
+				var t = _loadingThread;
+				if (t != null && t.IsAlive && t != Thread.CurrentThread) t.Join(2000);
+			}
+			catch { }
+			_loadingWindow = null;
+			_loadingThread = null;
+			_wpfLoadingAvailable = false;
 		}
 	}
 
@@ -199,6 +289,8 @@ namespace VisionMeasure
 								DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
 						}
 						catch { } // 磁盘故障时心跳失败不致命，继续下一轮
+						// 每30秒强制日志落盘：进程突然死亡时最多丢30秒日志，便于事后定位死亡点
+						try { FastLogger.Instance.Flush(2000); } catch { }
 					}
 				})
 				{ IsBackground = true, Name = "SessionHeartbeat" };

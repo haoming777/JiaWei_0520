@@ -156,7 +156,7 @@ namespace PLC调试.Class
 						EventDeviceMode?.Invoke(modeRaw == 4, modeRaw);   // 首读触发事件，记录初始状态
 						EventCylinderState?.Invoke(cylDisabled);
 						// 【气缸状态】日志：首读记录初始状态（含来源地址；日志搜索关键词：【气缸状态】）
-						try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Info(string.Format("【气缸状态】[Modbus] 初始状态: {0} 来源:M7072.0", cylDisabled ? "禁用(TRUE)" : "启用(FALSE)")); } catch { }
+						try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Info(string.Format("【气缸状态】[Modbus] 初始状态: {0} 来源:M7072.0", cylDisabled ? "禁用(TRUE)=气缸关闭" : "启用(FALSE)=气缸打开")); } catch { }
 					}
 					else
 					{
@@ -167,7 +167,7 @@ namespace PLC调试.Class
 							_cylinderDisabled = cylDisabled;
 							EventCylinderState?.Invoke(cylDisabled);
 							// 【气缸状态】日志：状态变化记录旧→新方向与来源地址（日志搜索关键词：【气缸状态】）
-							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Info(string.Format("【气缸状态】[Modbus] 状态变化: {0}→{1} 来源:M7072.0", prevDisabled ? "禁用(TRUE)" : "启用(FALSE)", cylDisabled ? "禁用(TRUE)" : "启用(FALSE)")); } catch { }
+							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Info(string.Format("【气缸状态】[Modbus] 状态变化: {0}→{1} 来源:M7072.0", prevDisabled ? "禁用(TRUE)=气缸关闭" : "启用(FALSE)=气缸打开", cylDisabled ? "禁用(TRUE)=气缸关闭" : "启用(FALSE)=气缸打开")); } catch { }
 						}
 					}
 				}

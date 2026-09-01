@@ -5,9 +5,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build
 
 - Open `VisionMeasure/VisionMeasure.sln` in Visual Studio (2017+)
-- Build solution in Debug or Release (AnyCPU), output to `../bin/`
+- Build solution in Debug or Release — all projects are **x64 only** (no AnyCPU configs), output to `../bin/`
 - NuGet packages need restore before first build
-- No CLI build without Visual Studio installed
+- CLI build works when VS/MSBuild is installed (e.g. VS18 at `D:\Program Files\Microsoft Visual Studio\18\...`). From Git Bash:
+  ```bash
+  MSYS_NO_PATHCONV=1 "/d/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/MSBuild.exe" \
+    "VisionMeasure/VisionMeasure.sln" /t:Rebuild /p:Configuration=Release /p:Platform=x64 /m /restore
+  ```
+  Notes: `MSYS_NO_PATHCONV=1` prevents Git Bash from mangling `/t:` `/p:` flags into paths; `Platform=x64` is required (without it MSBuild defaults to AnyCPU and errors with "BaseOutputPath 未设置"); when piping output use `set -o pipefail` or the pipeline masks MSBuild's exit code. Main WinExe project file is `VisionMeasure/视觉模板.csproj`.
 
 ## Architecture
 

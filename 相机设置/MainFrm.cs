@@ -360,13 +360,20 @@ namespace SetCamera
 
 			try
 			{
-				if (this.IsHandleCreated)
+				if (this.IsHandleCreated && bitmap != null)
 				{
 					this.xlPictureBox1.Invoke((EventHandler)delegate
 					{
+						// 【修复】克隆后再显示：SDK回调的bitmap与主检测流水线共用图像缓冲，
+						// 自动模式下会被流水线回收/复用，控件直接引用会拿到失效的GDI+句柄，
+						// 鼠标移动时GetImageDisplayRectangle读Width抛ArgumentException。
+						// 这里只Dispose自己上一帧的克隆，绝不Dispose SDK传入的图。
+						Bitmap clone;
+						try { clone = new Bitmap(bitmap); }
+						catch { return; }   // 源图已失效时跳过本帧，不污染控件
 						var old = this.xlPictureBox1.Image;
-						this.xlPictureBox1.Image = bitmap;
-						if (old != null && old != bitmap)
+						this.xlPictureBox1.Image = clone;
+						if (old != null)
 						{ try { old.Dispose(); } catch { } }
 					});
 				}

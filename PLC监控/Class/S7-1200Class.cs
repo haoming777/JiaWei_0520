@@ -134,10 +134,17 @@ namespace PLC调试.Class
 				try
 				{
 					Thread.Sleep(100);
-					if (!plcState) continue;
+					// 【修复】不再因 plcState=false 永久静默跳过：心跳/触发线程置 false 后，
+					// 本线程会永远 continue，气缸/设备模式监控与互锁全部失效且无任何日志。
+					// 改为始终尝试读取：读成功即正常更新状态，读失败走下方节流告警。
 
 					short modeRaw = plc.ReadInt16("DB1000.DBW323").Content;
 					bool cylDisabled = plc.ReadBool("DB1000.DBX234.0").Content;
+					if (failCount > 0)
+					{
+						// 此前连续读失败、现已恢复：留一条恢复日志便于定位中断时段
+						try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Info(string.Format("【设备状态】读取恢复正常(此前连续失败{0}次)", failCount)); } catch { }
+					}
 					failCount = 0;
 
 					if (!_statusInited)
@@ -148,7 +155,7 @@ namespace PLC调试.Class
 						EventDeviceMode?.Invoke(modeRaw == 4, modeRaw);   // 首读触发事件，记录初始状态
 						EventCylinderState?.Invoke(cylDisabled);
 						// 【气缸状态】日志：首读记录初始状态（含来源地址；日志搜索关键词：【气缸状态】）
-						try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Info(string.Format("【气缸状态】[S7-1200] 初始状态: {0} 来源:DB1000.DBX234.0", cylDisabled ? "禁用(TRUE)" : "启用(FALSE)")); } catch { }
+						try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Info(string.Format("【气缸状态】[S7-1200] 初始状态: {0} 来源:DB1000.DBX234.0", cylDisabled ? "禁用(TRUE)=气缸关闭" : "启用(FALSE)=气缸打开")); } catch { }
 					}
 					else
 					{
@@ -159,7 +166,7 @@ namespace PLC调试.Class
 							_cylinderDisabled = cylDisabled;
 							EventCylinderState?.Invoke(cylDisabled);
 							// 【气缸状态】日志：状态变化记录旧→新方向与来源地址（日志搜索关键词：【气缸状态】）
-							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Info(string.Format("【气缸状态】[S7-1200] 状态变化: {0}→{1} 来源:DB1000.DBX234.0", prevDisabled ? "禁用(TRUE)" : "启用(FALSE)", cylDisabled ? "禁用(TRUE)" : "启用(FALSE)")); } catch { }
+							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Info(string.Format("【气缸状态】[S7-1200] 状态变化: {0}→{1} 来源:DB1000.DBX234.0", prevDisabled ? "禁用(TRUE)=气缸关闭" : "启用(FALSE)=气缸打开", cylDisabled ? "禁用(TRUE)=气缸关闭" : "启用(FALSE)=气缸打开")); } catch { }
 						}
 					}
 				}
