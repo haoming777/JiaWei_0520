@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -63,7 +64,9 @@ namespace CommonLib
         private string _currentLogDate;
         private readonly object _writeLock = new object();
         private int _entriesSinceFlush;
-        private const int FLUSH_INTERVAL = 50; // 每50条 flush 一次
+        private const int FLUSH_INTERVAL = 50;          // 每50条 flush 一次
+        private const int FLUSH_MAX_INTERVAL_MS = 3000;  // 距上次刷盘超过3秒也刷一次（时间型兜底：活跃期日志延迟≤3秒）
+        private readonly Stopwatch _flushWatch = Stopwatch.StartNew();  // 距上次真正刷盘的时间
 
         private FastLogger(string logDir)
         {
@@ -187,6 +190,12 @@ namespace CommonLib
                 Thread.Sleep(20);
                 waited += 20;
             }
+            // 【修复】队列清空≠已落盘：StreamWriter还有4KB缓冲区未写盘。
+            // 心跳每30秒调用本方法，必须真正Flush缓冲区，"最多丢30秒日志"的兜底才成立。
+            lock (_writeLock)
+            {
+                try { _writer?.Flush(); } catch { }
+            }
         }
 
         public int PendingCount => _queue?.Count ?? 0;
@@ -224,16 +233,19 @@ namespace CommonLib
                         _writer = new StreamWriter(filePath, true, System.Text.Encoding.UTF8, 4096);
                         _currentLogDate = date;
                         _entriesSinceFlush = 0;
+                        _flushWatch.Restart();
                     }
 
                     _writer.WriteLine(line);
                     _entriesSinceFlush++;
 
-                    // 定期 flush，平衡性能与数据安全
-                    if (_entriesSinceFlush >= FLUSH_INTERVAL)
+                    // 定期 flush，平衡性能与数据安全：
+                    // ① 每50条 ② 距上次刷盘超过3秒（时间型兜底，解决"日志卡在缓冲区看不到/启动日志不齐"）
+                    if (_entriesSinceFlush >= FLUSH_INTERVAL || _flushWatch.ElapsedMilliseconds >= FLUSH_MAX_INTERVAL_MS)
                     {
                         try { _writer.Flush(); } catch { }
                         _entriesSinceFlush = 0;
+                        _flushWatch.Restart();
                     }
                 }
             }

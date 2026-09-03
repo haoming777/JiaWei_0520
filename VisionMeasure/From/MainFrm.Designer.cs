@@ -60,6 +60,7 @@ namespace VisionMeasure
             this.mainTitleBar1 = new CrsdetSoft.UIControls.MainTitleBar();
             this.panel2 = new System.Windows.Forms.Panel();
             this.ModelState = new Sunny.UI.UILight();
+            this.CylinderState = new Sunny.UI.UILight();
             this.PlcState = new Sunny.UI.UILight();
             this.InitState = new Sunny.UI.UILight();
             this.MotionState = new Sunny.UI.UILight();
@@ -881,6 +882,7 @@ namespace VisionMeasure
             // 
             this.panel2.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(47)))), ((int)(((byte)(60)))), ((int)(((byte)(76)))));
             this.panel2.Controls.Add(this.ModelState);
+            this.panel2.Controls.Add(this.CylinderState);
             this.panel2.Controls.Add(this.PlcState);
             this.panel2.Controls.Add(this.InitState);
             this.panel2.Controls.Add(this.MotionState);
@@ -920,7 +922,29 @@ namespace VisionMeasure
             this.ModelState.Text = "手动";
             this.ModelState.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
             this.ModelState.Visible = false;
-            // 
+            //
+            // CylinderState
+            //
+            this.CylinderState.CenterColor = System.Drawing.Color.PaleGreen;
+            this.CylinderState.Dock = System.Windows.Forms.DockStyle.Left;
+            this.CylinderState.Font = new System.Drawing.Font("微软雅黑", 12F);
+            this.CylinderState.ForeColor = System.Drawing.Color.White;
+            this.CylinderState.Location = new System.Drawing.Point(627, 7);
+            this.CylinderState.MinimumSize = new System.Drawing.Size(1, 1);
+            this.CylinderState.Name = "CylinderState";
+            this.CylinderState.OffCenterColor = System.Drawing.Color.Orange;
+            this.CylinderState.OffColor = System.Drawing.Color.Coral;
+            this.CylinderState.OnCenterColor = System.Drawing.Color.PaleGreen;
+            this.CylinderState.OnColor = System.Drawing.Color.ForestGreen;
+            this.CylinderState.Radius = 21;
+            this.CylinderState.ShowText = true;
+            this.CylinderState.Size = new System.Drawing.Size(86, 21);
+            this.CylinderState.State = Sunny.UI.UILightState.Off;
+            this.CylinderState.TabIndex = 32;
+            this.CylinderState.Text = "气缸关";
+            this.CylinderState.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
+            this.CylinderState.Visible = false;
+            //
             // PlcState
             // 
             this.PlcState.CenterColor = System.Drawing.Color.PaleGreen;
@@ -5612,6 +5636,7 @@ namespace VisionMeasure
 		private Sunny.UI.UILine uiLine10;
 		private Sunny.UI.UILine uiLine9;
 		private Sunny.UI.UILight ModelState;
+			private Sunny.UI.UILight CylinderState;
 		private System.Windows.Forms.TableLayoutPanel tableLayoutPanel57;
 		private System.Windows.Forms.Panel panel79;
 		private Sunny.UI.UILabel uiLabel51;

@@ -846,7 +846,7 @@ namespace SetCamera
 			}
 			catch (Exception ex)
 			{
-				try { FastLogger.Instance.Info($"【实时回报】写入{(_realtimeBitIdx == 1 ? "DB1000.DBX72.1" : "DB1000.DBX72.0")}失败: {ex.Message}"); } catch { }
+				try { FastLogger.Instance.Warn($"【实时回报】写入{(_realtimeBitIdx == 1 ? "DB1000.DBX72.1" : "DB1000.DBX72.0")}失败: {ex.Message}"); } catch { }
 			}
 		}
 

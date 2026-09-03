@@ -1873,6 +1873,29 @@ namespace VisionMeasure
 			catch { }
 		}
 
+		/// <summary>跨线程安全更新状态灯+文本（PLC回调线程调用；首次更新时自动设为可见）</summary>
+		private void TrySetLightText(Sunny.UI.UILight light, Sunny.UI.UILightState state, string text)
+		{
+			try
+			{
+				if (light == null || light.IsDisposed || _isClosing) return;
+				if (light.InvokeRequired)
+				{
+					light.BeginInvoke(new Action(() =>
+					{
+						try { if (!light.IsDisposed) { light.State = state; light.Text = text; light.Visible = true; } } catch { }
+					}));
+				}
+				else
+				{
+					light.State = state;
+					light.Text = text;
+					light.Visible = true;
+				}
+			}
+			catch { }
+		}
+
 		private void ModbusConnectState(bool state, string error)
 		{
 			try
@@ -1903,6 +1926,8 @@ namespace VisionMeasure
 				_isAutoMode = isAuto;
 				// 日志关键词覆盖"切换自动/切换手动"，便于现场按关键词检索；首读成功也会触发一次（记录初始模式）
 				FastLogger.Instance.Info($"【设备状态】切换{(isAuto ? "自动" : "手动")} (PLC原始值={rawValue})");
+					// 手自动状态灯：自动→On+“自动”，手动→Off+“手动”（首次更新自动变为可见）
+					TrySetLightText(ModelState, isAuto ? Sunny.UI.UILightState.On : Sunny.UI.UILightState.Off, isAuto ? "自动" : "手动");
 			}
 			catch (Exception ex)
 			{
@@ -1916,6 +1941,8 @@ namespace VisionMeasure
 			try
 			{
 				// 日志由 S7-1200Class / HCModbusClass 在状态检测点直接输出，避免一条变化打两行
+					// 气缸状态灯：启用(FALSE)=开→On+“气缸开”，禁用(TRUE)=关→Off+“气缸关”（首次更新自动变为可见）
+					TrySetLightText(CylinderState, disabled ? Sunny.UI.UILightState.Off : Sunny.UI.UILightState.On, disabled ? "气缸关" : "气缸开");
 			}
 			catch (Exception ex)
 			{
@@ -2334,9 +2361,29 @@ namespace VisionMeasure
 		#endregion
 
 		#region 相机图像处理方法（优化版）
+		/// <summary>
+		/// 【与相机设置界面共存】cameraDebug 期间（相机设置界面打开）不得立即 Dispose 帧位图：
+		/// 该位图与相机设置界面的 Cam1_OnImage 共享，界面在同一事件链上稍后克隆显示；
+		/// 立即释放会让界面克隆到已释放的位图（抛异常被静默吞掉 → 界面无图无报错）。
+		/// 改为延迟 1000ms 释放：界面的克隆（UI线程Invoke）有足够时间完成，
+		/// 未被界面订阅的相机的帧同样在 1 秒后回收，无泄漏（瞬时多占约 2MB/帧）。
+		/// </summary>
+		private static void DelayedDisposeBitmap(Bitmap bitmap)
+		{
+			if (bitmap == null) return;
+			var b = bitmap;
+			Task.Run(async () =>
+			{
+				try { await Task.Delay(1000); } catch { }
+				try { b.Dispose(); } catch { }
+			});
+		}
+
 		private void OnCamera1Image(Bitmap bitmap, string cameraName, string cameraKey)
 		{
-			if (_isClosing || _Config.cameraDebug != 0 || bitmap == null) { try { bitmap?.Dispose(); } catch { } return; }
+			if (bitmap == null) return;
+			if (_isClosing) { try { bitmap.Dispose(); } catch { } return; }
+			if (_Config.cameraDebug != 0) { DelayedDisposeBitmap(bitmap); return; }
 			if (_processor1 == null) { bitmap.Dispose(); return; }  // 工位未启用，丢弃图像
 			try
 			{
@@ -2353,7 +2400,9 @@ namespace VisionMeasure
 
 		private void OnCamera2Image(Bitmap bitmap, string cameraName, string cameraKey)
 		{
-			if (_isClosing || _Config.cameraDebug != 0 || bitmap == null) { try { bitmap?.Dispose(); } catch { } return; }
+			if (bitmap == null) return;
+			if (_isClosing) { try { bitmap.Dispose(); } catch { } return; }
+			if (_Config.cameraDebug != 0) { DelayedDisposeBitmap(bitmap); return; }
 			if (_processor2 == null) { bitmap.Dispose(); return; }
 			try
 			{
@@ -2370,7 +2419,9 @@ namespace VisionMeasure
 
 		private void OnCamera3Image(Bitmap bitmap, string cameraName, string cameraKey)
 		{
-			if (_isClosing || _Config.cameraDebug != 0 || bitmap == null) { try { bitmap?.Dispose(); } catch { } return; }
+			if (bitmap == null) return;
+			if (_isClosing) { try { bitmap.Dispose(); } catch { } return; }
+			if (_Config.cameraDebug != 0) { DelayedDisposeBitmap(bitmap); return; }
 			if (_processor3 == null) { bitmap.Dispose(); return; }
 			try
 			{
@@ -2393,7 +2444,7 @@ namespace VisionMeasure
 				try { FastLogger.Instance.Info($"[回调] Camera4 #{callbackCount} 收到图片 bitmap={bitmap != null} bmpSize={bitmap?.Width}x{bitmap?.Height}"); } catch { }
 
 			if (_isClosing) { try { FastLogger.Instance.Info("[回调] Camera4 被 _isClosing 拦截"); } catch { } try { bitmap?.Dispose(); } catch { } return; }
-			if (_Config.cameraDebug != 0) { try { FastLogger.Instance.Info($"[回调] Camera4 被 cameraDebug={_Config.cameraDebug} 拦截"); } catch { } try { bitmap?.Dispose(); } catch { } return; }
+			if (_Config.cameraDebug != 0) { try { FastLogger.Instance.Info($"[回调] Camera4 被 cameraDebug={_Config.cameraDebug} 拦截"); } catch { } DelayedDisposeBitmap(bitmap); return; }
 			if (bitmap == null) { try { FastLogger.Instance.Info("[回调] Camera4 bitmap为null"); } catch { } return; }
 			if (_processor4 == null) { try { FastLogger.Instance.Info("[回调] Camera4 _processor4为null，丢弃图片"); } catch { } bitmap.Dispose(); return; }
 			try
@@ -2418,7 +2469,7 @@ namespace VisionMeasure
 				try { FastLogger.Instance.Info($"[回调] Camera5 #{callbackCount} 收到图片 bitmap={bitmap != null} bmpSize={bitmap?.Width}x{bitmap?.Height}"); } catch { }
 
 			if (_isClosing) { try { FastLogger.Instance.Info("[回调] Camera5 被 _isClosing 拦截"); } catch { } try { bitmap?.Dispose(); } catch { } return; }
-			if (_Config.cameraDebug != 0) { try { FastLogger.Instance.Info($"[回调] Camera5 被 cameraDebug={_Config.cameraDebug} 拦截"); } catch { } try { bitmap?.Dispose(); } catch { } return; }
+			if (_Config.cameraDebug != 0) { try { FastLogger.Instance.Info($"[回调] Camera5 被 cameraDebug={_Config.cameraDebug} 拦截"); } catch { } DelayedDisposeBitmap(bitmap); return; }
 			if (bitmap == null) { try { FastLogger.Instance.Info("[回调] Camera5 bitmap为null"); } catch { } return; }
 			if (_processor5 == null) { try { FastLogger.Instance.Info("[回调] Camera5 _processor5为null，丢弃图片"); } catch { } bitmap.Dispose(); return; }
 			try

@@ -25,7 +25,7 @@ namespace PLC调试.Class
 
 		Thread doReadStatus;                     // 设备状态/气缸状态轮询线程
 		volatile short _lastModeRaw = 0;         // M7070 上次值
-		volatile bool _cylinderDisabled = false; // M7072.0 上次值
+		volatile bool _cylinderDisabled = false; // MX7074.0 上次值
 		volatile bool _statusInited = false;     // 首读成功标志
 
 		Stopwatch timeOut;
@@ -82,7 +82,7 @@ namespace PLC调试.Class
 		/// <summary>设备运行模式变化事件（M7070，4=自动 其他=手动）</summary>
 		public event PlcDeviceModeHandler EventDeviceMode;
 
-		/// <summary>气缸禁用状态变化事件（M7072.0，TRUE=禁用 FALSE=启用）</summary>
+		/// <summary>气缸禁用状态变化事件（MX7074.0，TRUE=禁用 FALSE=启用）</summary>
 		public event PlcCylinderStateHandler EventCylinderState;
 
 		/// <summary>设备是否处于自动模式（M7070==4）。首次成功读取前返回 false（按手动处理）</summary>
@@ -98,6 +98,11 @@ namespace PLC调试.Class
 				modbusTcp.DataFormat = HslCommunication.Core.DataFormat.CDAB;
 				modbusTcp.IsStringReverse = true;
 				modbusTcp.ConnectTimeOut = 2000; // P1: reduced from 5000
+					// P2: 读超时2秒——与S7-1200相同修复：PLC(汇川)单方面断连后socket读会无限阻塞，
+					// 僵死看门狗DoStateMethod→modbusState永远true→不触发重连、无任何日志。
+					// 设超时后读抛异常→置modbusState=false→重连自愈，失败期间有节流告警日志。
+					modbusTcp.ReceiveTimeOut = 2000;
+					// (该版本HslCommunication无SendTimeOut；写请求等待应答的超时同样由ReceiveTimeOut控制)
 
 				OperateResult connectState = modbusTcp.ConnectServer();
 				modbusState = connectState.IsSuccess;
@@ -127,8 +132,9 @@ namespace PLC调试.Class
 		}
 
 		/// <summary>
-		/// 读设备模式 M7070（4=自动）与气缸状态 M7072.0（TRUE=禁用），周期 100ms。
-		/// 注意：M7072.0 是汇川 M 区字地址 7072 的位 0；绝不能写成 "MX7072.0"（会解析成不同区域、静默读错）。
+		/// 读设备模式 M7070（4=自动）与气缸状态 MX7074.0（TRUE=禁用），周期 100ms。
+		/// 注意：MX7074.0 是汇川 M 区的位地址（与字地址 M7074 是不同区域），地址由 PLC 侧确认；
+		/// 与运行信号 MX7080.0 同区（该地址写入+回读均验证正常）。旧地址 M7072.0（字地址7072位0）现场 PLC 不写，值恒不变。
 		/// 【关键安全设计】读失败不置 modbusState=false、不触发 EventConnectState——
 		/// 这两个是 PLC 程序新增地址，现场 PLC 未同步更新时会持续读失败；
 		/// 若按既有线程模式判断线，会导致 WriteResult 停止、整机停摆。改为节流 Warn 日志暴露问题。
@@ -142,10 +148,17 @@ namespace PLC调试.Class
 				try
 				{
 					Thread.Sleep(100);
-					if (!modbusState) continue;
+					// 【修复】不再因 modbusState=false 永久静默跳过：心跳/触发线程置 false 后，
+					// 本线程会永远 continue，气缸/设备模式监控与互锁全部失效且无任何日志。
+					// 改为始终尝试读取：读成功即正常更新状态，读失败走下方节流告警。
 
 					short modeRaw = modbusTcp.ReadInt16("M7070").Content;
-					bool cylDisabled = modbusTcp.ReadBool("M7072.0").Content;
+					bool cylDisabled = modbusTcp.ReadBool("MX7074.0").Content;
+					if (failCount > 0)
+					{
+						// 此前连续读失败、现已恢复：留一条恢复日志便于定位中断时段
+						try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Info(string.Format("【设备状态】读取恢复正常(此前连续失败{0}次)", failCount)); } catch { }
+					}
 					failCount = 0;
 
 					if (!_statusInited)
@@ -156,7 +169,7 @@ namespace PLC调试.Class
 						EventDeviceMode?.Invoke(modeRaw == 4, modeRaw);   // 首读触发事件，记录初始状态
 						EventCylinderState?.Invoke(cylDisabled);
 						// 【气缸状态】日志：首读记录初始状态（含来源地址；日志搜索关键词：【气缸状态】）
-						try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Info(string.Format("【气缸状态】[Modbus] 初始状态: {0} 来源:M7072.0", cylDisabled ? "禁用(TRUE)=气缸关闭" : "启用(FALSE)=气缸打开")); } catch { }
+						try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Info(string.Format("【气缸状态】[Modbus] 初始状态: {0} 来源:MX7074.0", cylDisabled ? "禁用(TRUE)=气缸关闭" : "启用(FALSE)=气缸打开")); } catch { }
 					}
 					else
 					{
@@ -167,7 +180,7 @@ namespace PLC调试.Class
 							_cylinderDisabled = cylDisabled;
 							EventCylinderState?.Invoke(cylDisabled);
 							// 【气缸状态】日志：状态变化记录旧→新方向与来源地址（日志搜索关键词：【气缸状态】）
-							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Info(string.Format("【气缸状态】[Modbus] 状态变化: {0}→{1} 来源:M7072.0", prevDisabled ? "禁用(TRUE)=气缸关闭" : "启用(FALSE)=气缸打开", cylDisabled ? "禁用(TRUE)=气缸关闭" : "启用(FALSE)=气缸打开")); } catch { }
+							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Info(string.Format("【气缸状态】[Modbus] 状态变化: {0}→{1} 来源:MX7074.0", prevDisabled ? "禁用(TRUE)=气缸关闭" : "启用(FALSE)=气缸打开", cylDisabled ? "禁用(TRUE)=气缸关闭" : "启用(FALSE)=气缸打开")); } catch { }
 						}
 					}
 				}
@@ -175,7 +188,7 @@ namespace PLC调试.Class
 				{
 					failCount++;
 					if (failCount == 1 || failCount % 600 == 0) // 首次 + 每约60秒一次节流
-						try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn(string.Format("【设备状态】读M7070/M7072.0失败(第{0}次): {1}（不影响主流程；持续出现请检查PLC程序是否已包含该地址）", failCount, ex.Message)); } catch { }
+						try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn(string.Format("【设备状态】读M7070/MX7074.0失败(第{0}次): {1}（不影响主流程；持续出现请检查PLC程序是否已包含该地址）", failCount, ex.Message)); } catch { }
 					Thread.Sleep(1000);
 				}
 			}
@@ -211,9 +224,9 @@ namespace PLC调试.Class
 		{
 			timeOut.Start();
 			uint oldVal = 0;
-			try
+			while (!_disposed)
 			{
-				while (!_disposed)
+				try
 				{
 					Thread.Sleep(50);
 					if (modbusState)
@@ -235,11 +248,12 @@ namespace PLC调试.Class
 						}
 					}
 				}
-			}
-			catch (Exception ex)
-			{
-				modbusState = false;
-				EventConnectState(false, $"向Modbus写心跳时发生错误...\r\n {ex.Message} \r\n {ex.StackTrace}");
+				catch (Exception ex)
+				{
+					modbusState = false;
+					EventConnectState(false, $"读Modbus心跳时发生错误...\r\n {ex.Message} \r\n {ex.StackTrace}");
+					Thread.Sleep(1000);
+				}
 			}
 
 		}
@@ -248,15 +262,13 @@ namespace PLC调试.Class
 
 		private void WriteKeepAlive()
 		{
-			try
+			while (!_disposed)
 			{
-				while (!_disposed)
+				try
 				{
 					Thread.Sleep(500);
-					//toolClass.SaveLog($"modbusState: {modbusState}");
 					if (modbusState)
 					{
-						//toolClass.SaveLog($"进来了: {modbusState}");
 						//心跳
 						var hbWr = modbusTcp.Write(_Config.keepAlive.ToString(), (short)1);
 						if (!hbWr.IsSuccess)
@@ -264,11 +276,12 @@ namespace PLC调试.Class
 
 					}
 				}
-			}
-			catch (Exception ex)
-			{
-				modbusState = false;
-				EventConnectState(false, $"向Modbus写心跳时发生错误...\r\n {ex.Message} \r\n {ex.StackTrace}");
+				catch (Exception ex)
+				{
+					modbusState = false;
+					EventConnectState(false, $"向Modbus写心跳时发生错误...\r\n {ex.Message} \r\n {ex.StackTrace}");
+					Thread.Sleep(1000);
+				}
 			}
 		}
 		
@@ -332,19 +345,19 @@ namespace PLC调试.Class
 		int errorCount = 0;
 		private void DoReadCount()
 		{
-			try
+			uint count1 = 0;
+			uint count2 = 0;
+			uint count3 = 0;
+			uint count4 = 0;
+			uint count5 = 0;
+			toolClass.SaveLog($"读PLC计数开始");
+
+			toolClass.SaveLog($"modbusState为{modbusState}");
+			toolClass.SaveLog($"EventCount为{(EventCount == null ? "null" : "正常")}");
+
+			while (!_disposed)
 			{
-				uint count1 = 0;
-				uint count2 = 0;
-				uint count3 = 0;
-				uint count4 = 0;
-				uint count5 = 0;
-				toolClass.SaveLog($"读PLC计数开始");
-
-				toolClass.SaveLog($"modbusState为{modbusState}");
-				toolClass.SaveLog($"EventCount为{(EventCount == null ? "null" : "正常")}");
-
-				while (!_disposed)
+				try
 				{
 					Thread.Sleep(100);
 					if (modbusState)
@@ -358,7 +371,6 @@ namespace PLC调试.Class
 						if (EventCount != null)
 						{
 							EventCount(count1, count2, count3, count4, count5);
-							//toolClass.SaveLog($"\r\ncount1:{count1},\r\ncount2:{count2},\r\ncount3:{count3},\r\ncount4:{count4},\r\ncount5:{count5}");
 						}
 						else
 						{
@@ -375,11 +387,12 @@ namespace PLC调试.Class
 						}
 					}
 				}
-			}
-			catch (Exception ex)
-			{
-				modbusState = false;
-				EventConnectState(false, $"向Modbus写心跳时发生错误...\r\n {ex.Message} \r\n {ex.StackTrace}");
+				catch (Exception ex)
+				{
+					modbusState = false;
+					EventConnectState(false, $"读Modbus计数错误...\r\n {ex.Message} \r\n {ex.StackTrace}");
+					Thread.Sleep(1000);
+				}
 			}
 		}
 
@@ -403,9 +416,13 @@ namespace PLC调试.Class
 				}
 
 				sw.Restart();
-				// 4路信号并行写入，以 Write 返回的 IsSuccess（Modbus TCP 协议级应答）确认写入成功。
+				// 【时序修复】完成信号必须最后发：旧 Parallel.Invoke 4路并发经同一 socket 串行发出时顺序不定，
+				// MB10014(完成) 可能先于 MB10008~10012(结果) 到达 PLC → PLC 提前锁存旧值 → 误判/错位。
+				// 三个结果仍并行写入（Parallel.Invoke 内部等三者全部完成才返回；返回时各写均已完成
+				// Modbus 应答=PLC已存好值），完成信号随后单独写入，必然最后到达。
 				// 【已移除回读验证】PLC 收到 1 后立即处理并置 0，以太网往返延迟下回读经常读到
 				// 已被 PLC 置 0 的值，造成大量"回读不一致"误报；且每次回读多一次网络往返徒增耗时
+				int writeErrors = 0;
 				System.Threading.Tasks.Parallel.Invoke(
 					() =>
 					{
@@ -413,10 +430,14 @@ namespace PLC调试.Class
 						{
 							var wr = modbusTcp.Write("MB10008", v1);
 							if (!wr.IsSuccess)
+							{
+								Interlocked.Increment(ref writeErrors);
 								try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"Modbus MB10008 写入失败! {wr.Message}"); } catch { }
+							}
 						}
 						catch (Exception ex)
 						{
+							Interlocked.Increment(ref writeErrors);
 							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Error($"Modbus MB10008 写入异常: {ex.Message}"); } catch { }
 						}
 					},
@@ -426,10 +447,14 @@ namespace PLC调试.Class
 						{
 							var wr = modbusTcp.Write("MB10010", v2);
 							if (!wr.IsSuccess)
+							{
+								Interlocked.Increment(ref writeErrors);
 								try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"Modbus MB10010 写入失败! {wr.Message}"); } catch { }
+							}
 						}
 						catch (Exception ex)
 						{
+							Interlocked.Increment(ref writeErrors);
 							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Error($"Modbus MB10010 写入异常: {ex.Message}"); } catch { }
 						}
 					},
@@ -439,27 +464,26 @@ namespace PLC调试.Class
 						{
 							var wr = modbusTcp.Write("MB10012", v3);
 							if (!wr.IsSuccess)
+							{
+								Interlocked.Increment(ref writeErrors);
 								try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"Modbus MB10012 写入失败! {wr.Message}"); } catch { }
+							}
 						}
 						catch (Exception ex)
 						{
+							Interlocked.Increment(ref writeErrors);
 							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Error($"Modbus MB10012 写入异常: {ex.Message}"); } catch { }
-						}
-					},
-					() =>
-					{
-						try
-						{
-							var wr = modbusTcp.Write("MB10014", ok);
-							if (!wr.IsSuccess)
-								try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"Modbus MB10014 写入失败! {wr.Message}"); } catch { }
-						}
-						catch (Exception ex)
-						{
-							try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Error($"Modbus MB10014 写入异常: {ex.Message}"); } catch { }
 						}
 					}
 				);
+
+				// 完成信号：三个结果全部写入后才发送（时序保证的最后一道闸）
+				var wrOk = modbusTcp.Write("MB10014", ok);
+				if (!wrOk.IsSuccess)
+				{
+					writeErrors++;
+					try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn($"Modbus MB10014 写入失败! {wrOk.Message}"); } catch { }
+				}
 
 				// 记录发送间隔
 				long interval = _plcSendStatistics.RecordSend();
@@ -476,12 +500,13 @@ namespace PLC调试.Class
 			{
 				if (CommonLib.FastLogger.IsInitialized)
 					CommonLib.FastLogger.Instance.Debug(string.Format(
-						"写入结果完成，耗时：{0}ms，MB10008={1} MB10010={2} MB10012={3} MB10014={4}",
-						sw.ElapsedMilliseconds, v1, v2, v3, ok));
+						"写入结果完成，耗时：{0}ms，MB10008={1} MB10010={2} MB10012={3} MB10014={4} 失败{5}路",
+						sw.ElapsedMilliseconds, v1, v2, v3, ok, writeErrors));
 			}
 			catch { }
 				if (sw.ElapsedMilliseconds > 50) { try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Debug("Modbus写入耗时偏高: " + sw.ElapsedMilliseconds + "ms"); } catch { } }
-				return true;
+				// 任一路写失败返回 false，让 MainFrm 的失败重试机制（最多3次）在 HC 分支真正生效
+				return writeErrors == 0;
 			}
 			catch (Exception ex)
 			{

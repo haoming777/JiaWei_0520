@@ -102,7 +102,7 @@ namespace VisionMeasure
 			catch { }
 
 			// ──── 版本标识（每次改动后手动递增 BUILD_TAG，编译时间自动取 exe 时间戳）────
-			const string BUILD_TAG = "2026-08-31-v13"; // ← 改代码后记得改这个（v13: 关闭Loading后主窗体抢回前台焦点——SetForegroundWindow+瞬态TopMost+ShowInTaskbar，修复"主界面被压在后面只能手动切换"）
+			const string BUILD_TAG = "2026-09-01-v24"; // ← 改代码后记得改这个（v24: 修复相机设置界面无图——cameraDebug期间主程序立即Dispose帧位图导致界面克隆失败，改为延迟1000ms释放DelayedDisposeBitmap）
 			string buildTime = "未知";
 			try { buildTime = System.IO.File.GetLastWriteTime(typeof(Program).Assembly.Location).ToString("yyyy-MM-dd HH:mm:ss"); } catch { }
 			try

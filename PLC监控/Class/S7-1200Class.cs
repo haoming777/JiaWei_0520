@@ -93,7 +93,7 @@ namespace PLC调试.Class
 
 		public event PlcCountHandler EventCount;
 
-		/// <summary>设备运行模式变化事件（DB1000.DBW323，4=自动 其他=手动）</summary>
+		/// <summary>设备运行模式变化事件（DB1000.DBW232，4=自动 其他=手动）</summary>
 		public event PlcDeviceModeHandler EventDeviceMode;
 
 		/// <summary>气缸禁用状态变化事件（DB1000.DBX234.0，TRUE=禁用 FALSE=启用）</summary>
@@ -105,7 +105,7 @@ namespace PLC调试.Class
 		bool plcState = false;
 		public bool modbusState => plcState;
 
-		/// <summary>设备是否处于自动模式（DB1000.DBW323==4）。首次成功读取前返回 false（按手动处理）</summary>
+		/// <summary>设备是否处于自动模式（DB1000.DBW232==4）。首次成功读取前返回 false（按手动处理）</summary>
 		public bool IsAutoMode => _statusInited && _lastModeRaw == 4;
 
 		/// <summary>兼容 HCModbusClass 的 modbusTcp.Write 调用</summary>
@@ -120,7 +120,7 @@ namespace PLC调试.Class
 		}
 
 		/// <summary>
-		/// 读设备模式 DB1000.DBW323（4=自动）与气缸状态 DB1000.DBX234.0（TRUE=禁用），周期 100ms。
+		/// 读设备模式 DB1000.DBW232（4=自动）与气缸状态 DB1000.DBX234.0（TRUE=禁用），周期 100ms。
 		/// 【关键安全设计】读失败不置 plcState=false、不触发 EventConnectState——
 		/// 这两个是 PLC 程序新增地址，现场 PLC 未同步更新时会持续读失败；
 		/// 若按既有线程模式判断线，会导致 WriteResult 停止、整机停摆。
@@ -138,7 +138,7 @@ namespace PLC调试.Class
 					// 本线程会永远 continue，气缸/设备模式监控与互锁全部失效且无任何日志。
 					// 改为始终尝试读取：读成功即正常更新状态，读失败走下方节流告警。
 
-					short modeRaw = plc.ReadInt16("DB1000.DBW323").Content;
+					short modeRaw = plc.ReadInt16("DB1000.DBW232").Content;
 					bool cylDisabled = plc.ReadBool("DB1000.DBX234.0").Content;
 					if (failCount > 0)
 					{
@@ -174,7 +174,7 @@ namespace PLC调试.Class
 				{
 					failCount++;
 					if (failCount == 1 || failCount % 600 == 0) // 首次 + 每约60秒一次节流
-						try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn(string.Format("【设备状态】读DB1000.DBW323/DBX234.0失败(第{0}次): {1}（不影响主流程；持续出现请检查PLC程序是否已包含该地址）", failCount, ex.Message)); } catch { }
+						try { if (CommonLib.FastLogger.IsInitialized) CommonLib.FastLogger.Instance.Warn(string.Format("【设备状态】读DB1000.DBW232/DBX234.0失败(第{0}次): {1}（不影响主流程；持续出现请检查PLC程序是否已包含该地址）", failCount, ex.Message)); } catch { }
 					Thread.Sleep(1000);
 				}
 			}
@@ -185,7 +185,7 @@ namespace PLC调试.Class
 		Thread doReadCount;
 
 		Thread doReadStatus;                     // 设备状态/气缸状态轮询线程
-		volatile short _lastModeRaw = 0;         // DBW323 上次值
+		volatile short _lastModeRaw = 0;         // DBW232 上次值
 		volatile bool _cylinderDisabled = false; // DBX234.0 上次值
 		volatile bool _statusInited = false;     // 首读成功标志
 
@@ -196,6 +196,11 @@ namespace PLC调试.Class
 				plc.IpAddress = _Config.PlcIP;
 				plc.Port = _Config.PlcPort;
 				plc.ConnectTimeOut = 2000; // P1: 2s timeout prevents PLC blocking from stalling threads
+				// P2: 读超时2秒。PLC单方面断连(S7-1200连接表满/STOP/网线瞬断)后socket读会无限阻塞：
+				// 轮询/心跳/触发线程全部僵死、无日志、plcState仍为true也不触发重连——
+				// 表现为"模式切换/气缸变化无日志、自动模式互锁失效"且日志毫无痕迹。
+				// 设读超时后：读抛异常→catch置plcState=false→触发重连自愈，且每次失败都有节流告警日志。
+				plc.ReceiveTimeOut = 2000;
 
 				plc?.ConnectClose();
 				OperateResult connectState = plc.ConnectServer();

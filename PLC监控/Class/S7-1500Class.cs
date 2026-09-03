@@ -61,6 +61,10 @@ namespace PLC调试.Class
 			{
 				plc.IpAddress = _Config.PlcIP;
 				plc.Port = _Config.PlcPort;
+				plc.ConnectTimeOut = 2000; // 连接超时2秒（原本未设置，走默认值）
+				// 读超时2秒——与S7-1200Class相同修复：PLC单方面断连后socket读无限阻塞，
+				// 僵死看门狗/触发线程、无日志、不触发重连。设超时后读抛异常→plcState=false→重连自愈。
+				plc.ReceiveTimeOut = 2000;
 
 				plc?.ConnectClose();
 				OperateResult connectState = plc.ConnectServer();
