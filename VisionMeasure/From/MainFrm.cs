@@ -4469,19 +4469,60 @@ namespace VisionMeasure
 			ref string label_str)
 		{
 			var result = new SegmentationResult();
-			int result_Segmentation_str = 0;
 			var classBuilder = new System.Text.StringBuilder(result_class);
 
-			ProcessSegmentationBatch(rsp_segmentation, resultImage, ref result, ref result_Segmentation_str, ref classBuilder, ref resultClassFlaw, ref label_str);
-			ProcessSegmentationBatch(rsp_color, resultImage, ref result, ref result_Segmentation_str, ref classBuilder, ref resultClassFlaw, ref label_str);
-			ProcessSegmentationBatch(rsp_rests, resultImage, ref result, ref result_Segmentation_str, ref classBuilder, ref resultClassFlaw, ref label_str);
+			// 【最近配对】色标/夹尾可能各检出多个组件：收集全部中心点后取欧氏距离最近的一对，
+			// 测量值与连线都只用这一对（修复旧 1001 哨兵值在重复检出时误判 NG 的问题）
+			var seBiaoPoints = new List<Point2f>(4);
+			var pingShengPoints = new List<Point2f>(4);
+			bool cupDetected = false;
+
+			ProcessSegmentationBatch(rsp_segmentation, resultImage, ref classBuilder, ref resultClassFlaw, ref label_str, seBiaoPoints, pingShengPoints, ref cupDetected);
+			ProcessSegmentationBatch(rsp_color, resultImage, ref classBuilder, ref resultClassFlaw, ref label_str, seBiaoPoints, pingShengPoints, ref cupDetected);
+			ProcessSegmentationBatch(rsp_rests, resultImage, ref classBuilder, ref resultClassFlaw, ref label_str, seBiaoPoints, pingShengPoints, ref cupDetected);
 
 			result_class = classBuilder.ToString();
 
-			if (_Config.Camera5IFSeBiao)
-				result.DetectedBoth = result_Segmentation_str == 1001;
-			else
+			if (cupDetected)
+			{
+				// 空杯：色标对中直接判OK——DetectedBoth=true 且坐标保持0，
+				// 下游不会进入投影判定，result_Segmentation 保持初始 true
 				result.DetectedBoth = true;
+			}
+			else if (seBiaoPoints.Count > 0 && pingShengPoints.Count > 0)
+			{
+				// 最近配对：1对N / N对1 / N对M 通用，取距离平方最小的一对
+				double bestDist = double.MaxValue;
+				Point2f bestSeBiao = default;
+				Point2f bestPingSheng = default;
+				for (int i = 0; i < seBiaoPoints.Count; i++)
+				{
+					for (int j = 0; j < pingShengPoints.Count; j++)
+					{
+						double dx = seBiaoPoints[i].X - pingShengPoints[j].X;
+						double dy = seBiaoPoints[i].Y - pingShengPoints[j].Y;
+						double dist = dx * dx + dy * dy;
+						if (dist < bestDist)
+						{
+							bestDist = dist;
+							bestSeBiao = seBiaoPoints[i];
+							bestPingSheng = pingShengPoints[j];
+						}
+					}
+				}
+				result.SeBiaoX = bestSeBiao.X;
+				result.SeBiaoY = bestSeBiao.Y;
+				result.SeBiaoA = 0; // 角度下游未使用
+				result.PingShengX = bestPingSheng.X;
+				result.PingShengY = bestPingSheng.Y;
+				result.PingShengA = 0; // 角度下游未使用
+				result.DetectedBoth = true;
+			}
+			else
+			{
+				// 与旧语义一致：未启用色标检测时视为两边都检出（下游 result_Segmentation 恒 true）
+				result.DetectedBoth = !_Config.Camera5IFSeBiao;
+			}
 
 			return result;
 		}
@@ -4489,11 +4530,12 @@ namespace VisionMeasure
 		private void ProcessSegmentationBatch(
 			ResponseList<SegmentationResponse> rspList,
 			Mat resultImage,
-			ref SegmentationResult result,
-			ref int result_Segmentation_str,
 			ref System.Text.StringBuilder classBuilder,
 			ref bool resultClassFlaw,
-			ref string label_str)
+			ref string label_str,
+			List<Point2f> seBiaoPoints,
+			List<Point2f> pingShengPoints,
+			ref bool cupDetected)
 		{
 			if (rspList == null) return;
 
@@ -4530,19 +4572,13 @@ namespace VisionMeasure
 							switch (kv.Key)
 							{
 								case "色标":
-									result.SeBiaoX = minAreaRect.Center.X;
-									result.SeBiaoY = minAreaRect.Center.Y;
-									result.SeBiaoA = minAreaRect.Angle;
-									result_Segmentation_str += 1;
-									DrawPointFast(resultImage, minAreaRect.Center, new Scalar(255, 69, 0));
+									seBiaoPoints.Add(minAreaRect.Center);
+									DrawPointFast(resultImage, minAreaRect.Center, new Scalar(255, 69, 0), 8);
 									DrawRotatedRectangleFast(resultImage, minAreaRect, new Scalar(255, 69, 0));
 									break;
 								case "夹尾":
-									result.PingShengX = minAreaRect.Center.X;
-									result.PingShengY = minAreaRect.Center.Y;
-									result.PingShengA = minAreaRect.Angle;
-									result_Segmentation_str += 1000;
-									DrawPointFast(resultImage, minAreaRect.Center, new Scalar(160, 32, 240));
+									pingShengPoints.Add(minAreaRect.Center);
+									DrawPointFast(resultImage, minAreaRect.Center, new Scalar(160, 32, 240), 8);
 									DrawRotatedRectangleFast(resultImage, minAreaRect, new Scalar(160, 32, 240));
 									break;
 								case "爆管":
@@ -4586,8 +4622,8 @@ namespace VisionMeasure
 									break;
 								case "空杯":
 									resultClassFlaw = false;
-									result_Segmentation_str = 1001;
-									// 空杯产品不再回退计数器（计数由ResultCountMethod统一管理）
+									cupDetected = true;
+									// 空杯产品色标对中直接判OK：ProcessSegmentationResultsFast 置 DetectedBoth=true 且不配对投影
 									break;
 							}
 						}
