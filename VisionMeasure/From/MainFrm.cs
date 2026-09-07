@@ -288,6 +288,11 @@ namespace VisionMeasure
 		// Task数组池化，避免每帧 new Task[]
 		private readonly Task[] _cam4Tasks = new Task[2];
 		private readonly Task[] _cam5Tasks = new Task[5];
+		// 首帧串行标志：进程内 Cam4/Cam5 的第一轮推理改为串行执行，避免多模型"并发首次推理"
+		// 同时上 GPU 触发 ViMo SDK 首次并发的原生崩溃（2026-09-03 闪退根因，详见 WarmUpAIModels）。
+		// 仅首帧串行（结果与并行完全一致），后续帧恢复并行；仅被各自的检测工作线程读写。
+		private volatile bool _cam4FirstFrameDone = false;
+		private volatile bool _cam5FirstFrameDone = false;
 		#endregion
 
 		#region 运控轴状态
@@ -1429,7 +1434,11 @@ namespace VisionMeasure
 				InitializeAIModels();
 				Program.ReportStartupProgress(40, "正在加载AI检测模型...");
 
-				// 【PLC类型选择】根据配置或默认选择通讯协议（防呆：初始化失败回退 S7-1200）
+				// 【AI预热】在 PLC 对象创建之前，串行对每个模型跑一轮真实尺寸空推理（2026-09-03 闪退修复）：
+				// 进程内"首次推理"若以 Cam4 两路+Cam5 五路共 7 路并发发生，会触发 ViMo SDK 空结果转换的
+				// 原生空指针崩溃。预热把首次推理提前到启动安全时刻：Loading 界面显示进度且此时 PLC 类
+				// 尚未构造——无任何线程/心跳/开启信号，天然满足"预热完成前不得给 PLC 发信号"的要求。
+				WarmUpAIModels();
 				try
 				{
 					string plcTypeCfg = (_Config.PlcType ?? "").Trim().ToUpperInvariant();
@@ -2128,6 +2137,100 @@ namespace VisionMeasure
 			}
 		}
 
+		#region AI模型预热（2026-09-03 闪退修复）
+		/// <summary>
+		/// 在 PLC 对象创建之前，串行对每个启用工位的模型跑一轮真实尺寸空推理。
+		/// 背景：进程内"首次推理"若以 Cam4 两路+Cam5 五路共 7 路并发发生（切自动首轮循环），
+		/// 会触发 ViMo SDK 空结果转换的原生空指针崩溃（dump 证据：vimo_inference.DLL 读地址 0x0）。
+		/// 预热把首次推理提前到启动安全时刻：Loading 界面实时显示进度（41..53 区间），
+		/// 且此时 PLC 类尚未构造——无任何线程/心跳/开启信号，天然满足"预热完成前不得给PLC发信号"。
+		/// 单个模型预热失败（ret=-1）只告警不阻断启动，由首帧串行兜底；
+		/// 原生致命异常由 Vimo.Run 重新抛出，冒泡到 MainFrm_Load 的 catch 弹出"系统初始化失败"。
+		/// </summary>
+		private void WarmUpAIModels()
+		{
+			int total = 0;
+			if (_cameraEnabled[0]) total += 1;   // Cam1: 分割
+			if (_cameraEnabled[1]) total += 1;   // Cam2: 分类
+			if (_cameraEnabled[3]) total += 2;   // Cam4: 分割+OCR
+			if (_cameraEnabled[4]) total += 5;   // Cam5: OCR+PCode+色标+缺陷+分割
+			if (total <= 0) return;
+
+			int done = 0;
+			Mat dummyCam12 = null;   // Cam1/2 分辨率 1440x1080
+			Mat dummyCam45 = null;   // Cam4/5 分辨率 1624x1240
+			try
+			{
+				// 灰色假图：与生产输入同为 CV_8UC3（labelImage 经 GRAY2BGR 转换），内容与推理结果无关
+				dummyCam12 = new Mat(1080, 1440, MatType.CV_8UC3, new Scalar(128, 128, 128));
+				dummyCam45 = new Mat(1240, 1624, MatType.CV_8UC3, new Scalar(128, 128, 128));
+
+				if (_cameraEnabled[0]) WarmUpSeg(Model_Segmentation_Cam1, "Cam1分割", dummyCam12, ref done, total);
+				if (_cameraEnabled[1]) WarmUpCls(Model_Class_Cam2, "Cam2分类", dummyCam12, ref done, total);
+				if (_cameraEnabled[3])
+				{
+					WarmUpSeg(Model_Segmentation_Cam4, "Cam4分割", dummyCam45, ref done, total);
+					WarmUpOcr(Model_Char_Cam4, "Cam4字符OCR", dummyCam45, ref done, total);
+				}
+				if (_cameraEnabled[4])
+				{
+					WarmUpOcr(Model_Char_Cam5, "Cam5字符OCR", dummyCam45, ref done, total);
+					WarmUpOcr(Model_Char_PCode_Cam5, "Cam5批号PCode", dummyCam45, ref done, total);
+					WarmUpSeg(Model_Color_Cam5, "Cam5色标", dummyCam45, ref done, total);
+					WarmUpSeg(Model_Rests_Cam5, "Cam5缺陷", dummyCam45, ref done, total);
+					WarmUpSeg(Model_Segmentation_Cam5, "Cam5分割", dummyCam45, ref done, total);
+				}
+				try { FastLogger.Instance.Info($"[AI预热] 全部完成 ({done}/{total})"); } catch { }
+			}
+			finally
+			{
+				if (dummyCam12 != null) { try { dummyCam12.Dispose(); } catch { } }
+				if (dummyCam45 != null) { try { dummyCam45.Dispose(); } catch { } }
+			}
+		}
+
+		/// <summary>分割重载预热（Cam1分割/Cam4分割/Cam5色标/Cam5缺陷/Cam5分割）</summary>
+		private static void WarmUpSeg(Vimo model, string name, Mat dummy, ref int done, int total)
+		{
+			int pct = 41 + (int)Math.Round(done * 12.0 / total);   // 41..53 区间，55 留给PLC初始化
+			Program.ReportStartupProgress(pct, $"正在预热AI检测模型: {name}...");
+			ResponseList<SegmentationResponse> rsp;
+			int ret = model.Run(dummy, out rsp);
+			done++;
+			LogWarmUpResult(model, name, ret);
+		}
+
+		/// <summary>分类重载预热（Cam2分类）</summary>
+		private static void WarmUpCls(Vimo model, string name, Mat dummy, ref int done, int total)
+		{
+			int pct = 41 + (int)Math.Round(done * 12.0 / total);
+			Program.ReportStartupProgress(pct, $"正在预热AI检测模型: {name}...");
+			ResponseList<ClassificationResponse> rsp;
+			int ret = model.Run(dummy, out rsp);
+			done++;
+			LogWarmUpResult(model, name, ret);
+		}
+
+		/// <summary>OCR重载预热（Cam4字符OCR/Cam5字符OCR/Cam5批号PCode）</summary>
+		private static void WarmUpOcr(Vimo model, string name, Mat dummy, ref int done, int total)
+		{
+			int pct = 41 + (int)Math.Round(done * 12.0 / total);
+			Program.ReportStartupProgress(pct, $"正在预热AI检测模型: {name}...");
+			ResponseList<OcrResponse> rsp;
+			int ret = model.Run(dummy, out rsp);
+			done++;
+			LogWarmUpResult(model, name, ret);
+		}
+
+		/// <summary>预热结果留痕：失败只告警（首帧串行兜底），致命异常已由 Vimo.Run 重新抛出</summary>
+		private static void LogWarmUpResult(Vimo model, string name, int ret)
+		{
+			if (ret == 0)
+				try { FastLogger.Instance.Info($"[AI预热] {name} 预热完成 耗时={model.LastRunElapsedMs}ms"); } catch { }
+			else
+				try { FastLogger.Instance.Warn($"[AI预热] {name} 预热失败(ret={ret})，已跳过——首帧串行将兜底"); } catch { }
+		}
+		#endregion
 
 		private void StartIOThreads()
 		{
@@ -2363,10 +2466,10 @@ namespace VisionMeasure
 		#region 相机图像处理方法（优化版）
 		/// <summary>
 		/// 【与相机设置界面共存】cameraDebug 期间（相机设置界面打开）不得立即 Dispose 帧位图：
-		/// 该位图与相机设置界面的 Cam1_OnImage 共享，界面在同一事件链上稍后克隆显示；
+		/// 该位图与相机设置界面的 Cam1_OnImage 共享，界面在回调链上稍后克隆显示；
 		/// 立即释放会让界面克隆到已释放的位图（抛异常被静默吞掉 → 界面无图无报错）。
-		/// 改为延迟 1000ms 释放：界面的克隆（UI线程Invoke）有足够时间完成，
-		/// 未被界面订阅的相机的帧同样在 1 秒后回收，无泄漏（瞬时多占约 2MB/帧）。
+		/// 改为延迟 3000ms 释放：界面克隆（回调线程直克隆 + BeginInvoke 消费）有充足时间完成，
+		/// 未被界面订阅的相机的帧同样在 3 秒后回收，无泄漏（20Hz 下瞬时多占约 2MB×60 帧/相机）。
 		/// </summary>
 		private static void DelayedDisposeBitmap(Bitmap bitmap)
 		{
@@ -2374,7 +2477,7 @@ namespace VisionMeasure
 			var b = bitmap;
 			Task.Run(async () =>
 			{
-				try { await Task.Delay(1000); } catch { }
+				try { await Task.Delay(3000); } catch { }
 				try { b.Dispose(); } catch { }
 			});
 		}
@@ -3109,9 +3212,21 @@ namespace VisionMeasure
 
 				if (_cameraEnabled[3])
 				{
-					_cam4Tasks[0] = Task.Run(() => { m4SwSeg.Start(); Model_Segmentation_Cam4.Run(labelImage, out rsp_segmentation); m4SwSeg.Stop(); });
-					_cam4Tasks[1] = Task.Run(() => { m4SwOcr.Start(); Model_Char_Cam4.Run(labelImage, out rsp_ocr); m4SwOcr.Stop(); });
-					Task.WaitAll(_cam4Tasks);
+					if (!_cam4FirstFrameDone)
+					{
+						// 【首帧串行】进程内 Cam4 的第一轮推理串行执行：预热未覆盖的路径（模型加载失败等）
+						// 不再出现"两路并发首次推理"，杜绝 ViMo SDK 首次并发空结果崩溃；结果与并行完全一致
+						m4SwSeg.Start(); Model_Segmentation_Cam4.Run(labelImage, out rsp_segmentation); m4SwSeg.Stop();
+						m4SwOcr.Start(); Model_Char_Cam4.Run(labelImage, out rsp_ocr); m4SwOcr.Stop();
+						_cam4FirstFrameDone = true;
+						try { FastLogger.Instance.Info($"[首帧串行] Camera4 首帧串行推理完成(分割{m4SwSeg.ElapsedMilliseconds}ms+OCR{m4SwOcr.ElapsedMilliseconds}ms)，后续帧恢复并行"); } catch { }
+					}
+					else
+					{
+						_cam4Tasks[0] = Task.Run(() => { m4SwSeg.Start(); Model_Segmentation_Cam4.Run(labelImage, out rsp_segmentation); m4SwSeg.Stop(); });
+						_cam4Tasks[1] = Task.Run(() => { m4SwOcr.Start(); Model_Char_Cam4.Run(labelImage, out rsp_ocr); m4SwOcr.Stop(); });
+						Task.WaitAll(_cam4Tasks);
+					}
 				}
 
 				stageTimer.Stop();
@@ -3374,12 +3489,29 @@ namespace VisionMeasure
 
 				if (_cameraEnabled[4])
 				{
-					_cam5Tasks[0] = Task.Run(() => { mSwSeg.Start(); Model_Segmentation_Cam5.Run(labelImage, out rsp_segmentation); mSwSeg.Stop(); });
-					_cam5Tasks[1] = Task.Run(() => { mSwOcr.Start(); Model_Char_Cam5.Run(labelImage, out rsp_ocr); mSwOcr.Stop(); });
-					_cam5Tasks[2] = Task.Run(() => { mSwColor.Start(); Model_Color_Cam5.Run(labelImage, out rsp_color); mSwColor.Stop(); });
-					_cam5Tasks[3] = Task.Run(() => { mSwPCode.Start(); Model_Char_PCode_Cam5.Run(labelImage, out rsp_PCode_ocr); mSwPCode.Stop(); });
-					_cam5Tasks[4] = Task.Run(() => { mSwRests.Start(); Model_Rests_Cam5.Run(labelImage, out rsp_rests); mSwRests.Stop(); });
-					Task.WaitAll(_cam5Tasks);
+					if (!_cam5FirstFrameDone)
+					{
+						// 【首帧串行】进程内 Cam5 的第一轮推理串行执行：五路并发"首次推理"是 2026-09-03
+						// 闪退的直接触发形态（ViMo SDK 首次并发空结果崩溃）；结果与并行完全一致
+						mSwSeg.Start(); Model_Segmentation_Cam5.Run(labelImage, out rsp_segmentation); mSwSeg.Stop();
+						mSwOcr.Start(); Model_Char_Cam5.Run(labelImage, out rsp_ocr); mSwOcr.Stop();
+						mSwColor.Start(); Model_Color_Cam5.Run(labelImage, out rsp_color); mSwColor.Stop();
+						mSwPCode.Start(); Model_Char_PCode_Cam5.Run(labelImage, out rsp_PCode_ocr); mSwPCode.Stop();
+						mSwRests.Start(); Model_Rests_Cam5.Run(labelImage, out rsp_rests); mSwRests.Stop();
+						_cam5FirstFrameDone = true;
+						long m5Total = mSwSeg.ElapsedMilliseconds + mSwOcr.ElapsedMilliseconds + mSwColor.ElapsedMilliseconds
+							+ mSwPCode.ElapsedMilliseconds + mSwRests.ElapsedMilliseconds;
+						try { FastLogger.Instance.Info($"[首帧串行] Camera5 首帧串行推理完成(5模型合计{m5Total}ms)，后续帧恢复并行"); } catch { }
+					}
+					else
+					{
+						_cam5Tasks[0] = Task.Run(() => { mSwSeg.Start(); Model_Segmentation_Cam5.Run(labelImage, out rsp_segmentation); mSwSeg.Stop(); });
+						_cam5Tasks[1] = Task.Run(() => { mSwOcr.Start(); Model_Char_Cam5.Run(labelImage, out rsp_ocr); mSwOcr.Stop(); });
+						_cam5Tasks[2] = Task.Run(() => { mSwColor.Start(); Model_Color_Cam5.Run(labelImage, out rsp_color); mSwColor.Stop(); });
+						_cam5Tasks[3] = Task.Run(() => { mSwPCode.Start(); Model_Char_PCode_Cam5.Run(labelImage, out rsp_PCode_ocr); mSwPCode.Stop(); });
+						_cam5Tasks[4] = Task.Run(() => { mSwRests.Start(); Model_Rests_Cam5.Run(labelImage, out rsp_rests); mSwRests.Stop(); });
+						Task.WaitAll(_cam5Tasks);
+					}
 				}
 
 				stageTimer.Stop();

@@ -80,6 +80,13 @@ namespace SetCamera
 		private bool[] _cameraEnabled = { true, true, true, true, true };
 		private int _lastValidCamIndex = 0;
 
+		// 实时显示最新帧槽（见 Cam1_OnImage）：SDK 回调线程克隆入槽，UI 线程 BeginInvoke 消费，
+		// 取代旧实现"回调线程同步 Invoke 换图"——既阻塞 20Hz 取流回调，又可能在关窗时撞句柄销毁
+		private Bitmap _latestFrame;
+		private int _consumePending;          // 0/1：消费委托在途标志（BeginInvoke 队列最多积压一条）
+		private long _droppedFrameCount;      // 消费不及时被覆盖丢弃的帧数（每100帧记一次日志，诊断用）
+		private Task _triggerLoopTask;        // 实时/单张触发循环任务（停止时等待收尾，防后台收尾写竞争）
+
 		/// <summary>
 		/// 指向当前选中得相机
 		/// </summary>
@@ -170,7 +177,11 @@ namespace SetCamera
 				{
 					MessageBox.Show("请先停止实时取像模式！", "系统提示", MessageBoxButtons.OK, MessageBoxIcon.Stop);
 					e.Cancel = true;
+					return;   // 实时进行中：拒绝关窗且绝不擅自停循环（停止只走用户按钮/自动模式路径）
 				}
+				// 兜底：关窗前确保触发循环（单张/收尾中）已停止收尾（复位触发位/回报位），
+				// 防止关窗后后台收尾写与回报位复位竞争、回报位残留 TRUE
+				StopTriggerLoopAndWait();
 				if (cam1 != null) if(cam1!=null) cam1.OnImage -= Cam1_OnImage;
 				if (cam2 != null) if(cam2!=null) cam2.OnImage -= Cam1_OnImage;
 				if (cam3 != null) if(cam3!=null) cam3.OnImage -= Cam1_OnImage;
@@ -233,7 +244,7 @@ namespace SetCamera
 				uiButton3.Enabled = true;
 				//daHuaSDK.SetTriggerMode(1);
 				//xlPictureBox1.ISRealTimeDisplay = false;
-				TriggerFlag = false;
+				StopTriggerLoopAndWait();   // 停止循环并等收尾（触发位复位+回报位复位完成后再放行）
 				uiComboBox_cam.Enabled = true;
 				uiComboBox_axis.Enabled = true;
 			}
@@ -357,26 +368,63 @@ namespace SetCamera
 			// 只显示当前选中相机的图片
 			if (daHuaSDK == null || daHuaSDK.curCameraKey != cameraKey)
 				return;
+			if (bitmap == null) return;
 
 			try
 			{
-				if (this.IsHandleCreated && bitmap != null)
+				// 【修复】SDK回调的bitmap与主检测流水线共用图像缓冲，必须克隆后显示，
+				// 绝不直接引用（自动模式下会被流水线回收/复用，控件拿失效GDI+句柄抛ArgumentException）。
+				// 克隆在回调线程完成，不再同步Invoke阻塞取流线程。
+				Bitmap clone;
+				try { clone = new Bitmap(bitmap); }
+				catch { return; }   // 源图已失效时跳过本帧，不污染控件
+
+				// 入槽：换出的旧克隆（UI线程还没消费）直接丢弃——~20Hz下只显最新帧
+				var replaced = Interlocked.Exchange(ref _latestFrame, clone);
+				if (replaced != null)
 				{
-					this.xlPictureBox1.Invoke((EventHandler)delegate
-					{
-						// 【修复】克隆后再显示：SDK回调的bitmap与主检测流水线共用图像缓冲，
-						// 自动模式下会被流水线回收/复用，控件直接引用会拿到失效的GDI+句柄，
-						// 鼠标移动时GetImageDisplayRectangle读Width抛ArgumentException。
-						// 这里只Dispose自己上一帧的克隆，绝不Dispose SDK传入的图。
-						Bitmap clone;
-						try { clone = new Bitmap(bitmap); }
-						catch { return; }   // 源图已失效时跳过本帧，不污染控件
-						var old = this.xlPictureBox1.Image;
-						this.xlPictureBox1.Image = clone;
-						if (old != null)
-						{ try { old.Dispose(); } catch { } }
-					});
+					_droppedFrameCount++;
+					if (_droppedFrameCount % 100 == 0)
+						try { FastLogger.Instance.Info($"[实时显示] 已丢帧 {_droppedFrameCount} 帧（只显示最新帧，属正常现象）"); } catch { }
+					try { replaced.Dispose(); } catch { }
 				}
+
+				// 0/1标志：消费委托最多在途一条，避免BeginInvoke队列被20Hz打爆
+				if (Interlocked.Exchange(ref _consumePending, 1) == 0)
+				{
+					try
+					{
+						if (this.IsDisposed || !this.IsHandleCreated) { _consumePending = 0; return; }
+						this.BeginInvoke(new Action(ConsumeLatestFrame));
+					}
+					catch
+					{
+						Interlocked.Exchange(ref _consumePending, 0);   // 窗体已关闭：复位标志，不再投递
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				FastLogger.Instance.Info($"手动调试时发生异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
+			}
+		}
+
+		/// <summary>
+		/// UI线程消费最新帧：换入控件并释放控件上一帧（只释放自己的克隆，绝不Dispose SDK传入的图）。
+		/// 先复位在途标志再取帧——取帧与下次投递之间的新帧会再触发一轮消费，队列最多积压一条。
+		/// </summary>
+		private void ConsumeLatestFrame()
+		{
+			_consumePending = 0;
+			if (this.IsDisposed) return;
+			try
+			{
+				var frame = Interlocked.Exchange(ref _latestFrame, null);
+				if (frame == null) return;
+				var old = this.xlPictureBox1.Image;
+				this.xlPictureBox1.Image = frame;
+				if (old != null)
+				{ try { old.Dispose(); } catch { } }
 			}
 			catch (Exception ex)
 			{
@@ -435,12 +483,10 @@ namespace SetCamera
 				{
 					case 1:
 						tempTriggerPath = cam1TriggerPath;
-						if(cam2!=null) cam2.OnImage -= Cam1_OnImage;
-						if(cam3!=null) cam3.OnImage -= Cam1_OnImage;
-						if(cam4!=null) cam4.OnImage -= Cam1_OnImage;
-						if(cam5!=null) cam5.OnImage -= Cam1_OnImage;
+						UnsubscribeAllCameras();   // 幂等：先退订全部（含自身），防重复订阅叠加
+						if (cam1 == null) { FastLogger.Instance.Warn("相机一未初始化，无法订阅图像"); return; }
 						cam1.OnImage += Cam1_OnImage;
-						daHuaSDK = cam1; if(daHuaSDK==null) return;
+						daHuaSDK = cam1;
 						FastLogger.Instance.Info($"切换为相机一：tempTriggerPath: {tempTriggerPath} ------------------------------------------------------------------------");
 
 
@@ -448,22 +494,18 @@ namespace SetCamera
 						break;
 					case 2:
 						tempTriggerPath = cam2TriggerPath;
-						if(cam1!=null) cam1.OnImage -= Cam1_OnImage;
-						if(cam3!=null) cam3.OnImage -= Cam1_OnImage;
-						if(cam4!=null) cam4.OnImage -= Cam1_OnImage;
-						if(cam5!=null) cam5.OnImage -= Cam1_OnImage;
+						UnsubscribeAllCameras();
+						if (cam2 == null) { FastLogger.Instance.Warn("相机二未初始化，无法订阅图像"); return; }
 						cam2.OnImage += Cam1_OnImage;
-						daHuaSDK = cam2; if(daHuaSDK==null) return;
+						daHuaSDK = cam2;
 						FastLogger.Instance.Info($"切换为相机二：tempTriggerPath: {tempTriggerPath}	------------------------------------------------------------------------");
 						break;
 					case 3:
 						tempTriggerPath = cam3TriggerPath;
-						if(cam1!=null) cam1.OnImage -= Cam1_OnImage;
-						if(cam2!=null) cam2.OnImage -= Cam1_OnImage;
-						if(cam4!=null) cam4.OnImage -= Cam1_OnImage;
-						if(cam5!=null) cam5.OnImage -= Cam1_OnImage;
+						UnsubscribeAllCameras();
+						if (cam3 == null) { FastLogger.Instance.Warn("相机三未初始化，无法订阅图像"); return; }
 						cam3.OnImage += Cam1_OnImage;
-						daHuaSDK = cam3; if(daHuaSDK==null) return;
+						daHuaSDK = cam3;
 
 						uiComboBox_axis.SelectedIndex = 2;
 
@@ -471,23 +513,19 @@ namespace SetCamera
 						break;
 					case 4:
 						tempTriggerPath = cam4TriggerPath;
-						if(cam1!=null) cam1.OnImage -= Cam1_OnImage;
-						if(cam3!=null) cam3.OnImage -= Cam1_OnImage;
-						if(cam2!=null) cam2.OnImage -= Cam1_OnImage;
-						if(cam5!=null) cam5.OnImage -= Cam1_OnImage;
+						UnsubscribeAllCameras();
+						if (cam4 == null) { FastLogger.Instance.Warn("相机四未初始化，无法订阅图像"); return; }
 						cam4.OnImage += Cam1_OnImage;
-						daHuaSDK = cam4; if(daHuaSDK==null) return;
+						daHuaSDK = cam4;
 						uiComboBox_axis.SelectedIndex = 0;
 						FastLogger.Instance.Info($"切换为相机四：tempTriggerPath: {tempTriggerPath}------------------------------------------------------------------------");
 						break;
 					case 5:
 						tempTriggerPath = cam5TriggerPath;
-						if(cam1!=null) cam1.OnImage -= Cam1_OnImage;
-						if(cam3!=null) cam3.OnImage -= Cam1_OnImage;
-						if(cam4!=null) cam4.OnImage -= Cam1_OnImage;
-						if(cam2!=null) cam2.OnImage -= Cam1_OnImage;
+						UnsubscribeAllCameras();
+						if (cam5 == null) { FastLogger.Instance.Warn("相机五未初始化，无法订阅图像"); return; }
 						cam5.OnImage += Cam1_OnImage;
-						daHuaSDK = cam5; if(daHuaSDK==null) return;
+						daHuaSDK = cam5;
 						uiComboBox_axis.SelectedIndex = 1;
 						FastLogger.Instance.Info($"切换为相机五：tempTriggerPath: {tempTriggerPath}------------------------------------------------------------------------");
 						break;
@@ -506,6 +544,19 @@ namespace SetCamera
 
 		}
 
+
+		/// <summary>
+		/// 幂等退订全部相机（含自身）。订阅入口被 Load、切轴回调、增益/曝光回车等多处重复触发，
+		/// 先退订自身再订阅可杜绝重复订阅叠加（同一帧被回调多次 → 重复克隆、显示异常）。
+		/// </summary>
+		private void UnsubscribeAllCameras()
+		{
+			if (cam1 != null) cam1.OnImage -= Cam1_OnImage;
+			if (cam2 != null) cam2.OnImage -= Cam1_OnImage;
+			if (cam3 != null) cam3.OnImage -= Cam1_OnImage;
+			if (cam4 != null) cam4.OnImage -= Cam1_OnImage;
+			if (cam5 != null) cam5.OnImage -= Cam1_OnImage;
+		}
 
 		#region 运动控制部分
 		private void goBtn_Click(object sender, EventArgs e)
@@ -714,23 +765,43 @@ namespace SetCamera
 			}
 		}
 
+		/// <summary>
+		/// 轴位置刷新线程：运控卡读取在工作线程，UI 赋值经 BeginInvoke 封送（0/1 标志防队列积压）。
+		/// 旧代码在后台线程直接给 TextBox.Text 赋值，窗体关闭瞬间会抛"创建窗口句柄时出错"，
+		/// 与 2026-09-03 时间线 19:07:23 关闭设置窗体时的错误日志吻合，属跨线程访问 UI 控件。
+		/// </summary>
 		private void UpdateLocation()
 		{
-			try
+			int locationUpdatePending = 0;
+			while (!this.IsDisposed)
 			{
-				while (true)
+				try
 				{
 					Thread.Sleep(10);
-					location1_Txt.Text = myZmcaux.GetLocation(g_handle, 0).ToString("F2");
-					location2_Txt.Text = myZmcaux.GetLocation(g_handle, 1).ToString("F2");
-					location3_Txt.Text = myZmcaux.GetLocation(g_handle, 2).ToString("F2");
+					if (this.IsDisposed || !this.IsHandleCreated) break;
+					double loc0 = myZmcaux.GetLocation(g_handle, 0);
+					double loc1 = myZmcaux.GetLocation(g_handle, 1);
+					double loc2 = myZmcaux.GetLocation(g_handle, 2);
+					// 0/1标志：一条更新委托在途时跳过本轮，最多积压一条（10ms 周期远快于 UI 消费）
+					if (Interlocked.Exchange(ref locationUpdatePending, 1) == 0)
+					{
+						this.BeginInvoke(new Action(() =>
+						{
+							locationUpdatePending = 0;
+							if (this.IsDisposed) return;
+							location1_Txt.Text = loc0.ToString("F2");
+							location2_Txt.Text = loc1.ToString("F2");
+							location3_Txt.Text = loc2.ToString("F2");
+						}));
+					}
+				}
+				catch (Exception ex)
+				{
+					// 窗体销毁/句柄失效或运控卡读异常：线程静默退出（IsBackground），不弹窗不刷屏
+					try { FastLogger.Instance.Info($"位置刷新线程退出: {ex.Message}"); } catch { }
+					break;
 				}
 			}
-			catch (Exception ex)
-			{
-				FastLogger.Instance.Info($"保存数据时异常...\r\n {ex.Message} \r\n {ex.StackTrace}");
-			}
-
 		}
 
 		volatile bool TriggerFlag = true;
@@ -771,7 +842,7 @@ namespace SetCamera
 						SetRealtimeReportBit(true);
 				}
 
-				Task.Run(() =>
+				_triggerLoopTask = Task.Run(() =>
 				{
 					while (TriggerFlag)
 					{
@@ -850,6 +921,27 @@ namespace SetCamera
 			}
 		}
 
+		/// <summary>
+		/// 停止实时/单张触发循环并等待其收尾（复位触发位、复位回报位）最多 1 秒。
+		/// 旧代码置 TriggerFlag=false 后立即继续，循环收尾的 PLC 写与回报位复位仍在后台飞行，
+		/// 关窗/切自动时与收尾写竞争，可能残留回报位 TRUE。幂等：重复调用只多等一次（任务已结束则立即返回）。
+		/// </summary>
+		private void StopTriggerLoopAndWait()
+		{
+			TriggerFlag = false;
+			var t = _triggerLoopTask;
+			if (t == null) return;
+			try
+			{
+				if (!t.Wait(1000))
+					FastLogger.Instance.Warn("[实时触发] 停止等待循环收尾超时(1s)，收尾PLC写将在后台完成");
+			}
+			catch (Exception ex)
+			{
+				FastLogger.Instance.Warn($"[实时触发] 停止等待异常: {ex.Message}");
+			}
+		}
+
 		/// <summary>设备模式变化（PLC后台线程触发）：切自动时先停实时、提示并自动关闭本窗体</summary>
 		private void OnDeviceModeFromPlc(bool isAuto, short rawValue)
 		{
@@ -877,7 +969,7 @@ namespace SetCamera
 		private void StopRealtimeByAutoMode()
 		{
 			if (uiButton4.Text != "停止实时") return;
-			TriggerFlag = false;
+			StopTriggerLoopAndWait();   // 停止循环并等收尾（触发位复位+回报位复位完成后再放行）
 			uiButton4.Text = "实时取像";
 			uiButton3.Enabled = true;
 			uiComboBox_cam.Enabled = true;
@@ -885,9 +977,12 @@ namespace SetCamera
 			try { FastLogger.Instance.Info("【设备状态】自动模式切入，已自动停止实时取像"); } catch { }
 		}
 
-		/// <summary>窗体关闭兜底：退订事件 + 复位回报位</summary>
+		/// <summary>窗体关闭兜底：丢弃未消费的最新帧 + 退订事件 + 复位回报位</summary>
 		private void MainFrm_FormClosed(object sender, FormClosedEventArgs e)
 		{
+			// 回调线程可能刚入槽、UI 消费尚未处理：取走并释放，防 GDI+ 句柄泄漏
+			var pendingFrame = Interlocked.Exchange(ref _latestFrame, null);
+			if (pendingFrame != null) { try { pendingFrame.Dispose(); } catch { } }
 			try { if (_plc != null) _plc.EventDeviceMode -= OnDeviceModeFromPlc; } catch { }
 			if (_realtimeBitIdx >= 0)
 			{
