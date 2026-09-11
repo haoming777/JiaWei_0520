@@ -1,0 +1,38 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- 品牌色 -->
+    <SolidColorBrush x:Key="PrimaryBrush" Color="#0078D4"/>
+    <SolidColorBrush x:Key="PrimaryHoverBrush" Color="#106EBE"/>
+    <SolidColorBrush x:Key="PrimaryPressedBrush" Color="#005A9E"/>
+    <SolidColorBrush x:Key="PrimaryLightBrush" Color="#EBF3FC"/>
+
+    <!-- 背景 -->
+    <SolidColorBrush x:Key="AppBackgroundBrush" Color="#F3F4F6"/>
+    <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFFF"/>
+
+    <!-- 文字层级：主 → 次 → 禁用 -->
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="#111827"/>
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#6B7280"/>
+    <SolidColorBrush x:Key="TextOnPrimaryBrush" Color="#FFFFFF"/>
+
+    <!-- 边框 -->
+    <SolidColorBrush x:Key="BorderBrush" Color="#D1D5DB"/>
+    <SolidColorBrush x:Key="DividerBrush" Color="#E5E7EB"/>
+
+    <!-- 状态色 -->
+    <SolidColorBrush x:Key="SuccessBrush" Color="#10B981"/>
+    <SolidColorBrush x:Key="SuccessDarkBrush" Color="#047857"/>
+    <SolidColorBrush x:Key="SuccessLightBrush" Color="#ECFDF5"/>
+    <SolidColorBrush x:Key="WarningBrush" Color="#F59E0B"/>
+    <SolidColorBrush x:Key="WarningDarkBrush" Color="#B45309"/>
+    <SolidColorBrush x:Key="WarningLightBrush" Color="#FEF3C7"/>
+    <SolidColorBrush x:Key="DangerBrush" Color="#EF4444"/>
+    <SolidColorBrush x:Key="DangerDarkBrush" Color="#B91C1C"/>
+    <SolidColorBrush x:Key="DangerLightBrush" Color="#FEE2E2"/>
+
+    <!-- 禁用 -->
+    <SolidColorBrush x:Key="DisabledBackgroundBrush" Color="#E5E7EB"/>
+    <SolidColorBrush x:Key="DisabledTextBrush" Color="#9CA3AF"/>
+
+</ResourceDictionary>

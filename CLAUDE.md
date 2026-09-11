@@ -35,9 +35,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Core flow**: PLC triggers → `MainFrm` reads camera → ViMo AI inference → Cognex VisionPro inspection → results sent back to PLC → images optionally saved via `SaveImageQueues*` → production data recorded to SQLite via `AsyncDatabaseRecorder`.
 
+**Dongle**: since 2026-09-10 (`BUILD_TAG v28`) the main program refuses to start without the `XL.UsbDog` dongle. The check lives in `Program.Main` (before `MainFrm` is created) — a check inside `MainFrm_Load` would be swallowed by the global `ThreadException` handler and the process would keep running.
+
 **Config**: `Class_Config` is a thread-safe singleton; all persistent settings read/write `setup.ini` via P/Invoke INI API (`IniAPI`). Modules communicate through `IMainListener` / `IFormPlugin` interfaces.
 
-## Key external dependencies (not NuGet)
+## Standalone tools
+
+- `相机开关工具/` — Customer-facing camera switch config tool (`CameraSwitchTool.exe`). WPF .NET 4.7.2, own sln, no NuGet deps, outputs to `../bin/` (deploys next to `VisionMeasure.exe`). Toggles `setup.ini` `[system]` keys `ActiveCam1-5` (station enable) and `IFRunCamera1-5` (AI inference), prompts to restart the main process after save, enforces ≥1 station enabled (matches MainFrm guard), backs up `setup.ini.camswitch.bak` before each save, logs to `bin\Logs\CameraSwitchTool.log` (same folder as the main program's logs, distinct filename). Requires the `XL.UsbDog` dongle at startup and locks save/restart if it's pulled while running. Its INI P/Invoke declarations mirror `CommonLib/IniAPI.cs` (`CharSet.Auto`) so behavior matches the main program exactly. All toggled settings only take effect after main-program restart (ini values are cached in `Class_Config`).
+
+**Key external dependencies (not NuGet)**
 
 These DLLs are referenced from external paths and must be present in `bin/`:
 - `CLIDelegate.dll` — 大华 camera SDK

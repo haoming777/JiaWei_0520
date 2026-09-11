@@ -1420,11 +1420,7 @@ namespace VisionMeasure
 				FastLogger.Instance.Info("系统开始初始化");
 				Program.ReportStartupProgress(2, "正在初始化系统组件...");
 
-				//if (!UsbDogClass.FindUsbDog())
-				//{
-				//	FastLogger.Instance.Info("初始化时，未找到加密狗");
-				//	throw new Exception("初始化时，未找到加密狗");
-				//}
+				// 加密狗校验已移至 Program.Main 启动早期（此处抛异常会被 ThreadException 全局处理器吞掉，进程不会退出，无法拦截）
 				_Config.cameraDebug = 0;
 
 				LoadConfiguration();

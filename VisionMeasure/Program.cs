@@ -6,6 +6,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using XL.UsbDog;
 
 namespace VisionMeasure
 {
@@ -102,7 +103,7 @@ namespace VisionMeasure
 			catch { }
 
 			// ──── 版本标识（每次改动后手动递增 BUILD_TAG，编译时间自动取 exe 时间戳）────
-			const string BUILD_TAG = "2026-09-04-v27"; // ← 改代码后记得改这个（v27: AI模型预热(启动期串行空推理,Loading显示进度,PLC信号门控)+首帧串行+相机设置实时取像/触发循环/位置刷新修复）
+			const string BUILD_TAG = "2026-09-10-v28"; // ← 改代码后记得改这个（v28: 恢复加密狗启动校验(移至Program.Main)+新增相机开关配置工具CameraSwitchTool）
 			string buildTime = "未知";
 			try { buildTime = System.IO.File.GetLastWriteTime(typeof(Program).Assembly.Location).ToString("yyyy-MM-dd HH:mm:ss"); } catch { }
 			try
@@ -120,6 +121,15 @@ namespace VisionMeasure
 
 			try
 			{
+				// ──── 3.5 加密狗校验：无狗直接拒绝启动 ────
+				// 必须在 MainFrm 创建前执行：MainFrm_Load 中抛异常会被 ThreadException 全局处理器吞掉（进程继续运行），
+				// 无法起到拦截作用。此处抛异常由外层 catch 统一提示用户并正常落日志退出。
+				if (!new XLUsbDogClass().FindUsbDog())
+				{
+					throw new Exception("未检测到加密狗，程序无法启动。请插入加密狗后重试。");
+				}
+				FastLogger.Instance.Info("加密狗校验通过");
+
 				Application.EnableVisualStyles();
 				Application.SetCompatibleTextRenderingDefault(false);
 
