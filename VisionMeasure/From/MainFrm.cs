@@ -285,6 +285,10 @@ namespace VisionMeasure
 		private readonly ConcurrentDictionary<long, byte> _encodingIds = new ConcurrentDictionary<long, byte>();
 		private ConcurrentDictionary<long, QueueResultItem[]> _pendingImageSaves = new ConcurrentDictionary<long, QueueResultItem[]>();
 
+		// 【存图审计】节流计数器：存图开关全关时的NG次数 / DB记录器缺失次数（防刷屏）
+		private int _saveSwitchOffNgLogCount = 0;
+		private int _dbRecorderNullLogCount = 0;
+
 		// Task数组池化，避免每帧 new Task[]
 		private readonly Task[] _cam4Tasks = new Task[2];
 		private readonly Task[] _cam5Tasks = new Task[5];
@@ -4141,6 +4145,14 @@ namespace VisionMeasure
 		{
 			if (_pendingImageSaves.TryRemove(unifiedId, out var results))
 			{
+				// 【存图审计】NG留"开始存图"痕迹(OK不刷屏)，与SaveImagesByDefectType的完成日志对账
+				bool anyNg = false;
+				try { if (results != null) anyNg = results.Any(r => r != null && r.Result == false); } catch { }
+				if (anyNg)
+				{
+					try { FastLogger.Instance.Info($"[存图] DB已提交,开始存图: UnifiedId={unifiedId} 缺陷={GetDefectTypeFolder(results)}"); } catch { }
+				}
+
 				// 卸载JPEG编码到独立线程，不阻塞DB消费者线程，也不与AI推理争抢ThreadPool
 				long captureId = unifiedId;
 				var captureResults = results;
@@ -4173,11 +4185,22 @@ namespace VisionMeasure
 			}
 			else
 			{
-				// 可能已被ResultMatcher跳过或缓存已清理，属正常情况
+				// 【存图审计】DB已提交但待存条目不存在→该产品图必丢，升级Warn并带现场信息定位原因
+				try
+				{
+					long memMB = 0;
+					try { using (var proc = Process.GetCurrentProcess()) memMB = proc.WorkingSet64 / 1024 / 1024; } catch { }
+					FastLogger.Instance.Warn($"[存图] DB已提交但待存条目不存在,跳过存图: UnifiedId={unifiedId} (ImageCache含此ID={_imageCache.ContainsKey(unifiedId)}, PendingSaves={_pendingImageSaves.Count}, 内存={memMB}MB; 可能原因: 内存紧急清理/待存队列满驱逐/重复key/DB记录重复提交)");
+				}
+				catch { }
 			}
 		}
 		private void SaveImagesByDefectType(long sequenceId, QueueResultItem[] results)
 		{
+			var sw = Stopwatch.StartNew();
+			// 【存图审计】整体是否NG（用于NG专属审计日志，OK不刷屏）
+			bool anyNg = false;
+			try { if (results != null) anyNg = results.Any(r => r != null && r.Result == false); } catch { }
 			try
 			{
 				IFSaveOKImage = _Config.IsSaveOkImage;
@@ -4189,6 +4212,15 @@ namespace VisionMeasure
 				{
 					// 如果不需要存图，也要清理缓存
 					ClearImageCache(sequenceId);
+					// 【存图审计】存图开关全关时NG必无图，节流留痕（前3次+每100次）
+					if (anyNg)
+					{
+						int n = Interlocked.Increment(ref _saveSwitchOffNgLogCount);
+						if (n <= 3 || n % 100 == 0)
+						{
+							try { FastLogger.Instance.Warn($"[存图] 存图开关全部关闭,NG不存图(第{n}次): UnifiedId={sequenceId} 缺陷={GetDefectTypeFolder(results)} (IsSaveNgImage={IFSaveNGImage}, IsSaveNgRawImage={IFSaveNGRawImage}, IsSaveOkImage={IFSaveOKImage}, IsSaveOkRawImage={IFSaveOKRawImage})"); } catch { }
+						}
+					}
 					return;
 				}
 
@@ -4229,7 +4261,11 @@ namespace VisionMeasure
 						if (!IFSaveOKImage && !IFSaveOKRawImage && isOk) return;
 
 						var saver = GetHighSpeedSaver(cameraName);
-						if (saver == null) return;
+						if (saver == null)
+						{
+							try { FastLogger.Instance.Warn($"[存图] 高速保存器不存在,该相机跳过: UnifiedId={sequenceId} Camera={cameraName}"); } catch { }
+							return;
+						}
 
 						string defectFolder = GetDefectTypeForCamera(cameraName, results);
 						string resultFolder = isOk ? "OK" : "NG";
@@ -4240,9 +4276,18 @@ namespace VisionMeasure
 						// 并行编码：每个相机独立编码，互不阻塞
 						byte[] origJpg = null, rstJpg = null;
 						if (original != null && ((isOk && IFSaveOKRawImage) || (!isOk && IFSaveNGRawImage)))
+						{
 							origJpg = BitmapFastConverter.ToJpegBytesViaOpenCv(original, IMAGE_JPEG_QUALITY);
+							// 【存图审计】编码失败(返回null/空)时NG必无此图，留痕（OK失败不刷屏）
+							if (!isOk && (origJpg == null || origJpg.Length == 0))
+								try { FastLogger.Instance.Warn($"[存图] 原图编码失败: UnifiedId={sequenceId} Camera={cameraName}"); } catch { }
+						}
 						if (result != null && ((isOk && IFSaveOKImage) || (!isOk && IFSaveNGImage)))
+						{
 							rstJpg = BitmapFastConverter.ToJpegBytesViaOpenCv(result, IMAGE_JPEG_QUALITY);
+							if (!isOk && (rstJpg == null || rstJpg.Length == 0))
+								try { FastLogger.Instance.Warn($"[存图] 结果图编码失败: UnifiedId={sequenceId} Camera={cameraName}"); } catch { }
+						}
 
 						// 入队（HighSpeedImageSaver 内部 ConcurrentQueue，线程安全）
 						if (origJpg != null && origJpg.Length > 0)
@@ -4257,12 +4302,34 @@ namespace VisionMeasure
 						}
 					});
 
+					// 【存图审计】NG相机在图快照中缺图→该相机必无图可存，留痕排查
+					foreach (var cam in new[] { "Camera1", "Camera2", "Camera3", "Camera4", "Camera5" })
+					{
+						if (!IsCameraNg(cam, results)) continue;
+						bool hasOrig = false, hasRst = false;
+						for (int i = 0; i < origSnap.Length; i++) if (origSnap[i].Key == cam) { hasOrig = true; break; }
+						for (int i = 0; i < rstSnap.Length; i++) if (rstSnap[i].Key == cam) { hasRst = true; break; }
+						if (!hasOrig || !hasRst)
+						{
+							try { FastLogger.Instance.Warn($"[存图] NG相机缺图: UnifiedId={sequenceId} Camera={cam} 缺陷={GetDefectTypeForCamera(cam, results)} (原图={(hasOrig ? "有" : "无")}, 结果图={(hasRst ? "有" : "无")})"); } catch { }
+						}
+					}
+
 					// 编码完成后安全清理缓存
 					ClearImageCache(sequenceId);
+
+					// 【存图审计】NG存图完成留痕(OK不刷屏)，与OnDbRecordCommitted的"开始"日志对账
+					if (anyNg)
+					{
+						try { FastLogger.Instance.Info($"[存图] 完成入队: UnifiedId={sequenceId} 缺陷={overallDefect} 耗时={sw.ElapsedMilliseconds}ms 原图{origSnap.Length}张/结果图{rstSnap.Length}张"); } catch { }
+					}
 				}
 				else
 				{
-					FastLogger.Instance.Debug($"缓存中未找到图像: SequenceId={sequenceId}");
+					// 【存图审计】DB已提交但缓存无图→图必丢，升级Warn并带现场信息定位原因
+					long memMB = 0;
+					try { using (var proc = Process.GetCurrentProcess()) memMB = proc.WorkingSet64 / 1024 / 1024; } catch { }
+					FastLogger.Instance.Warn($"[存图] 缓存中未找到图像,跳过存图: UnifiedId={sequenceId} 缺陷={GetDefectTypeFolder(results)} (原图缓存含此ID={_imageCache.ContainsKey(sequenceId)}, 结果缓存含此ID={_resultImageCache.ContainsKey(sequenceId)}, 缓存总数={_imageCache.Count}/{_resultImageCache.Count}, 内存={memMB}MB; 可能原因: 缓存已被内存压力驱逐)");
 				}
 			}
 			catch (Exception ex)
@@ -4981,7 +5048,13 @@ namespace VisionMeasure
 
 		private void AddProductionRecordBuffered(QueueResultItem[] results, bool finalResult)
 		{
-			if (_dbRecorder == null) return;
+			if (_dbRecorder == null)
+			{
+				// 【存图审计】DB记录器缺失时记录与存图全部跳过(待存条目滞留到驱逐)，节流留痕防刷屏
+				if (Interlocked.Increment(ref _dbRecorderNullLogCount) <= 3)
+					FastLogger.Instance.Error("[存图] DB记录器未初始化,生产记录与存图被跳过!");
+				return;
+			}
 			try
 			{
 				var record = new ProductionRecord
@@ -7267,7 +7340,13 @@ namespace VisionMeasure
 				EnqueueTime = DateTime.Now
 			};
 
-			try { return _saveQueue.TryAdd(task, 10); }
+			try
+			{
+				if (_saveQueue.TryAdd(task, 10)) return true;
+				// 【存图审计】队列满且取不出旧任务→本图必丢，留痕
+				FastLogger.Instance.Warn($"{_saverName} 入队失败(队列已满且无法取出旧任务): {task.FilePath}");
+				return false;
+			}
 			catch { return false; }
 		}
 

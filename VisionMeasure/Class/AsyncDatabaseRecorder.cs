@@ -629,6 +629,11 @@ namespace VisionMeasure
 					{
 						OnRecordCommitted?.Invoke(record.UnifiedId);
 					}
+					else
+					{
+						// 【存图审计】UnifiedId无效时回调不触发→该产品图必丢(待存条目滞留到驱逐)，留痕
+						FastLogger.Instance.Warn($"[存图] DB已提交但UnifiedId无效,存图回调未触发: SeqId={record.SequenceId} UnifiedId={record.UnifiedId} Result={record.FinalResult}");
+					}
 
 					// 新SKU首条记录：立刻创建汇总行，避免30秒窗口期内报表查不到
 					EnsureSummaryExists(record);
