@@ -103,7 +103,7 @@ namespace VisionMeasure
 			catch { }
 
 			// ──── 版本标识（每次改动后手动递增 BUILD_TAG，编译时间自动取 exe 时间戳）────
-			const string BUILD_TAG = "2026-09-10-v28"; // ← 改代码后记得改这个（v28: 恢复加密狗启动校验(移至Program.Main)+新增相机开关配置工具CameraSwitchTool）
+			const string BUILD_TAG = "2026-09-15-v30"; // ← 改代码后记得改这个（v30: 恢复IFRunCamera1-5推理开关：False=不加载模型不推理、该相机结果强制OK）
 			string buildTime = "未知";
 			try { buildTime = System.IO.File.GetLastWriteTime(typeof(Program).Assembly.Location).ToString("yyyy-MM-dd HH:mm:ss"); } catch { }
 			try

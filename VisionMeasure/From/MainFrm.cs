@@ -66,6 +66,8 @@ namespace VisionMeasure
 
 		// 工位启用状态（程序启动时读一次 INI，运行期不变）
 		private bool[] _cameraEnabled; // [0]=Cam1, [1]=Cam2, ...
+		// AI推理启用状态（程序启动时读一次 INI，运行期不变；False=不加载模型、该相机结果强制OK）
+		private bool[] _inferenceEnabled; // [0]=Cam1, [1]=Cam2, ...
 		// 相机图像翻转模式（程序启动时读一次 INI，运行期不变）
 		// 0=无翻转, 1=水平镜像, 2=垂直镜像, 3=旋转180°
 		private int[] _cameraFlipModes;
@@ -349,6 +351,15 @@ namespace VisionMeasure
 			_cameraEnabled[2] = _Config.ActiveCam3;
 			_cameraEnabled[3] = _Config.ActiveCam4;
 			_cameraEnabled[4] = _Config.ActiveCam5;
+			// 【推理开关】与工位启用并列的独立开关：False=相机仍连接采集，但不加载模型、
+			// 推理跳过、该相机结果强制OK（2026-06-15 内存优化重构时被误删，2026-09-15 恢复）
+			_inferenceEnabled = new bool[5];
+			_inferenceEnabled[0] = _Config.IFRunCamera1;
+			_inferenceEnabled[1] = _Config.IFRunCamera2;
+			_inferenceEnabled[2] = _Config.IFRunCamera3;
+			_inferenceEnabled[3] = _Config.IFRunCamera4;
+			_inferenceEnabled[4] = _Config.IFRunCamera5;
+			try { FastLogger.Instance.Info("AI推理启用状态: " + string.Join(" ", _inferenceEnabled.Select((b, i) => "Cam" + (i + 1) + "=" + b)) + " (" + _inferenceEnabled.Count(e => e) + "/5 启用)"); } catch { }
 			// 防呆：至少一个工位启用
 			int enabledCount = _cameraEnabled.Count(x => x);
 			if (enabledCount == 0)
@@ -575,7 +586,7 @@ namespace VisionMeasure
 				_dbRecorder = new AsyncDatabaseRecorder();
 				// 设置获取当前SKU的委托
 				_dbRecorder.GetCurrentSku = () => GetCurrentSkuValue();
-				_dbRecorder.OnRecordCommitted = (unifiedId) => OnDbRecordCommitted(unifiedId);
+				_dbRecorder.OnRecordCommitted = (unifiedId, shift, shiftDate, sku) => OnDbRecordCommitted(unifiedId, shift, shiftDate, sku);
 				_dbRecorder.OnBurstExcluded = (markedCount) =>
 				{
 					// DB层已确认一组连续爆管并完成标记，回调参数=实际成功标记的剔除记录数
@@ -666,6 +677,9 @@ namespace VisionMeasure
 				// 确认：SKU切换，先自动保存上一个SKU的班次报表（仅汇总表）
 				if (!string.IsNullOrEmpty(_savedSku) && _dbRecorder != null)
 				{
+					// 【班次边界修复】先把暂存批次刷进DB队列再导出（导出内部会等队列清空），
+					// 保证旧SKU最后几秒检测的记录进入报表
+					FlushPendingRecords();
 					_dbRecorder.ExportFullShiftReport(_currentShiftDate, _currentShift, skipDetailExport: true);
 					FastLogger.Instance.Debug($"SKU切换: {_savedSku} -> {currentSku}，已自动保存{_currentShift}班次汇总报表");
 				}
@@ -1220,18 +1234,22 @@ namespace VisionMeasure
 				// 升序遍历最旧key，跳过"正在编码"的条目：其Mat正被存图任务原生编码读取，
 				// 若此时归还池并被下一帧复用覆写 → AccessViolationException 进程崩溃。
 				// 被跳过的条目由存图任务结束时自行ClearImageCache，下轮驱逐即可回收
+				// 【NG无图修复】同时跳过"待存"条目（匹配完成等待DB提交回调的）：这些条目若被驱逐，
+				// 提交回调存图时缓存必查空 → NG无图。待存队列已有硬上限(MAX_IMAGE_CACHE_SIZE*2)，
+				// 保护范围天然有界，无需额外护栏。
 				var keys = _imageCache.Keys.OrderBy(k => k).ToList();
 				int evicted = 0, skipped = 0;
 				foreach (var key in keys)
 				{
 					if (evicted >= count) break;
 					if (_encodingIds.ContainsKey(key)) { skipped++; continue; }
+					if (_pendingImageSaves.ContainsKey(key)) { skipped++; continue; }
 					ClearImageCache(key);
 					Interlocked.Increment(ref _cacheEvictCount);
 					evicted++;
 				}
 				if (evicted > 0 || skipped > 0)
-					try { FastLogger.Instance.Warn($"[内存] 驱逐{evicted}个旧缓存条目(跳过在编{skipped}个), 剩余{_imageCache.Count}, 累计驱逐{_cacheEvictCount}"); } catch { }
+					try { FastLogger.Instance.Warn($"[内存] 驱逐{evicted}个旧缓存条目(跳过保护{skipped}个), 剩余{_imageCache.Count}, 累计驱逐{_cacheEvictCount}"); } catch { }
 			}
 			catch { }
 		}
@@ -1248,24 +1266,13 @@ namespace VisionMeasure
 				foreach (var key in keys)
 				{
 					if (_encodingIds.ContainsKey(key)) continue;   // 在编条目跳过，存图任务结束后自清(晚数十毫秒，不构成内存风险)
+					if (_pendingImageSaves.ContainsKey(key)) continue;   // 【NG无图修复】待存条目跳过，提交回调存图成功后自清；紧急清理不再清空待存队列(队列已有硬上限守卫，正常由提交回调消费)
 					ClearImageCache(key);
 					Interlocked.Increment(ref _cacheEvictCount);
 					cleared++;
 				}
-				// 同时清理滞留的存图待处理队列，防止对象池泄漏
-				{
-					var pendingKeys = _pendingImageSaves.Keys.ToArray();
-					foreach (var key in pendingKeys)
-					{
-						if (_pendingImageSaves.TryRemove(key, out var items))
-						{
-							foreach (var item in items)
-								try { QueueResultItem.Return(item); } catch { }
-						}
-					}
-				}
 				// P1: single GC only
-				try { FastLogger.Instance.Error($"[内存] 紧急清理完成，清除{cleared}组缓存(跳过在编{keys.Length - cleared}组)"); } catch { }
+				try { FastLogger.Instance.Error($"[内存] 紧急清理完成，清除{cleared}组缓存(跳过保护{keys.Length - cleared}组)"); } catch { }
 			}
 			catch { }
 		}
@@ -2080,39 +2087,39 @@ namespace VisionMeasure
 				string[] status = new string[5];
 
 				// Camera1 - 分割模型
-				if (_cameraEnabled[0])
+				if (_cameraEnabled[0] && _inferenceEnabled[0])
 				{
 					Model_Segmentation_Cam1.Init(modelpath_cam1, UseGpu_cam1, deviceid_cam1, modelId_char_cam1);
 					status[0] = "已加载(分割)";
 					loadedCount++;
 				}
-				else status[0] = "跳过(工位未启用)";
+				else status[0] = _cameraEnabled[0] ? "跳过(推理关闭)" : "跳过(工位未启用)";
 
 				// Camera2 - 分类模型
-				if (_cameraEnabled[1])
+				if (_cameraEnabled[1] && _inferenceEnabled[1])
 				{
 					Model_Class_Cam2.Init(modelpath_cam2, UseGpu_cam2, deviceid_cam2, modelId_class_cam2);
 					status[1] = "已加载(分类)";
 					loadedCount++;
 				}
-				else status[1] = "跳过(工位未启用)";
+				else status[1] = _cameraEnabled[1] ? "跳过(推理关闭)" : "跳过(工位未启用)";
 
 				// Camera3 - 无AI模型（传统圆度检测）
-				status[2] = _cameraEnabled[2] ? "无需AI(圆度检测)" : "跳过(工位未启用)";
-				if (_cameraEnabled[2]) loadedCount++;
+				status[2] = !_cameraEnabled[2] ? "跳过(工位未启用)" : (_inferenceEnabled[2] ? "无需AI(圆度检测)" : "跳过(推理关闭)");
+				if (_cameraEnabled[2] && _inferenceEnabled[2]) loadedCount++;
 
 				// Camera4 - 分割+OCR模型
-				if (_cameraEnabled[3])
+				if (_cameraEnabled[3] && _inferenceEnabled[3])
 				{
 					Model_Segmentation_Cam4.Init(modelpath_cam4, UseGpu_cam4, deviceid_cam4, modelId_segmentation_cam4);
 					Model_Char_Cam4.Init(modelpath_cam4, UseGpu_cam4, deviceid_cam4, modelId_char_cam4);
 					status[3] = "已加载(分割+OCR)";
 					loadedCount++;
 				}
-				else status[3] = "跳过(工位未启用)";
+				else status[3] = _cameraEnabled[3] ? "跳过(推理关闭)" : "跳过(工位未启用)";
 
 				// Camera5 - 字符+PCode+色标+缺陷+分割模型
-				if (_cameraEnabled[4])
+				if (_cameraEnabled[4] && _inferenceEnabled[4])
 				{
 					Model_Char_Cam5.Init(modelpath_cam5, UseGpu_cam5, deviceid_cam5, modelId_char_cam5);
 					Model_Char_PCode_Cam5.Init(modelpath_cam5, UseGpu_cam5, deviceid_cam5, modelId_char_PCode_cam5);
@@ -2122,7 +2129,7 @@ namespace VisionMeasure
 					status[4] = "已加载(OCR+PCode+色标+缺陷)";
 					loadedCount++;
 				}
-				else status[4] = "跳过(工位未启用)";
+				else status[4] = _cameraEnabled[4] ? "跳过(推理关闭)" : "跳过(工位未启用)";
 
 				FastLogger.Instance.Info("AI模型初始化完成");
 				// 汇总日志
@@ -2165,14 +2172,14 @@ namespace VisionMeasure
 				dummyCam12 = new Mat(1080, 1440, MatType.CV_8UC3, new Scalar(128, 128, 128));
 				dummyCam45 = new Mat(1240, 1624, MatType.CV_8UC3, new Scalar(128, 128, 128));
 
-				if (_cameraEnabled[0]) WarmUpSeg(Model_Segmentation_Cam1, "Cam1分割", dummyCam12, ref done, total);
-				if (_cameraEnabled[1]) WarmUpCls(Model_Class_Cam2, "Cam2分类", dummyCam12, ref done, total);
-				if (_cameraEnabled[3])
+				if (_cameraEnabled[0] && _inferenceEnabled[0]) WarmUpSeg(Model_Segmentation_Cam1, "Cam1分割", dummyCam12, ref done, total);
+				if (_cameraEnabled[1] && _inferenceEnabled[1]) WarmUpCls(Model_Class_Cam2, "Cam2分类", dummyCam12, ref done, total);
+				if (_cameraEnabled[3] && _inferenceEnabled[3])
 				{
 					WarmUpSeg(Model_Segmentation_Cam4, "Cam4分割", dummyCam45, ref done, total);
 					WarmUpOcr(Model_Char_Cam4, "Cam4字符OCR", dummyCam45, ref done, total);
 				}
-				if (_cameraEnabled[4])
+				if (_cameraEnabled[4] && _inferenceEnabled[4])
 				{
 					WarmUpOcr(Model_Char_Cam5, "Cam5字符OCR", dummyCam45, ref done, total);
 					WarmUpOcr(Model_Char_PCode_Cam5, "Cam5批号PCode", dummyCam45, ref done, total);
@@ -2704,7 +2711,7 @@ namespace VisionMeasure
 				ResponseList<SegmentationResponse> rsp_segmentation = null;
 				bool result_Segmentation = false;
 
-				if (_cameraEnabled[0])
+				if (_cameraEnabled[0] && _inferenceEnabled[0])
 				{
 					Model_Segmentation_Cam1.Run(labelImage, out rsp_segmentation);
 				}
@@ -2891,7 +2898,7 @@ namespace VisionMeasure
 				bool result_flaw = false;
 				string result_class = "";
 
-				if (_cameraEnabled[1])
+				if (_cameraEnabled[1] && _inferenceEnabled[1])
 				{
 					Model_Class_Cam2.Run(labelImage, out rsp_class);
 				}
@@ -3051,7 +3058,7 @@ namespace VisionMeasure
 				else
 				{
 					DetectionResultV3 detectionResult = null;
-					if (_cameraEnabled[2])
+					if (_cameraEnabled[2] && _inferenceEnabled[2])
 					{
 						detectionResult = RoundnessDetectorV3.DetectRoundnessAndRect(labelImage);
 					}
@@ -3210,7 +3217,7 @@ namespace VisionMeasure
 				var m4SwSeg = new Stopwatch();
 				var m4SwOcr = new Stopwatch();
 
-				if (_cameraEnabled[3])
+				if (_cameraEnabled[3] && _inferenceEnabled[3])
 				{
 					if (!_cam4FirstFrameDone)
 					{
@@ -3487,7 +3494,7 @@ namespace VisionMeasure
 				var mSwPCode = new Stopwatch();
 				var mSwRests = new Stopwatch();
 
-				if (_cameraEnabled[4])
+				if (_cameraEnabled[4] && _inferenceEnabled[4])
 				{
 					if (!_cam5FirstFrameDone)
 					{
@@ -4141,7 +4148,7 @@ namespace VisionMeasure
 		/// DB记录提交后回调：从缓存中取出图像并保存
 		/// 确保记录已入库后才存图，保证记录与图片一一对应
 		/// </summary>
-		private void OnDbRecordCommitted(long unifiedId)
+		private void OnDbRecordCommitted(long unifiedId, string shift, string shiftDate, string sku)
 		{
 			if (_pendingImageSaves.TryRemove(unifiedId, out var results))
 			{
@@ -4156,15 +4163,21 @@ namespace VisionMeasure
 				// 卸载JPEG编码到独立线程，不阻塞DB消费者线程，也不与AI推理争抢ThreadPool
 				long captureId = unifiedId;
 				var captureResults = results;
+				// 【班次边界修复】班次/日期/SKU来自DB记录（检测时刻），与报表口径一致
+				var recordShift = shift;
+				var recordShiftDate = shiftDate;
+				var recordSku = sku;
+				// 【AV崩溃防护】标记"正在编码"：缓存驱逐(内存压力/热路径)会跳过本条目，
+				// 防止其Mat被归还存图池后又被下一帧复用覆写，导致原生imencode读取
+				// 被并发改写的内存 → AccessViolationException 进程崩溃(托管层无法捕获)
+				// 【NG无图修复】TryAdd移到StartNew之前：待存条目刚TryRemove、编码任务尚未启动的
+				// 窗口内驱逐仍可能取走缓存条目 → NG无图/AV崩溃，先标记再派发任务关闭该窗口
+				_encodingIds.TryAdd(captureId, 0);
 				Task.Factory.StartNew(() =>
 				{
-					// 【AV崩溃防护】标记"正在编码"：缓存驱逐(内存压力/热路径)会跳过本条目，
-					// 防止其Mat被归还存图池后又被下一帧复用覆写，导致原生imencode读取
-					// 被并发改写的内存 → AccessViolationException 进程崩溃(托管层无法捕获)
-					_encodingIds.TryAdd(captureId, 0);
 					try
 					{
-						SaveImagesByDefectType(captureId, captureResults);
+						SaveImagesByDefectType(captureId, captureResults, recordShift, recordShiftDate, recordSku);
 					}
 					catch (Exception ex)
 					{
@@ -4195,7 +4208,7 @@ namespace VisionMeasure
 				catch { }
 			}
 		}
-		private void SaveImagesByDefectType(long sequenceId, QueueResultItem[] results)
+		private void SaveImagesByDefectType(long sequenceId, QueueResultItem[] results, string shift, string shiftDate, string sku)
 		{
 			var sw = Stopwatch.StartNew();
 			// 【存图审计】整体是否NG（用于NG专属审计日志，OK不刷屏）
@@ -4227,10 +4240,12 @@ namespace VisionMeasure
 				// 构建基础路径：日期 -> 班次 -> SKU -> OK/NG
 				// 所有时间戳从单次 DateTime.Now 快照派生，保证目录/文件名一致
 				var now = DateTime.Now;
-				string dateFolder = now.ToString("yyMMdd");
+				// 【班次边界修复】日期/班次/SKU取自DB记录（检测时刻），不用存图时刻的当前值：
+				// 跨班次边界提交的记录图片归入其所属班次，与报表口径一致（shiftDate: yyyy-MM-dd → yyMMdd）
+				string dateFolder = string.IsNullOrEmpty(shiftDate) ? now.ToString("yyMMdd") : shiftDate.Replace("-", "").Substring(2);
 				string hourFolder = now.ToString("HH"); // 小时级分片，防单目录文件破万
-				string shiftFolder = _currentShift;
-				string skuFolder = GetCurrentSkuValue();
+				string shiftFolder = string.IsNullOrEmpty(shift) ? _currentShift : shift;
+				string skuFolder = string.IsNullOrEmpty(sku) ? GetCurrentSkuValue() : sku;
 
 				string dtFormat = now.ToString("yyMMddHHmmssfff");
 
@@ -5653,9 +5668,23 @@ namespace VisionMeasure
 		private void AutoSaveShiftReport(string date, string shift)
 		{
 			// 班次切换时自动保存仅导出汇总表（主表），不导出明细记录（副表）
+			// 【班次边界修复】异步执行：先把暂存批次刷进DB队列再导出（导出内部等队列清空），
+			// 保证班次切换前最后几秒检测的记录进入上一班次报表
+			// （2026-09-15 16:00边界：早班最后7条记录16:00:05才入库，16:00:02导出时漏掉）
 			if (_dbRecorder != null)
 			{
-				_dbRecorder.ExportFullShiftReport(date, shift, skipDetailExport: true);
+				Task.Run(() =>
+				{
+					try
+					{
+						FlushPendingRecords();
+						_dbRecorder.ExportFullShiftReport(date, shift, skipDetailExport: true);
+					}
+					catch (Exception ex)
+					{
+						try { FastLogger.Instance.Error($"自动保存班次报表异常: {ex.Message}"); } catch { }
+					}
+				});
 			}
 		}
 

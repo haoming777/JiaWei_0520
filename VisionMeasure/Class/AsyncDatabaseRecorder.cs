@@ -285,7 +285,8 @@ namespace VisionMeasure
 		public Func<string> GetCurrentSku { get; set; }
 
 			// 记录提交回调：DB INSERT成功后触发，用于存图
-			public Action<long> OnRecordCommitted { get; set; }
+			// （参数：UnifiedId, 班次, 班次归属日期, SKU——存图按记录口径归档，不依赖存图时刻的当前班次）
+			public Action<long, string, string, string> OnRecordCommitted { get; set; }
 			// 连续爆管剔除回调：通知主界面更新计数（参数=实际成功标记的剔除记录数，防止DB标记失败时主界面虚高）
 			public Action<int> OnBurstExcluded { get; set; }
 			// 汇总刷新回调：通知主界面同步良率数据
@@ -627,7 +628,8 @@ namespace VisionMeasure
 					// 记录已入库，触发存图回调
 					if (record.UnifiedId > 0)
 					{
-						OnRecordCommitted?.Invoke(record.UnifiedId);
+						// 【班次边界修复】班次/日期/SKU取自记录（检测时刻），存图路径与报表口径一致
+						OnRecordCommitted?.Invoke(record.UnifiedId, record.Shift, record.ShiftDateStr, record.Sku);
 					}
 					else
 					{
@@ -659,6 +661,14 @@ namespace VisionMeasure
 				string date = now.ToString("yyyy-MM-dd"); // 夜班归属当天
 				// 【修复】刷新当前班次下所有SKU的汇总行：SKU切换后旧SKU行不再冻结，报表与界面计数保持一致
 				RefreshAllSkusForShift(date, shift);
+				// 【班次边界修复】班次切换后15分钟内补刷上一班次：
+				// 跨边界提交的记录（检测在旧班次、入库在新班次之后）会让旧班次汇总行
+				// 冻结在"首条快照"（EnsureSummaryExists只建行一次），补刷恢复真实计数
+				if (now.Minute < 15)
+				{
+					var prev = now.AddHours(-1);
+					RefreshAllSkusForShift(prev.ToString("yyyy-MM-dd"), GetCurrentShift(prev.Hour));
+				}
 				// 每 30 秒触发一次 WAL checkpoint，防止 WAL 文件无限增长
 				try { _dbHelper.ExecuteNonQuery("PRAGMA wal_checkpoint(PASSIVE);"); }
 				catch { }
