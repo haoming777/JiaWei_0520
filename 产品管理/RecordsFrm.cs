@@ -1009,6 +1009,14 @@ namespace SetProduct
 
         private void DgvRecords_SummaryCellFormatting(object sender, DataGridViewCellFormattingEventArgs e)
         {
+            // 【未生产标记】"当前班次未生产"标记行整行淡黄色高亮（与AsyncDatabaseRecorder.NoProductionMarkerSku同一字符串）
+            if (e.RowIndex >= 0 && dgvRecords.Rows.Count > e.RowIndex &&
+                dgvRecords.Columns.Contains("sku") && dgvRecords.Rows[e.RowIndex].Cells["sku"].Value?.ToString() == "当前班次未生产")
+            {
+                e.CellStyle.BackColor = Color.FromArgb(255, 244, 204);
+                e.CellStyle.ForeColor = Color.FromArgb(154, 103, 0);
+            }
+
             if (e.ColumnIndex >= 0 && e.ColumnIndex < dgvRecords.Columns.Count && dgvRecords.Columns[e.ColumnIndex].Name == "yield_rate" && e.Value != null)
             {
                 if (decimal.TryParse(e.Value.ToString(), out decimal yield))

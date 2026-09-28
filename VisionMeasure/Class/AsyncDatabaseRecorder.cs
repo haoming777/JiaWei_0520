@@ -45,6 +45,9 @@ namespace VisionMeasure
 		private DateTime _lastCleanupTime = DateTime.MinValue;
 		private const int CLEANUP_INTERVAL_HOURS = 24;
 
+		// 【未生产标记】"当前班次未生产"标记行的SKU占位符（产品管理/RecordsFrm.cs 高亮判定用同一字符串）
+		public const string NoProductionMarkerSku = "当前班次未生产";
+
 		public AsyncDatabaseRecorder(string databasePath = null)
 		{
 			if (string.IsNullOrEmpty(databasePath))
@@ -68,6 +71,11 @@ namespace VisionMeasure
 
 			// 初始化数据库表
 			InitializeDatabase();
+
+			// 【未生产标记】启动即记一次班次心跳：即使软件只运行几十秒，该班次也算"软件打开过"
+			UpdateShiftPresence();
+			// 【未生产标记】启动即插"当前班次未生产"标记行（当前班次无明细时）；生产开始后由保存路径即时删除
+			CheckAndMarkNoProductionShifts();
 
 			// 启动工作线程
 			_workerThread = new Thread(ProcessQueue)
@@ -163,6 +171,17 @@ namespace VisionMeasure
 				_dbHelper.ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_detail_time ON production_records_detail(p_time);");
 				_dbHelper.ExecuteNonQuery("CREATE INDEX IF NOT EXISTS idx_detail_date ON production_records_detail(p_date);");
 				_dbHelper.ExecuteNonQuery(createSummaryTable);
+
+				// 【未生产标记】班次心跳表：记录软件在哪些班次运行过（"当前班次未生产"标记的前提）
+				string createPresenceTable = @"
+					CREATE TABLE IF NOT EXISTS app_shift_presence (
+						p_shift_date TEXT NOT NULL,
+						p_shift      TEXT NOT NULL,
+						first_seen   DATETIME,
+						last_seen    DATETIME,
+						PRIMARY KEY (p_shift_date, p_shift)
+					)";
+				_dbHelper.ExecuteNonQuery(createPresenceTable);
 
 				// 补建检测标准列（兼容旧数据库）
 				EnsureSummaryConfigColumns();
@@ -640,6 +659,20 @@ namespace VisionMeasure
 					// 新SKU首条记录：立刻创建汇总行，避免30秒窗口期内报表查不到
 					EnsureSummaryExists(record);
 
+					// 【未生产标记】本班次已产出，即时摘掉"当前班次未生产"标记行：
+					// 按记录自身班次/日期定位（跨班界延迟提交也能删掉上一班次的标记）；
+					// 失败不影响主流程，30秒定时器会兜底删除
+					try
+					{
+						_dbHelper.ExecuteNonQuery(
+							"DELETE FROM production_records_summary " +
+							"WHERE sku = @markerSku AND p_date = @date AND p_shift = @shift",
+							new SQLiteParameter("@markerSku", NoProductionMarkerSku),
+							new SQLiteParameter("@date", record.ShiftDateStr),
+							new SQLiteParameter("@shift", record.Shift));
+					}
+					catch { }
+
 					// 汇总表定时全量更新（_batchFlushTimer 30秒）
 				}
 			}
@@ -669,6 +702,9 @@ namespace VisionMeasure
 					var prev = now.AddHours(-1);
 					RefreshAllSkusForShift(prev.ToString("yyyy-MM-dd"), GetCurrentShift(prev.Hour));
 				}
+				// 【未生产标记】班次心跳 + 补/删"当前班次未生产"标记行（幂等；当前班次未生产即插，有生产即删）
+				UpdateShiftPresence();
+				CheckAndMarkNoProductionShifts();
 				// 每 30 秒触发一次 WAL checkpoint，防止 WAL 文件无限增长
 				try { _dbHelper.ExecuteNonQuery("PRAGMA wal_checkpoint(PASSIVE);"); }
 				catch { }
@@ -700,6 +736,99 @@ namespace VisionMeasure
 			if (hour >= 8 && hour <= 15) return "早班";
 			if (hour >= 16 && hour <= 23) return "中班";
 			return "夜班";
+		}
+
+		/// <summary>
+		/// 【未生产标记】班次心跳：upsert 当前班次到 app_shift_presence，表示软件在该班次运行过。
+		/// 程序启动时（构造函数）和30秒定时器各调用一次。
+		/// </summary>
+		public void UpdateShiftPresence()
+		{
+			try
+			{
+				var now = DateTime.Now;
+				string shift = GetCurrentShift(now.Hour);
+				string date = now.ToString("yyyy-MM-dd");
+				string nowStr = now.ToString("yyyy-MM-dd HH:mm:ss");
+				// 两步实现 upsert：INSERT OR IGNORE 记录首见时间，UPDATE 刷新最后心跳（兼容旧版SQLite）
+				_dbHelper.ExecuteNonQuery(
+					"INSERT OR IGNORE INTO app_shift_presence (p_shift_date, p_shift, first_seen, last_seen) " +
+					"VALUES (@date, @shift, @now, @now)",
+					new SQLiteParameter("@date", date),
+					new SQLiteParameter("@shift", shift),
+					new SQLiteParameter("@now", nowStr));
+				_dbHelper.ExecuteNonQuery(
+					"UPDATE app_shift_presence SET last_seen = @now " +
+					"WHERE p_shift_date = @date AND p_shift = @shift",
+					new SQLiteParameter("@now", nowStr),
+					new SQLiteParameter("@date", date),
+					new SQLiteParameter("@shift", shift));
+			}
+			catch { }
+		}
+
+		/// <summary>
+		/// 【未生产标记】维护"当前班次未生产"标记行（30秒定时器调用，幂等）：
+		/// ① 删误标：班次已有检测记录但仍挂着标记的，删除标记行（跨班界延迟提交的修正；
+		///    首条产品入库时保存路径也会即时删除，本步骤作30秒兜底）
+		/// ② 插标记：软件运行过（心跳有记录）且明细0条且尚无标记的班次，
+		///    向汇总表插入 sku='当前班次未生产' 的全0行。
+		///    时机：班次窗口已结束（终态兜底），或该班次就是当前班次（班次开场即显示，生产开始即删除）。
+		/// 只回看保留期内的班次（明细超期被清理后无法区分"未生产"与"已生产"，不再标记）。
+		/// </summary>
+		public void CheckAndMarkNoProductionShifts()
+		{
+			try
+			{
+				string markerSku = NoProductionMarkerSku;
+			var now = DateTime.Now;
+
+				// ① 删除误标行：明细已有记录但还挂着标记的班次
+				_dbHelper.ExecuteNonQuery(
+					"DELETE FROM production_records_summary " +
+					"WHERE sku = @markerSku " +
+					"  AND EXISTS (SELECT 1 FROM production_records_detail d " +
+					"              WHERE d.p_shift_date = production_records_summary.p_date " +
+					"                AND d.p_shift = production_records_summary.p_shift)",
+					new SQLiteParameter("@markerSku", markerSku));
+
+				// ② 插入缺失的标记行：
+				//    班次窗口已结束（夜班=当天08:00 早班=当天16:00 中班=次日00:00），
+				//    或该班次就是当前班次（班次开场即显示"未生产"，首条产品入库时由保存路径即时删除）
+				_dbHelper.ExecuteNonQuery(
+					"INSERT OR IGNORE INTO production_records_summary " +
+					"    (p_date, p_shift, sku, total_count, ok_count, ng_count, " +
+					"     ng_异物, ng_管盖有无, ng_管口圆度, ng_正面工号缺失, ng_背面工号缺失, " +
+					"     ng_爆管, ng_斜口, ng_未剪断, ng_混合多种缺陷, ng_PCode, ng_色标对中, " +
+					"     continuous_exclude_count, yield_rate) " +
+					"SELECT p_shift_date, p_shift, @markerSku, " +
+					"       0, 0, 0, " +
+					"       0, 0, 0, 0, 0, " +
+					"       0, 0, 0, 0, 0, 0, " +
+					"       0, 0 " +
+					"FROM app_shift_presence " +
+					"WHERE (datetime(CASE p_shift " +
+					"            WHEN '夜班' THEN p_shift_date || ' 08:00:00' " +
+					"            WHEN '早班' THEN p_shift_date || ' 16:00:00' " +
+					"            WHEN '中班' THEN date(p_shift_date, '+1 day') || ' 00:00:00' " +
+					"        END) <= datetime('now', 'localtime') " +
+					"        OR (p_shift_date = @today AND p_shift = @currentShift)) " +
+					"  AND p_shift_date >= date('now', 'localtime', '-" + DATA_RETENTION_DAYS + " day') " +
+					"  AND NOT EXISTS (SELECT 1 FROM production_records_detail d " +
+					"                  WHERE d.p_shift_date = app_shift_presence.p_shift_date " +
+					"                    AND d.p_shift = app_shift_presence.p_shift) " +
+					"  AND NOT EXISTS (SELECT 1 FROM production_records_summary s " +
+					"                  WHERE s.p_date = app_shift_presence.p_shift_date " +
+					"                    AND s.p_shift = app_shift_presence.p_shift " +
+					"                    AND s.sku = @markerSku)",
+					new SQLiteParameter("@markerSku", markerSku),
+					new SQLiteParameter("@today", now.ToString("yyyy-MM-dd")),
+					new SQLiteParameter("@currentShift", GetCurrentShift(now.Hour)));
+			}
+			catch (Exception ex)
+			{
+				try { FastLogger.Instance.Warn($"【未生产标记】检查异常: {ex.Message}"); } catch { }
+			}
 		}
 
 		/// <summary>
@@ -1260,6 +1389,10 @@ private void GenerateShiftSummaryInternal(string date, string shift)
 					// 清理后收缩数据库文件
 					try { _dbHelper.ExecuteNonQuery("PRAGMA optimize;"); } catch { }
 				}
+
+				// 【未生产标记】同步清理过期班次心跳：明细超期清理后，残留心跳会让旧班次被误标"未生产"
+				_dbHelper.ExecuteNonQuery("DELETE FROM app_shift_presence WHERE p_shift_date < @cutoff",
+					new SQLiteParameter("@cutoff", cutoffDate));
 			}
 			catch (Exception ex)
 			{

@@ -40,6 +40,7 @@ namespace PLCMonitor
             // 
             this.uiContextMenuStrip1.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(243)))), ((int)(((byte)(249)))), ((int)(((byte)(255)))));
             this.uiContextMenuStrip1.Font = new System.Drawing.Font("宋体", 12F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
+            this.uiContextMenuStrip1.ImageScalingSize = new System.Drawing.Size(24, 24);
             this.uiContextMenuStrip1.Name = "uiContextMenuStrip1";
             this.uiContextMenuStrip1.Size = new System.Drawing.Size(61, 4);
             // 
@@ -47,6 +48,7 @@ namespace PLCMonitor
             // 
             this.uiContextMenuStrip2.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(243)))), ((int)(((byte)(249)))), ((int)(((byte)(255)))));
             this.uiContextMenuStrip2.Font = new System.Drawing.Font("宋体", 12F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
+            this.uiContextMenuStrip2.ImageScalingSize = new System.Drawing.Size(24, 24);
             this.uiContextMenuStrip2.Name = "uiContextMenuStrip2";
             this.uiContextMenuStrip2.Size = new System.Drawing.Size(61, 4);
             // 
@@ -54,18 +56,20 @@ namespace PLCMonitor
             // 
             this.textBox1.BackColor = System.Drawing.SystemColors.Window;
             this.textBox1.Font = new System.Drawing.Font("宋体", 15.75F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.textBox1.Location = new System.Drawing.Point(261, 81);
+            this.textBox1.Location = new System.Drawing.Point(392, 122);
+            this.textBox1.Margin = new System.Windows.Forms.Padding(4);
             this.textBox1.Name = "textBox1";
-            this.textBox1.Size = new System.Drawing.Size(184, 31);
+            this.textBox1.Size = new System.Drawing.Size(274, 43);
             this.textBox1.TabIndex = 2;
             // 
             // label1
             // 
             this.label1.AutoSize = true;
             this.label1.Font = new System.Drawing.Font("宋体", 21.75F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.label1.Location = new System.Drawing.Point(126, 83);
+            this.label1.Location = new System.Drawing.Point(189, 124);
+            this.label1.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.label1.Name = "label1";
-            this.label1.Size = new System.Drawing.Size(129, 29);
+            this.label1.Size = new System.Drawing.Size(195, 44);
             this.label1.TabIndex = 3;
             this.label1.Text = "输入值：";
             // 
@@ -73,9 +77,10 @@ namespace PLCMonitor
             // 
             this.button1.BackColor = System.Drawing.Color.Chartreuse;
             this.button1.Font = new System.Drawing.Font("宋体", 21.75F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button1.Location = new System.Drawing.Point(381, 169);
+            this.button1.Location = new System.Drawing.Point(572, 254);
+            this.button1.Margin = new System.Windows.Forms.Padding(4);
             this.button1.Name = "button1";
-            this.button1.Size = new System.Drawing.Size(118, 41);
+            this.button1.Size = new System.Drawing.Size(177, 62);
             this.button1.TabIndex = 4;
             this.button1.Text = "确定";
             this.button1.UseVisualStyleBackColor = false;
@@ -83,12 +88,13 @@ namespace PLCMonitor
             // 
             // InPutFrm
             // 
-            this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 12F);
+            this.AutoScaleDimensions = new System.Drawing.SizeF(9F, 18F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(526, 240);
+            this.ClientSize = new System.Drawing.Size(789, 360);
             this.Controls.Add(this.button1);
             this.Controls.Add(this.label1);
             this.Controls.Add(this.textBox1);
+            this.Margin = new System.Windows.Forms.Padding(4);
             this.Name = "InPutFrm";
             this.Text = "InPutFrm";
             this.Load += new System.EventHandler(this.InPutFrm_Load);
